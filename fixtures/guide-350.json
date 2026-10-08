@@ -1,0 +1,172 @@
+{
+ "schema": 1,
+ "head": "560d7e1aab66404d7f9581b0268f622da58e08b7",
+ "author": "Tandem",
+ "overview": "Tandem runs AI workers that report back when they finish a task. This PR fixes three ways that loop could get stuck: finished work was rejected when a worker reworded its to-do list, workers were blocked from running the project's own checks, and a job could start twice after another coordinator took it over.",
+ "flow": {
+  "title": "Before / after",
+  "subtitle": "One implementer run, from launch to its report being accepted",
+  "rows": [
+   [
+    {
+     "text": "launchAgent()",
+     "kind": "changed",
+     "change": 3,
+     "note": "owner check"
+    },
+    {
+     "edge": "tool call"
+    },
+    {
+     "text": "reviewerToolRefusal()"
+    },
+    {
+     "edge": ""
+    },
+    {
+     "text": "implementerShellRefusal()",
+     "kind": "removed",
+     "change": 2
+    },
+    {
+     "edge": "to-do update"
+    },
+    {
+     "text": "todoItems()"
+    }
+   ],
+   [
+    {
+     "edge": "report"
+    },
+    {
+     "text": "openSteps()"
+    },
+    {
+     "edge": ""
+    },
+    {
+     "text": "standsFor()",
+     "kind": "added",
+     "change": 1,
+     "note": "number or wording"
+    },
+    {
+     "branch": [
+      {
+       "edge": "all closed",
+       "text": "report accepted"
+      },
+      {
+       "edge": "steps open",
+       "text": "openStepsRejection()"
+      }
+     ]
+    }
+   ]
+  ]
+ },
+ "changes": [
+  {
+   "title": "Steps match by number",
+   "why": "Claude Code workers paraphrase to-do subjects, so exact-text matching rejected finished reports.",
+   "steps": [
+    {
+     "file": "src/playbooks/progress.ts",
+     "from": 29,
+     "to": 31,
+     "title": "Step items carry their number",
+     "note": "The brief asks for `1. step text` verbatim; `stepItem` is the one place that format lives."
+    },
+    {
+     "file": "src/playbooks/progress.ts",
+     "from": 45,
+     "to": 50,
+     "title": "A number wins over wording",
+     "note": "A numbered item closes the step with that number regardless of text; unnumbered items compare normalized text."
+    },
+    {
+     "file": "src/playbooks/progress.ts",
+     "from": 73,
+     "to": 76,
+     "title": "The rejection quotes exact items",
+     "note": "The worker is told the exact item text to use, number included, so its next try matches."
+    },
+    {
+     "file": "src/session/worker.ts",
+     "from": 740,
+     "to": 740,
+     "title": "Worker uses the shared message",
+     "note": "The inline rejection string moves into `progress.ts`."
+    }
+   ]
+  },
+  {
+   "title": "Implementers may run pinned checks",
+   "why": "Refusing the pinned command stopped implementers catching a failing gate before reporting; it never counted as evidence anyway.",
+   "steps": [
+    {
+     "file": "src/session/worker.ts",
+     "from": 361,
+     "to": 361,
+     "title": "Guard drops the shell refusal",
+     "note": "Only the reviewer refusal remains in the tool guard chain."
+    }
+   ]
+  },
+  {
+   "title": "Only the claim owner launches",
+   "why": "A taken-over operation could be launched by its old owner, leaving the task scouting with no worker.",
+   "steps": [
+    {
+     "file": "src/workers/job-launch.ts",
+     "from": 187,
+     "to": 187,
+     "title": "Return unless we own the claim",
+     "note": "The admitting coordinator stops when another has taken the operation over."
+    },
+    {
+     "file": "tests/workers/workflow.test.ts",
+     "from": 103,
+     "to": 103,
+     "title": "Regression test",
+     "note": "Two controllers race one dispatch; only the new owner appends the job."
+    }
+   ]
+  }
+ ],
+ "comments": [
+  {
+   "id": "d1",
+   "file": "src/playbooks/progress.ts",
+   "line": 48,
+   "kind": "question",
+   "body": "A numbered item whose text names a different step (`3. Reuse check` when step 3 is `Run tests`) now closes step 3. Is that trade intended, or should a numbered item also need a loose text match?"
+  },
+  {
+   "id": "d2",
+   "file": "src/workers/job-launch.ts",
+   "line": 187,
+   "kind": "suggestion",
+   "body": "This return is silent. A timeline event here would make a takeover visible in `tandem trace` instead of looking like a stall."
+  },
+  {
+   "id": "d3",
+   "file": "src/playbooks/progress.ts",
+   "line": 75,
+   "kind": "nit",
+   "body": "This string is 300+ characters on one line; splitting the two sentences would read better in the source."
+  },
+  {
+   "id": "d4",
+   "file": "tests/workers/workflow.test.ts",
+   "line": 103,
+   "kind": "nit",
+   "body": "The test name is great. Consider asserting the old owner's runtime has no job too, not just the new owner's."
+  }
+ ],
+ "summary": "Three focused fixes, each with a regression test. One question on numbered matching, otherwise ready.",
+ "groups": {
+  "src/instructions.ts": "Agent guidance"
+ }
+}

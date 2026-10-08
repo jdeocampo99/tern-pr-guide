@@ -1,0 +1,12 @@
+schema = 1
+id = "prguide"
+name = "PR Guide"
+version = "0.1.0"
+host = "host.luau"
+window = "window.luau"
+styles = ["guide.css"]
+
+[[blocks]]
+id = "guide"
+title = "PR Guide"
+palette = true
