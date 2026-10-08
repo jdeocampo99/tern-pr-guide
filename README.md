@@ -2,12 +2,28 @@
 
 **Review GitHub pull requests in Tern, one step at a time.**
 
-PR Guide turns a pull request into a guided walkthrough. Instead of a wall of files, you read the
-PR as a few changes, each broken into short steps with the code right beside a plain explanation.
-Mark each step as you go, comment on any changed line, and post the whole review to GitHub in one
-go, without leaving your terminal.
+PR Guide turns a pull request into a story you read piece by piece. Instead of a wall of files, you
+see what the PR does, then walk through it change by change, with the code right beside a plain
+explanation.
 
 ![The review page: a plain-language overview, a before/after diagram, and the first change](docs/screenshots/overview.png)
+
+## Why use it
+
+- **The whole review happens in Tern.** Pick a PR, read it, comment, and submit, all without
+  opening a browser.
+- **Fast, even on huge PRs.** Diffs are built locally with git, and the page only draws the code
+  near you. An 85-file PR stays snappy and a 5,600-line file opens instantly.
+- **Does what you'd do on GitHub.** Read the description, comment on any changed line, then
+  comment, approve, or request changes as one review.
+- **An AI reviewer you choose.** One button (or `⇧G`) has your own [OMP](https://omp.sh) agent read
+  the PR and write a guided review, in the spirit of Linear Diffs. Pick any model and effort level
+  OMP offers.
+- **The PR as a story.** The guide opens with a short overview and a before/after diagram, then
+  breaks the PR into a few changes, each with small steps you tick off as you go.
+- **Comments you'd actually post.** Suggested comments are written like a kind, busy teammate:
+  short, specific, and friendly. Keep the ones you agree with, drop the rest.
+- **Works without AI too.** Any PR opens as a GitHub-style file tree, one file at a time.
 
 ## What it does
 
