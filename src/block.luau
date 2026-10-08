@@ -38,7 +38,7 @@ type Block = {
  ai: Agent.Run?,
 }
 
-local ARGS = "repo=<directory> to pick a PR, or pr=<number or URL> with repo=<checkout path>, optionally guide=<file> and post=true"
+local ARGS = "repo=<directory> to pick a PR, or pr=<number or URL> with repo=<checkout path>, optionally guide=<file> and post=false for a dry run"
 local SAMPLE_GUIDE = "fixtures/guide-350.json"
 
 -- The closing animations in guide.css last 150-200 ms.
@@ -224,13 +224,19 @@ local function gotoStep(s: State, cx: BlockCx, i: number, explicit: boolean)
  follow(s, cx, explicit)
 end
 
--- Sends the review once: the page shows it sending, then where it went or why it didn't.
+-- Sends the review once: the page shows it sending, then where it went or why it didn't. A review
+-- bound for GitHub first asks to be confirmed, and the next submit posts it; any other action
+-- cancels the ask (see dispatch).
 local function submit(s: State, cx: BlockCx)
  local r, out = s.review, s.submit
  s.editingSummary = false
  if r.posted or out.sending then return end
+ if not out.dryRunPath and not out.confirming then
+  out.confirming = true
+  return
+ end
  local verdict, payload = r.verdict, Review.reviewPayload(r)
- out.sending, out.error = true, nil
+ out.confirming, out.sending, out.error = false, true, nil
  Fetch.submitReview(r.pr, payload, out, function(delivery, err)
   out.sending, out.error = false, err
   if delivery then r.posted = { verdict = verdict, payload = payload, delivery = delivery } end
@@ -383,6 +389,7 @@ local ACTIONS: { [string]: Handler } = {
 }
 
 local function dispatch(s: State, cx: BlockCx, action: Keys.Action)
+ if action.act ~= "submit-review" then s.submit.confirming = false end
  local handler = ACTIONS[action.act]
  if handler then handler(s, cx, action.value or "") end
 end
@@ -395,12 +402,15 @@ local function options(args: { string }): (Options?, string?)
   if name ~= "pr" and name ~= "repo" and name ~= "guide" and name ~= "post" then
    return nil, "Unknown argument \"" .. arg .. "\". The block takes " .. ARGS .. "."
   end
+  if name == "post" and value ~= "true" and value ~= "false" then
+   return nil, "post= takes true or false, not \"" .. value .. "\". The block takes " .. ARGS .. "."
+  end
   given[name :: string] = value :: string
  end
  local pr, repo = given.pr, given.repo
  if not pr and not repo then return { guide = given.guide or SAMPLE_GUIDE, post = false }, nil end
  if pr and (repo or "") == "" then return nil, "pr= needs repo=. The block takes " .. ARGS .. "." end
- return { pr = pr, repo = repo, guide = given.guide, post = given.post == "true" }, nil
+ return { pr = pr, repo = repo, guide = given.guide, post = given.post ~= "false" }, nil
 end
 
 local function nameOf(pr: string?): string
@@ -414,8 +424,9 @@ local function offerAgent(b: Block)
  if b.page then b.page.ai = if b.guided then nil else b.ai end
 end
 
--- Shows `pr` with `guide`, from a guide file when `guided`. Unless real posting was asked for,
--- submitting is a dry run.
+-- Shows `pr` with `guide`, from a guide file when `guided`. Submitting posts to GitHub once the
+-- reader confirms, unless the block was opened with `post=false` or has no checkout (the sample):
+-- then it is a dry run.
 local function showGuide(b: Block, pr: Pr.PR, guide: Guide.Guide, guided: boolean)
  local repo = if b.repo then b.repo.root else nil
  local dryRunPath = if b.opts.post and repo then nil else Fetch.dryRunPath(pr.number)

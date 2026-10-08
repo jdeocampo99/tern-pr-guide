@@ -27,8 +27,9 @@ export type ModelBox = { field: Fields.Field, query: string, selected: number, e
 export type Hit = { file: string, entry: number }
 
 -- Where submitting sends the review and how far it got: in a dry run the review is saved to
--- `dryRunPath`, else posted; `repo` is the checkout `gh` runs in, nil for the bundled sample.
-export type Submit = { repo: string?, dryRunPath: string?, sending: boolean, error: string? }
+-- `dryRunPath`, else posted after the reader confirms (`confirming`: the first submit has been
+-- pressed and the next one posts); `repo` is the checkout `gh` runs in, nil for the bundled sample.
+export type Submit = { repo: string?, dryRunPath: string?, confirming: boolean, sending: boolean, error: string? }
 
 -- Which code blocks a render draws open. The page redraws whole on every key and Tern stops a view
 -- that takes over 2 s, so open blocks share a budget of rows; blocks past it draw as their header.
@@ -106,7 +107,7 @@ function M.new(pr: Pr.PR, guide: Guide.Guide, to: { repo: string?, dryRunPath: s
   flash = nil, flashCount = 0,
   composer = nil, search = nil, hit = nil,
   helpOpen = false, models = nil, reviewOpen = false, reviewCursor = 1, editingSummary = false,
-  keyed = false, submit = { repo = to.repo, dryRunPath = to.dryRunPath, sending = false, error = nil }, ai = nil,
+  keyed = false, submit = { repo = to.repo, dryRunPath = to.dryRunPath, confirming = false, sending = false, error = nil }, ai = nil,
   born = {}, booted = false,
  }
 end

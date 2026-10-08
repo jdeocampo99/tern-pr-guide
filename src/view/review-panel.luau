@@ -151,15 +151,20 @@ end
 local function submitArea(s: State.State, included: number): { Node }
  local r, submit = s.review, s.submit
  if r.posted then return postedArea(r.posted) end
- local label = if submit.sending then "Sending…" else "Submit review  ·  " .. verdictLabel(r.verdict)
+ local verdict = verdictLabel(r.verdict)
+ local confirming = submit.confirming and not submit.sending
+ local label = if submit.sending then "Sending…"
+  elseif confirming then "Post " .. verdict .. " with " .. plural(included, "comment") .. "? Press ⌘⏎ again"
+  elseif submit.dryRunPath then "Save (dry run)  ·  " .. verdict
+  else "Submit review  ·  " .. verdict
+ local button = { span("gp-rv-submit-label", label) }
+ if not confirming then table.insert(button, span("gp-rv-submit-key", "⌘ ⏎")) end
  local nodes = {
-  el("span", { class = "gp-rv-submit", actions = { click = "submit-review" } }, {
-   span("gp-rv-submit-label", label),
-   span("gp-rv-submit-key", "⌘ ⏎"),
-  }),
+  el("span", { class = "gp-rv-submit" .. (if confirming then " gp-rv-submit-confirm" else ""), actions = { click = "submit-review" } }, button),
   span("gp-rv-note", if submit.dryRunPath
    then "Dry run: saves " .. plural(included, "comment") .. " and the summary to " .. submit.dryRunPath .. "; nothing is sent."
-   else "Posts " .. plural(included, "comment") .. " and the summary to PR #" .. r.pr.number .. " at once."),
+   elseif confirming then "Not posted yet. ⌘⏎ or a click posts to PR #" .. r.pr.number .. "; anything else, or esc, cancels."
+   else "Asks you to confirm, then posts " .. plural(included, "comment") .. " and the summary to PR #" .. r.pr.number .. " at once."),
  }
  if submit.error then table.insert(nodes, span("gp-rv-error", "Not sent: " .. submit.error)) end
  return nodes
@@ -194,7 +199,7 @@ function M.view(s: State.State): Node
     span("gp-rv-title", "Finish your review"),
     span("gp-rv-sub", if s.submit.dryRunPath
      then "Dry run: submitting saves the review to a file. Nothing is sent to GitHub."
-     else "Posts one review to PR #" .. number .. ". Nothing is sent until you submit."),
+     else "Posts one review to PR #" .. number .. ", after you confirm."),
    }),
    Ui.spacer(),
    el("span", { class = "gp-rv-link", text = "Close  esc", actions = { click = "toggle-review" } }),

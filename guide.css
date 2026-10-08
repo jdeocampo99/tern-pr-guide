@@ -685,6 +685,7 @@
 .gp-rv-submit { display: flex; gap: 10px; align-items: center; justify-content: center; }
 .gp-rv-submit-label { color: #fff; font-family: -apple-system, "SF Pro Text", "Helvetica Neue", sans-serif; font-size: 14px; font-weight: 600; }
 .gp-rv-submit-key { font-size: 11px; padding: 0 6px; border-radius: 5px; border: 1px solid rgba(255,255,255,0.35); color: rgba(255,255,255,0.85); }
+.gp-rv-submit.gp-rv-submit-confirm, .gp-rv-submit.gp-rv-submit-confirm:hover { background: light-dark(#bc4c00, #c9510c); }
 .gp-rv-row-cur { border-color: light-dark(#4f86e8, #5b8ff0); }
 /* the step you are on, in the left column: a tinted box holding the step and its note */
 .gp-ol-herebox { display: flex; flex-direction: column; border-radius: 9px; background: light-dark(#e9f0fc, #22304a); border: 1px solid light-dark(#c4d6f6, #34507e); padding: 2px 0 4px; }

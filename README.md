@@ -46,8 +46,11 @@ line.
 ![Search across steps, files, comments and code](docs/screenshots/search.png)
 
 **Posts one review.** `r` opens your review: tick the comments to include, edit the summary, pick
-Comment, Approve or Request changes, and submit with `⌘⏎`. Everything goes to GitHub as a single
-review. If the PR got new commits while you were reading, nothing is posted and the page tells you.
+Comment, Approve or Request changes, and submit with `⌘⏎`. The first press only asks: the button
+turns orange and reads "Post Approve with 3 comments? Press ⌘⏎ again". Press `⌘⏎` (or click it)
+again to post; any other key, `esc`, or closing the panel cancels. Everything goes to GitHub as a
+single review. If the PR got new commits while you were reading, nothing is posted and the page
+tells you.
 
 ![Finishing a review](docs/screenshots/review.png)
 
@@ -80,8 +83,9 @@ press `⏎`. The PR for the branch you're on is listed first.
 To open it with a key, bind the action `plugin.prguide.review` in Tern's keybind settings.
 **PR Guide: sample** in the palette opens a built-in sample, so you can try it without a PR.
 
-Submitting is a dry run by default: the review is saved to `/tmp/prguide-review-<n>.json` and
-nothing is sent. To post to GitHub, open the page from Lua with `post=true`.
+Submitting posts to GitHub after that confirm step. To rehearse without posting, open the page
+from Lua with `post=false`: the button reads "Save (dry run)" and the review is saved to
+`/tmp/prguide-review-<n>.json` instead. The sample page is always a dry run.
 
 **Advanced / scripting.** The page is the block `prguide.guide`:
 
@@ -94,7 +98,7 @@ cx:new_block("prguide.guide", {"pr=123", "repo=/path/to/your/clone"}, "tab")
 | `repo=` | path inside your local clone; on its own, it opens the picker |
 | `pr=` | PR number or URL, opened straight away |
 | `guide=` | guide file to use instead of the clone's (see below) |
-| `post=true` | actually post to GitHub |
+| `post=false` | dry run: save the review to `/tmp/prguide-review-<n>.json` instead of posting |
 
 Behind the scenes it runs `gh pr view` once, fetches the PR into `refs/prguide/<n>/*` in your clone
 (your branches and working tree are untouched), and diffs locally. Lockfiles and files marked
