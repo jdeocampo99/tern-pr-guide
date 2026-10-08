@@ -84,6 +84,9 @@ export type State = {
  ai: Agent.Run?,
  born: { [string]: string },
  booted: boolean,
+ -- How the page came to be: opened as a PR ("load"), or written by the AI over the default
+ -- walkthrough ("guide"). The page's blocks arrive with a matching motion.
+ arrival: "load" | "guide",
 }
 
 local SUPPORTING_PREFIX = "f:"
@@ -109,7 +112,7 @@ function M.new(pr: Pr.PR, guide: Guide.Guide, to: { repo: string?, dryRunPath: s
   composer = nil, search = nil, hit = nil,
   helpOpen = false, models = nil, reviewOpen = false, reviewCursor = 1, editingSummary = false,
   keyed = false, submit = { repo = to.repo, dryRunPath = to.dryRunPath, confirming = false, sending = false, error = nil }, ai = nil,
-  born = {}, booted = false,
+  born = {}, booted = false, arrival = "load",
  }
 end
 

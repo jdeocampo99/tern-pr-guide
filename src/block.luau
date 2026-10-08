@@ -338,10 +338,11 @@ local ACTIONS: { [string]: Handler } = {
  -- the model dropdown
  ["toggle-models"] = function(s, cx)
   local run = s.ai
-  if s.models or not run or run.running then
-   s.models = nil
+  if s.models then
+   if not s.closing.models then closeAfter(s, cx, { "models" }, function() s.models = nil end) end
    return
   end
+  if not run or run.running then return end
   Fetch.refreshLenses(run.agent)
   State.openModels(s, run.agent)
   frameLater(cx, { { "focus", Page.modelFieldPath } })
@@ -501,6 +502,7 @@ local function generate(b: Block, cx: BlockCx)
    showGuide(b, pr, guide, true)
    local page = b.page :: State
    page.review.own = own
+   page.arrival = "guide"
    cx:toast("success", "AI guided review ready")
   end
   cx:render()
@@ -527,7 +529,7 @@ end
 local function loadPr(b: Block, cx: BlockCx, pr: string)
  local repo = b.repo :: Fetch.Repo
  Fetch.openPr({ pr = pr, repo = repo.root, cache = repo.cache }, function(stage)
-  b.notice = Notice.loading(b.name, stage)
+  b.notice = Notice.loading(b.name, stage, b.notice)
   cx:render()
  end, function(loaded, err)
   if loaded then showPr(b, loaded) else b.notice = Notice.failed(b.name, err :: string) end
@@ -541,13 +543,14 @@ end
 -- block's, else PR Guide's own saved copy, which the first open of that repo downloads.
 local function openPr(b: Block, cx: BlockCx, pr: string)
  b.picker, b.name = nil, nameOf(pr)
+ b.notice = Notice.loading(b.name, "", nil)
  local slug = Picker.linkRepo(pr)
  if not slug then
   if b.repo then return loadPr(b, cx, pr) end
   b.notice = Notice.failed(b.name, "A PR number needs a checkout to read it from. Paste the PR's link instead.")
   return
  end
- b.notice = Notice.loading(b.name, "Finding a checkout of " .. slug)
+ b.notice = Notice.loading(b.name, "Finding a checkout of " .. slug, nil)
  Fetch.checkoutFor(b.repo, b.dir, slug, function(found)
   if found then
    b.repo = found

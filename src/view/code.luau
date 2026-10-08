@@ -151,7 +151,7 @@ function M.step(s: State.State, motion: Ui.Motion, plan: State.Plan, step: Guide
   return el("div", { class = class .. " gp-excerpt-done", key = key }, { head })
  end
  local show = State.show(s, step.file, key, step)
- local rows, height = M.rows(s, fd, key, show, plan.plain[key] == true, Comments.forBlock(s, step.file, key, true))
+ local rows, height = M.rows(s, fd, key, show, plan.plain[key] == true, Comments.forBlock(s, motion, step.file, key, true))
  return el("div", { class = class, key = key }, { head, Ui.body(motion, "x:" .. key, s.closing["peek:" .. key] == true, height, rows) })
 end
 

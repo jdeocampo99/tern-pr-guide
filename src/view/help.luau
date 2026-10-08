@@ -21,7 +21,7 @@ local FILES: { Group } = {
 
 local M = {}
 
-function M.view(closing: boolean, guided: boolean): Node
+function M.view(closing: boolean, guided: boolean, enter: string): Node
  local cols = {}
  for _, group in if guided then GUIDED else FILES do
   local rows = { span("gp-panel-h", group.title) }
@@ -34,7 +34,7 @@ function M.view(closing: boolean, guided: boolean): Node
   span("gp-panel-h", "Mouse"),
   span("gp-keylabel", "Hover a line and click + to comment. Click a second + to cover a range. Click a file name to fold it."),
  }))
- return el("div", { class = "gp-panel gp-keys" .. (if closing then " gp-closing-panel" else ""), key = "keys" }, cols)
+ return el("div", { class = "gp-panel gp-keys " .. enter .. (if closing then " gp-closing-panel" else ""), key = "keys" }, cols)
 end
 
 return M

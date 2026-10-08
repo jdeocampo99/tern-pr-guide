@@ -48,18 +48,35 @@ local function named(p: Picker.Picker): string?
  return "A number alone doesn't say which repository: paste the PR's link to open #" .. n .. "."
 end
 
--- Rows under section labels, or what the list has instead of rows.
-local function list(p: Picker.Picker, repoName: string): { Node }
+-- Rows that stand where the list will be while it loads, each a title and a line under it.
+local SKELETON_ROWS = { "a", "b", "c", "b" }
+
+local function skeleton(): Node
+ local rows = {}
+ for n, width in SKELETON_ROWS do
+  table.insert(rows, el("div", { class = "gp-sk-row", key = "k" .. n }, {
+   el("span", { class = "gp-sk-main" }, { span("gp-sk gp-sk-title gp-sk-" .. width, ""), span("gp-sk gp-sk-sub", "") }),
+   Ui.spacer(),
+   span("gp-sk gp-sk-when", ""),
+  }))
+ end
+ return el("div", { class = "gp-sk-list", key = "skeleton" }, rows)
+end
+
+-- Rows under section labels, or what the list has instead of rows; true beside them while the
+-- list is still loading.
+local function list(p: Picker.Picker, repoName: string): ({ Node }, boolean)
  local kids = {}
  local hint = named(p)
  if hint then table.insert(kids, span("gp-sr-empty", hint)) end
  if p.error then
   table.insert(kids, span("gp-sr-empty gp-notice-error", p.error))
-  return kids
+  return kids, false
  end
  if not p.prs then
   table.insert(kids, span("gp-sr-empty", "Loading open pull requests…"))
-  return kids
+  table.insert(kids, skeleton())
+  return kids, true
  end
  local rows = Picker.rows(p)
  if #rows == 0 then
@@ -68,7 +85,7 @@ local function list(p: Picker.Picker, repoName: string): { Node }
   elseif not hint then
    table.insert(kids, span("gp-sr-empty", "No open pull request matches “" .. p.field.text .. "”."))
   end
-  return kids
+  return kids, false
  end
  -- With the current branch's PR on top, labels set it apart from the rest; across GitHub the
  -- labels say why each PR is listed.
@@ -82,16 +99,19 @@ local function list(p: Picker.Picker, repoName: string): { Node }
   end
   table.insert(kids, row(p, item, n == p.selected))
  end
- return kids
+ return kids, false
 end
 
 function M.view(p: Picker.Picker, root: string?): Node
  local repoName = if root then Text.baseName(root) else ""
  local placeholder = if p.anywhere then "Filter, or paste a PR link…" else "Filter, or paste a PR number or link…"
+ local body, loading = list(p, repoName)
+ -- Its key changes when the list arrives, so the list fades in once; typing in the filter only
+ -- changes the rows inside it.
  local panel = {
   el("div", { class = "gp-sr-box", key = "box" }, { span("gp-sr-slash", "#"), Fields.node(p.field, "field", placeholder) }),
+  el("div", { class = "gp-pk-body" .. (if loading then "" else " gp-pk-arrive"), key = if loading then "wait" else "list" }, body),
  }
- for _, node in list(p, repoName) do table.insert(panel, node) end
  local hints = { span("gp-hb-mode", "Pick a pull request"), Ui.spacer() }
  for _, key in KEYS do
   table.insert(hints, el("span", { class = "gp-hb-item" }, { span("gp-hb-key", key[1]), span("gp-hb-label", key[2]) }))
@@ -108,7 +128,7 @@ end
 M.fieldPath = PICKER .. ".box.field"
 
 function M.rowPath(pr: Picker.Summary): string
- return PICKER .. "." .. rowKey(pr)
+ return PICKER .. ".list." .. rowKey(pr)
 end
 
 return M

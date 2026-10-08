@@ -80,7 +80,7 @@ end
 
 -- A row offering the reader's AI agent to write a guide, with the lens, model and effort it will use
 -- (a button opening the model dropdown, `box`, beneath it) and why the last run failed, or the run going.
-local function aiRow(run: Agent.Run, box: State.ModelBox?): Node
+local function aiRow(run: Agent.Run, box: State.ModelBox?, motion: Ui.Motion, closing: boolean): Node
  if run.running then return busyRow(run) end
  local anchor = { el("span", { class = "gp-ai-model" .. (if box then " gp-ai-model-open" else ""), key = "button", actions = { click = "toggle-models" } }, {
   span("gp-ai-model-lens", Agent.currentLens(run.agent).name),
@@ -91,7 +91,7 @@ local function aiRow(run: Agent.Run, box: State.ModelBox?): Node
  }) }
  if box then
   table.insert(anchor, el("div", { class = "gp-md-scrim", key = "scrim", actions = { click = "toggle-models" } }))
-  table.insert(anchor, ModelPanel.view(box, run.agent))
+  table.insert(anchor, ModelPanel.view(box, run.agent, Ui.entering(motion, "p:models", "gp-enter-pop"), closing))
  end
  local kids = {
   el("span", { class = "gp-btn gp-btn-primary gp-ai-button", actions = { click = "generate-guide" } }, {
@@ -136,17 +136,17 @@ local function status(s: State.State, counts: Review.Counts): Node
  return el("div", { class = "gp-status" }, kids)
 end
 
-function M.view(s: State.State): Node
+function M.view(s: State.State, motion: Ui.Motion): Node
  local pr = s.review.pr
  local counts = Review.counts(s.review)
  local parts = {
   el("div", { class = "gp-title" }, { span("gp-title-num", "#" .. pr.number), span("gp-title-text", pr.title), Ui.spacer(), reviewButton(s, counts.included) }),
   status(s, counts),
  }
- if s.ai then table.insert(parts, aiRow(s.ai, s.models)) end
- if s.search then table.insert(parts, SearchPanel.view(s.search, s.review.guide.guided)) end
- if s.helpOpen then table.insert(parts, Help.view(s.closing.help == true, s.review.guide.guided)) end
- if s.reviewOpen then table.insert(parts, ReviewPanel.view(s)) end
+ if s.ai then table.insert(parts, aiRow(s.ai, s.models, motion, s.closing.models == true)) end
+ if s.search then table.insert(parts, SearchPanel.view(s.search, s.review.guide.guided, Ui.entering(motion, "p:search", "gp-enter-panel"))) end
+ if s.helpOpen then table.insert(parts, Help.view(s.closing.help == true, s.review.guide.guided, Ui.entering(motion, "p:help", "gp-enter-panel"))) end
+ if s.reviewOpen then table.insert(parts, ReviewPanel.view(s, motion)) end
  return el("div", { class = "gp-header", key = "header" }, parts)
 end
 

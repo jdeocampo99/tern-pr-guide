@@ -132,25 +132,27 @@ local function verdictLabel(id: Review.VerdictId): string
  return id
 end
 
-local function postedArea(posted: Review.Posted): { Node }
+-- Where the review went. It arrives when the send finishes, not with a key, so it always plays:
+-- the card settles in and its check pops.
+local function postedArea(posted: Review.Posted, enter: string): { Node }
  local what = verdictLabel(posted.verdict) .. " with " .. plural(#posted.payload.comments, "comment")
  local delivery = posted.delivery
  if delivery.kind == "saved" then
-  return { el("div", { class = "gp-rv-done" }, {
-   span("gp-rv-done-title", "✓  Dry run: review saved"),
+  return { el("div", { class = "gp-rv-done " .. enter }, {
+   el("div", { class = "gp-rv-done-title" }, { span("gp-rv-done-tick", "✓"), span("gp-rv-done-label", "Dry run: review saved") }),
    span("gp-rv-done-text", what .. " saved to " .. delivery.path .. ". Nothing was sent to GitHub."),
   }) }
  end
- return { el("div", { class = "gp-rv-done" }, {
-  span("gp-rv-done-title", "✓  Review posted"),
+ return { el("div", { class = "gp-rv-done " .. enter }, {
+  el("div", { class = "gp-rv-done-title" }, { span("gp-rv-done-tick", "✓"), span("gp-rv-done-label", "Review posted") }),
   span("gp-rv-done-text", what .. "."),
   el("span", { class = "gp-rv-done-link", text = "Open it on GitHub ↗", actions = { click = "open-posted" } }),
  }) }
 end
 
-local function submitArea(s: State.State, included: number): { Node }
+local function submitArea(s: State.State, motion: Ui.Motion, included: number): { Node }
  local r, submit = s.review, s.submit
- if r.posted then return postedArea(r.posted) end
+ if r.posted then return postedArea(r.posted, Ui.entering(motion, "done", "gp-enter-done", true)) end
  local verdict = verdictLabel(r.verdict)
  local confirming = submit.confirming and not submit.sending
  local label = if submit.sending then "Sending…"
@@ -170,7 +172,7 @@ local function submitArea(s: State.State, included: number): { Node }
  return nodes
 end
 
-local function side(s: State.State, included: number): { Node }
+local function side(s: State.State, motion: Ui.Motion, included: number): { Node }
  local guide = s.review.guide
  local editing = s.editingSummary
  local nodes = {
@@ -186,14 +188,15 @@ local function side(s: State.State, included: number): { Node }
   el("div", { class = "gp-rv-sec-top gp-rv-gap" }, { span("gp-rv-sec-title", "Verdict") }),
   el("div", { class = "gp-rv-verdicts" }, verdicts(s)),
  }
- for _, node in submitArea(s, included) do table.insert(nodes, node) end
+ for _, node in submitArea(s, motion, included) do table.insert(nodes, node) end
  return nodes
 end
 
-function M.view(s: State.State): Node
+function M.view(s: State.State, motion: Ui.Motion): Node
  local included = Review.counts(s.review).included
  local number = s.review.pr.number
- return el("div", { class = "gp-panel gp-rv" .. (if s.closing.review then " gp-closing-panel" else ""), key = "review" }, {
+ local enter = Ui.entering(motion, "p:review", "gp-enter-panel")
+ return el("div", { class = "gp-panel gp-rv " .. enter .. (if s.closing.review then " gp-closing-panel" else ""), key = "review" }, {
   el("div", { class = "gp-rv-head" }, {
    el("div", { class = "gp-rv-head-text" }, {
     span("gp-rv-title", "Finish your review"),
@@ -206,7 +209,7 @@ function M.view(s: State.State): Node
   }),
   el("div", { class = "gp-rv-cols", key = "cols" }, {
    el("div", { class = "gp-rv-list", key = "list" }, commentList(s, included)),
-   el("div", { class = "gp-rv-side", key = "side" }, side(s, included)),
+  el("div", { class = "gp-rv-side", key = "side" }, side(s, motion, included)),
   }),
  })
 end

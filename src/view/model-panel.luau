@@ -68,7 +68,7 @@ end
 
 -- The list starts at match `box.top`, under a row offering the ones above it. Its key changes with
 -- `top`, so the list draws as a fresh scroller at its own start and the wheel scrolls it freely.
-function M.view(box: State.ModelBox, agent: Agent.Agent): Node
+function M.view(box: State.ModelBox, agent: Agent.Agent, enter: string, closing: boolean): Node
  local choices = State.modelChoices(box, agent)
  local rows, group = {}, nil
  if box.top > 1 then
@@ -100,7 +100,7 @@ function M.view(box: State.ModelBox, agent: Agent.Agent): Node
  local foot = efforts(box, choices[box.selected])
  if foot then table.insert(kids, foot) end
  table.insert(kids, lenses(agent))
- return el("div", { class = "gp-md-pop", key = "models" }, kids)
+ return el("div", { class = "gp-md-pop " .. enter .. (if closing then " gp-closing-pop" else ""), key = "models" }, kids)
 end
 
 return M

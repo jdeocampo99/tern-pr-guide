@@ -3,9 +3,9 @@
 local Guide = require("../guide")
 local Text = require("../text")
 
--- Remembers each collapsible body's unroll class across renders: views read the last render's
--- `born` and record this render's into `next`. Bodies born in a render a key caused (`animate`
--- false) never unroll.
+-- Remembers each animated node's entrance class across renders: views read the last render's
+-- `born` and record this render's into `next` (see `entering`). Nodes first drawn in a render a
+-- key caused (`animate` false) never play their entrance.
 export type Motion = { born: { [string]: string }, next: { [string]: string }, booted: boolean, animate: boolean }
 
 export type KindLabel = { verb: string, word: string, icon: string }
@@ -79,13 +79,21 @@ function M.avatar(class: string, name: string): Node
  return span("gp-avatar " .. class, Text.initial(name))
 end
 
+-- The entrance class for a node drawn after the page's first render, or "" for one that stays
+-- still. A change a key caused (`animate` false) stays still unless `always`: results that arrive
+-- on their own, like a posted review, are not key presses. The class is remembered by `id` for the
+-- node's lifetime because changing it would restart the animation.
+function M.entering(motion: Motion, id: string, class: string, always: boolean?): string
+ local born = motion.born[id] or (if motion.booted and (always == true or motion.animate) then class else "")
+ motion.next[id] = born
+ return born
+end
+
 -- A collapsible body keyed "body". Bodies present on the first render stay still; bodies that
--- appear later unroll. The unroll class is fixed for the body's lifetime because changing it would
--- restart the animation; `closing` plays the roll-up before the body goes.
+-- appear later unroll. `closing` plays the roll-up before the body goes.
 function M.body(motion: Motion, id: string, closing: boolean, height: number, children: { Node }): Node
  local bucket = math.clamp(math.ceil(height / 40), 1, 75)
- local born = motion.born[id] or (if motion.booted and motion.animate then "gp-hb" .. bucket else "")
- motion.next[id] = born
+ local born = M.entering(motion, id, "gp-hb gp-hb" .. bucket)
  return el("div", { class = "gp-body gp-rb" .. bucket .. " " .. born .. (if closing then " gp-closing" else ""), key = "body" }, children)
 end
 

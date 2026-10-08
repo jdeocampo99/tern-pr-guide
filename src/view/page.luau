@@ -17,8 +17,33 @@ local Ui = require("./ui")
 local el = Ui.el
 
 local PAGE = "main.page"
+-- How many blocks stagger in when an AI guide arrives; later ones come with the last.
+local STAGGERED_BLOCKS = 6
 
 local M = {}
+
+-- Everything that fades colors or borders between states (a card added, a block marked reviewed)
+-- does so only under `gp-soft`, which the page drops once a key drives it: keys stay instant.
+local function rootClass(s: State.State, extra: string): string
+ return "gp-root gp-page" .. extra .. (if s.keyed then "" else " gp-soft")
+end
+
+-- Adds `class` to `node`'s classes.
+local function addClass(node: Node, class: string)
+ local props = (node :: any).p
+ props.class = props.class .. " " .. class
+end
+
+-- Marks the page's blocks as arriving. A PR that just opened fades in as a whole; a guide the AI
+-- just finished writing, the rare moment of a review, has the blocks below the header rise in one
+-- after another. The classes stay for the page's life: they only play when their node is drawn.
+local function arriving(s: State.State, blocks: { Node })
+ if s.arrival == "guide" then
+  for n = 2, #blocks do addClass(blocks[n], "gp-arrive gp-ad" .. math.min(n - 1, STAGGERED_BLOCKS)) end
+ else
+  for _, block in blocks do addClass(block, "gp-arrive-load") end
+ end
+end
 
 -- Without a guide: the header, then the file tree pinned beside the code with a scroll of its own,
 -- and the description at the top of the code. The code scrolls with the page: Tern's reveal into
@@ -27,20 +52,22 @@ local M = {}
 local function split(s: State.State, motion: Ui.Motion, plan: State.Plan): Node
  local blocks = { Description.view(s, motion) }
  for _, step in s.review.steps do table.insert(blocks, Code.step(s, motion, plan, step)) end
- return el("div", {}, { el("div", { class = "gp-root gp-page gp-split", key = "page" }, {
-  Header.view(s),
+ local main = {
+  Header.view(s, motion),
   el("div", { class = "gp-split-row", key = "ch1" }, {
    el("div", { class = "gp-split-left", key = "tree" }, { Change.view(s, 1) }),
    el("div", { class = "gp-code-col gp-split-right", key = "code" }, blocks),
   }),
-  Hints.view(s),
- }) })
+ }
+ arriving(s, main)
+ table.insert(main, Hints.view(s))
+ return el("div", {}, { el("div", { class = rootClass(s, " gp-split"), key = "page" }, main) })
 end
 
 function M.view(s: State.State, motion: Ui.Motion): Node
  local plan = State.plan(s)
  if not s.review.guide.guided then return split(s, motion, plan) end
- local page = { Header.view(s), Description.view(s, motion) }
+ local page = { Header.view(s, motion), Description.view(s, motion) }
  local overview = Overview.view(s, motion)
  if overview then table.insert(page, overview) end
  for n, change in s.review.guide.changes do
@@ -55,8 +82,9 @@ function M.view(s: State.State, motion: Ui.Motion): Node
  if supporting then
   table.insert(page, el("div", { class = "gp-crow", key = "sup" }, { el("div", { class = "gp-code-col", key = "code" }, { supporting }) }))
  end
+ arriving(s, page)
  table.insert(page, Hints.view(s))
- return el("div", {}, { el("div", { class = "gp-root gp-page", key = "page" }, page) })
+ return el("div", {}, { el("div", { class = rootClass(s, ""), key = "page" }, page) })
 end
 
 -- The code block `blockId`: a step's block in its change row, or a supporting file's.

@@ -57,7 +57,7 @@ local function fileBlock(s: State.State, motion: Ui.Motion, plan: State.Plan, fi
  if open then
   local fd = s.diffs[path]
   local show = State.show(s, path, blockId, nil)
-  local rows, rowsHeight = Code.rows(s, fd, blockId, show, plan.plain[blockId] == true, Comments.forBlock(s, path, blockId, false))
+  local rows, rowsHeight = Code.rows(s, fd, blockId, show, plan.plain[blockId] == true, Comments.forBlock(s, motion, path, blockId, false))
   table.insert(children, Ui.body(motion, "file:" .. path, s.closing["file:" .. path] == true, rowsHeight, rows))
   height += rowsHeight
  end
