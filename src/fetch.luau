@@ -369,6 +369,19 @@ function M.saveChoice(agent: Agent.Agent)
  pcall(tern.kv.set, CHOICE_KEY, { model = agent.model, effort = agent.effort })
 end
 
+-- How long the last finished run took, which the next run's progress is estimated from; three
+-- minutes before there is one.
+local RUN_SECONDS_KEY, DEFAULT_RUN_SECONDS = "runSeconds", 180
+
+function M.expectedRunSeconds(): number
+ local ok, seconds = pcall(tern.kv.get, RUN_SECONDS_KEY)
+ return if ok and type(seconds) == "number" and seconds > 0 then seconds else DEFAULT_RUN_SECONDS
+end
+
+function M.saveRunSeconds(seconds: number)
+ pcall(tern.kv.set, RUN_SECONDS_KEY, seconds)
+end
+
 -- The models `agent` can run with, from `omp models`. Calls `done` once; the list is empty when
 -- listing fails, which leaves the current model as the only choice.
 function M.listModels(agent: Agent.Agent, done: (models: { Agent.Model }) -> ())

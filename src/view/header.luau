@@ -39,20 +39,42 @@ local PHRASES = {
 }
 local PHRASE_SECONDS = 7
 
--- The run going: a turning spark, the current phrase (keyed by phrase, so a new one enters and the
--- rest stay still across the once-a-second redraw), bouncing dots, and the model and clock.
+-- Steps the bar fill is drawn in; Tern nodes take no inline style, so each step is a class.
+local BAR_STEPS = 50
+-- Letters past this many write in together with the last one.
+local STAGGERED_LETTERS = 30
+
+-- `text` one letter per node, each writing in a little after the one before.
+local function writing(text: string): { Node }
+ local letters = {}
+ for i, code in utf8.codes(text) do
+  local letter = if code == 32 then "\u{00A0}" else utf8.char(code)
+  table.insert(letters, el("span", { class = "gp-ai-ch gp-ai-cd" .. math.min(#letters + 1, STAGGERED_LETTERS), key = "c" .. i, text = letter }))
+ end
+ return letters
+end
+
+-- The run going: a turning spark, the phrase being written in (keyed by phrase, so only a new
+-- one animates across the once-a-second redraw) over the one leaving, an estimated progress bar,
+-- and the clock.
 local function busyRow(run: Agent.Run): Node
  local clock = string.format("%d:%02d", math.floor(run.seconds / 60), run.seconds % 60)
- local n = math.floor(run.seconds / PHRASE_SECONDS) % #PHRASES + 1
+ local turn = math.floor(run.seconds / PHRASE_SECONDS)
+ local n = turn % #PHRASES + 1
+ local phrases = { el("span", { class = "gp-ai-phrase", key = "p" .. n }, writing(PHRASES[n])) }
+ if turn > 0 and run.seconds % PHRASE_SECONDS == 0 then
+  local leaving = (turn - 1) % #PHRASES + 1
+  table.insert(phrases, 1, el("span", { class = "gp-ai-phrase gp-ai-phrase-out", key = "o" .. leaving, text = PHRASES[leaving] }))
+ end
+ local step = math.floor(Agent.progress(run.seconds, run.expected) * BAR_STEPS + 0.5)
  return el("div", { class = "gp-ai gp-ai-busy", key = "ai" }, {
   el("span", { class = "gp-ai-spark", key = "spark", text = "✦" }),
-  el("span", { class = "gp-ai-phrase", key = "p" .. n, text = PHRASES[n] }),
-  el("span", { class = "gp-ai-dots", key = "dots" }, {
-   el("span", { class = "gp-ai-dot gp-ai-dot1", key = "d1" }),
-   el("span", { class = "gp-ai-dot gp-ai-dot2", key = "d2" }),
-   el("span", { class = "gp-ai-dot gp-ai-dot3", key = "d3" }),
+  el("span", { class = "gp-ai-phrases", key = "phrases" }, phrases),
+  el("span", { class = "gp-ai-bar", key = "bar" }, {
+   el("span", { class = "gp-ai-fill gp-pg" .. step, key = "fill" }),
+   el("span", { class = "gp-ai-shine", key = "shine" }),
   }),
-  el("span", { class = "gp-ai-meta", key = "meta", text = Agent.label(run.agent) .. "  ·  " .. clock }),
+  el("span", { class = "gp-ai-meta", key = "meta", text = clock }),
  })
 end
 

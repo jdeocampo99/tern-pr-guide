@@ -11,9 +11,9 @@ export type Model = { selector: string, name: string, efforts: { string } }
 -- the model and effort a run uses, and the models there are to choose from (empty until listed).
 export type Agent = { command: string, path: string, model: string, effort: string?, models: { Model } }
 
--- Writing a guide for the page's PR: whether a run is going, the seconds it has taken so far, and
--- the first line of why the last run failed.
-export type Run = { agent: Agent, running: boolean, seconds: number, error: string? }
+-- Writing a guide for the page's PR: whether a run is going, the seconds it has taken so far, how
+-- long a run is expected to take, and the first line of why the last run failed.
+export type Run = { agent: Agent, running: boolean, seconds: number, expected: number, error: string? }
 
 local MARKS = { ctx = " ", add = "+", del = "-" }
 
@@ -23,6 +23,13 @@ local EFFORTS: { [string]: boolean } = { off = true, minimal = true, low = true,
 local DEFAULT_EFFORT = "high"
 
 local M = {}
+
+-- How far along a run `seconds` in probably is, 0 to 1, when one takes about `expected` seconds:
+-- `omp -p` reports nothing until it ends, so this eases toward 90% at `expected` and then creeps,
+-- never claiming more than 95% before the run is done.
+function M.progress(seconds: number, expected: number): number
+ return math.min(0.95, 1 - math.exp(-2.3 * seconds / math.max(expected, 1)))
+end
 
 -- OMP's settings, under the home directory.
 M.CONFIG = "/.omp/agent/config.yml"

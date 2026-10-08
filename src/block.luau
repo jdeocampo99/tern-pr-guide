@@ -442,10 +442,11 @@ local function showPr(b: Block, pr: Pr.PR)
 end
 
 -- Has the reader's agent write a guide for the page's PR, counting the seconds it takes, then
--- shows the PR with it, keeping the reader's own comments. One run at a time.
+-- shows the PR with it, keeping the reader's own comments. One run at a time, and only while the
+-- page has no guide, as the button is.
 local function generate(b: Block, cx: BlockCx)
  local run, s, repo = b.ai, b.page, b.repo
- if not run or run.running or not s or not repo then return end
+ if not run or run.running or not s or not repo or b.guided then return end
  local pr, own = s.review.pr, s.review.own
  local started = tern.now()
  local ticker: TimerHandle
@@ -454,12 +455,13 @@ local function generate(b: Block, cx: BlockCx)
   cx:render()
   ticker = tern.timer(1000, tick)
  end
- run.running, run.seconds, run.error = true, 0, nil
+ run.running, run.seconds, run.expected, run.error = true, 0, Fetch.expectedRunSeconds(), nil
  ticker = tern.timer(1000, tick)
  Fetch.generateGuide(run.agent, repo, pr, function(guide, err)
   ticker:cancel()
   run.running, run.error = false, err
   if guide then
+   Fetch.saveRunSeconds(run.seconds)
    showGuide(b, pr, guide, true)
    local page = b.page :: State
    page.review.own = own
@@ -544,7 +546,7 @@ local block: BlockDef<Block> = {
   tern.timer(0, function()
    Fetch.findAgent(function(agent)
     if not agent then return end
-    b.ai = { agent = agent, running = false, seconds = 0, error = nil }
+    b.ai = { agent = agent, running = false, seconds = 0, expected = 0, error = nil }
     offerAgent(b)
     cx:render()
     Fetch.listModels(agent, function(models)

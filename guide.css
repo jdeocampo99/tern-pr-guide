@@ -817,19 +817,104 @@
 .gp-md-more:hover { background: light-dark(#f3f4f6, #292a2f); color: light-dark(#111, #fff); }
 /* the AI writing a guide: a rare, minutes-long wait, so it gets some life */
 @keyframes gp-spark { 0% { transform: rotate(0deg) scale(1); } 50% { transform: rotate(180deg) scale(1.3); } 100% { transform: rotate(360deg) scale(1); } }
-@keyframes gp-dot { 0%, 70%, 100% { transform: translateY(0); opacity: 0.35; } 35% { transform: translateY(-4px); opacity: 1; } }
-@keyframes gp-phrase-fade { from { opacity: 0; } to { opacity: 1; } }
-@keyframes gp-phrase-in { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
-.gp-ai-busy { gap: 10px; }
+@keyframes gp-write { from { opacity: 0; transform: translateY(4px); filter: blur(3px); } to { opacity: 1; transform: translateY(0); filter: blur(0); } }
+@keyframes gp-unwrite { from { opacity: 1; transform: translateY(0); filter: blur(0); } to { opacity: 0; transform: translateY(-4px); filter: blur(3px); } }
+@keyframes gp-shine { from { transform: translateX(-100%); } to { transform: translateX(400%); } }
+@keyframes gp-fade-in { from { opacity: 0; } to { opacity: 1; } }
+.gp-ai-busy { gap: 12px; }
 .gp-ai-spark { display: inline-block; font-size: 15px; color: light-dark(#7c5cff, #a78bfa); animation: gp-spark 2400ms cubic-bezier(0.77, 0, 0.175, 1) infinite; }
-.gp-ai-phrase { font-family: -apple-system, "SF Pro Text", "Helvetica Neue", sans-serif; font-size: 13.5px; font-weight: 600; color: light-dark(#1f2328, #e6e8eb); animation: gp-phrase-in 240ms cubic-bezier(0.23, 1, 0.32, 1); }
-.gp-ai-dots { display: flex; gap: 4px; align-items: center; margin-left: -4px; }
-.gp-ai-dot { width: 4px; height: 4px; border-radius: 2px; background: light-dark(#7c5cff, #a78bfa); animation: gp-dot 1200ms cubic-bezier(0.77, 0, 0.175, 1) infinite; }
-.gp-ai-dot2 { animation-delay: 120ms; }
-.gp-ai-dot3 { animation-delay: 240ms; }
+.gp-ai-phrases { position: relative; display: flex; width: 210px; flex-shrink: 0; }
+.gp-ai-phrase { display: flex; font-family: -apple-system, "SF Pro Text", "Helvetica Neue", sans-serif; font-size: 13.5px; font-weight: 600; color: light-dark(#1f2328, #e6e8eb); }
+.gp-ai-phrase-out { position: absolute; top: 0; left: 0; animation: gp-unwrite 200ms cubic-bezier(0.23, 1, 0.32, 1) forwards; }
+.gp-ai-ch { display: inline-block; opacity: 0; animation: gp-write 260ms cubic-bezier(0.23, 1, 0.32, 1) forwards; }
+.gp-ai-bar { position: relative; width: 240px; height: 4px; border-radius: 2px; overflow: clip; background: light-dark(#e6e8ee, #2c2e35); }
+.gp-ai-fill { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border-radius: 2px; background: light-dark(#7c5cff, #a78bfa); transform-origin: left center; transition: transform 1000ms linear; }
+.gp-ai-shine { position: absolute; top: 0; left: 0; width: 25%; height: 100%; background: linear-gradient(90deg, transparent, light-dark(rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.35)), transparent); animation: gp-shine 1800ms linear infinite; }
 .gp-ai-meta { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; color: light-dark(#8a8f98, #7d838d); }
+.gp-pg0 { transform: scaleX(0.00); }
+.gp-pg1 { transform: scaleX(0.02); }
+.gp-pg2 { transform: scaleX(0.04); }
+.gp-pg3 { transform: scaleX(0.06); }
+.gp-pg4 { transform: scaleX(0.08); }
+.gp-pg5 { transform: scaleX(0.10); }
+.gp-pg6 { transform: scaleX(0.12); }
+.gp-pg7 { transform: scaleX(0.14); }
+.gp-pg8 { transform: scaleX(0.16); }
+.gp-pg9 { transform: scaleX(0.18); }
+.gp-pg10 { transform: scaleX(0.20); }
+.gp-pg11 { transform: scaleX(0.22); }
+.gp-pg12 { transform: scaleX(0.24); }
+.gp-pg13 { transform: scaleX(0.26); }
+.gp-pg14 { transform: scaleX(0.28); }
+.gp-pg15 { transform: scaleX(0.30); }
+.gp-pg16 { transform: scaleX(0.32); }
+.gp-pg17 { transform: scaleX(0.34); }
+.gp-pg18 { transform: scaleX(0.36); }
+.gp-pg19 { transform: scaleX(0.38); }
+.gp-pg20 { transform: scaleX(0.40); }
+.gp-pg21 { transform: scaleX(0.42); }
+.gp-pg22 { transform: scaleX(0.44); }
+.gp-pg23 { transform: scaleX(0.46); }
+.gp-pg24 { transform: scaleX(0.48); }
+.gp-pg25 { transform: scaleX(0.50); }
+.gp-pg26 { transform: scaleX(0.52); }
+.gp-pg27 { transform: scaleX(0.54); }
+.gp-pg28 { transform: scaleX(0.56); }
+.gp-pg29 { transform: scaleX(0.58); }
+.gp-pg30 { transform: scaleX(0.60); }
+.gp-pg31 { transform: scaleX(0.62); }
+.gp-pg32 { transform: scaleX(0.64); }
+.gp-pg33 { transform: scaleX(0.66); }
+.gp-pg34 { transform: scaleX(0.68); }
+.gp-pg35 { transform: scaleX(0.70); }
+.gp-pg36 { transform: scaleX(0.72); }
+.gp-pg37 { transform: scaleX(0.74); }
+.gp-pg38 { transform: scaleX(0.76); }
+.gp-pg39 { transform: scaleX(0.78); }
+.gp-pg40 { transform: scaleX(0.80); }
+.gp-pg41 { transform: scaleX(0.82); }
+.gp-pg42 { transform: scaleX(0.84); }
+.gp-pg43 { transform: scaleX(0.86); }
+.gp-pg44 { transform: scaleX(0.88); }
+.gp-pg45 { transform: scaleX(0.90); }
+.gp-pg46 { transform: scaleX(0.92); }
+.gp-pg47 { transform: scaleX(0.94); }
+.gp-pg48 { transform: scaleX(0.96); }
+.gp-pg49 { transform: scaleX(0.98); }
+.gp-pg50 { transform: scaleX(1.00); }
+.gp-ai-cd1 { animation-delay: 0ms; }
+.gp-ai-cd2 { animation-delay: 22ms; }
+.gp-ai-cd3 { animation-delay: 44ms; }
+.gp-ai-cd4 { animation-delay: 66ms; }
+.gp-ai-cd5 { animation-delay: 88ms; }
+.gp-ai-cd6 { animation-delay: 110ms; }
+.gp-ai-cd7 { animation-delay: 132ms; }
+.gp-ai-cd8 { animation-delay: 154ms; }
+.gp-ai-cd9 { animation-delay: 176ms; }
+.gp-ai-cd10 { animation-delay: 198ms; }
+.gp-ai-cd11 { animation-delay: 220ms; }
+.gp-ai-cd12 { animation-delay: 242ms; }
+.gp-ai-cd13 { animation-delay: 264ms; }
+.gp-ai-cd14 { animation-delay: 286ms; }
+.gp-ai-cd15 { animation-delay: 308ms; }
+.gp-ai-cd16 { animation-delay: 330ms; }
+.gp-ai-cd17 { animation-delay: 352ms; }
+.gp-ai-cd18 { animation-delay: 374ms; }
+.gp-ai-cd19 { animation-delay: 396ms; }
+.gp-ai-cd20 { animation-delay: 418ms; }
+.gp-ai-cd21 { animation-delay: 440ms; }
+.gp-ai-cd22 { animation-delay: 462ms; }
+.gp-ai-cd23 { animation-delay: 484ms; }
+.gp-ai-cd24 { animation-delay: 506ms; }
+.gp-ai-cd25 { animation-delay: 528ms; }
+.gp-ai-cd26 { animation-delay: 550ms; }
+.gp-ai-cd27 { animation-delay: 572ms; }
+.gp-ai-cd28 { animation-delay: 594ms; }
+.gp-ai-cd29 { animation-delay: 616ms; }
+.gp-ai-cd30 { animation-delay: 638ms; }
 @media (prefers-reduced-motion: reduce) {
-  .gp-ai-spark, .gp-ai-dot { animation: none; }
-  .gp-ai-dot { opacity: 0.6; }
-  .gp-ai-phrase { animation: gp-phrase-fade 240ms ease; }
+  .gp-ai-spark, .gp-ai-shine { animation: none; }
+  .gp-ai-shine { opacity: 0; }
+  .gp-ai-ch { animation: gp-fade-in 200ms ease forwards; animation-delay: 0ms; }
+  .gp-ai-phrase-out { animation: none; opacity: 0; }
 }
