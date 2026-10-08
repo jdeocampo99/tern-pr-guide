@@ -97,9 +97,9 @@ committed). Opening that PR uses it, and the picker marks PRs that have one with
 ## AI guided review
 
 With [OMP](https://omp.sh) installed, a PR without a guide shows a **Generate AI Guided Review**
-button, with the model and effort it will use beside it. Click it and your agent reads the PR and
-writes the guide; the page turns into the guided review when it's done. It takes a few minutes, and
-you can keep reading meanwhile.
+button, with the model and effort it will use beside it. Click it (or press `⇧G`) and your agent
+reads the PR and writes the guide; the page turns into the guided review when it's done. It takes a
+few minutes, and you can keep reading meanwhile.
 
 - Click the model, or press `⇧M`, to pick another: type to search the models OMP lists, `↑`/`↓` for
   the model, `←`/`→` for the effort, `⏎` to use it. Your pick is remembered for every PR.

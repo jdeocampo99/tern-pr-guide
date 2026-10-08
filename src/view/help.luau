@@ -14,7 +14,7 @@ local GUIDED: { Group } = {
 
 -- Without a guide every step is a whole file and there is one change: the whole PR.
 local FILES: { Group } = {
- { title = "1  Read", keys = { { "j  k", "next / previous file" }, { "/", "search the PR" }, { "i", "PR description" }, { "g", "open on GitHub" }, { "⇧ M", "AI model and effort" } } },
+ { title = "1  Read", keys = { { "j  k", "next / previous file" }, { "/", "search the PR" }, { "i", "PR description" }, { "g", "open on GitHub" }, { "⇧ G", "generate AI guided review" }, { "⇧ M", "AI model and effort" } } },
  { title = "2  React", keys = { { "⏎", "file reviewed, move on" }, { "m", "mark / unmark all reviewed" }, { "c", "comment on this file" } } },
  GUIDED[3],
 }

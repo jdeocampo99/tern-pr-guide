@@ -32,13 +32,34 @@ local function headerAction(label: string, keyHint: string?, action: string): No
  return el("span", { class = "gp-hdr-act", actions = { click = action } }, kids)
 end
 
+-- What the generating row says it is doing, one after another while the agent works.
+local PHRASES = {
+ "Reading the diff", "Following the changes", "Untangling the why", "Sketching the walkthrough",
+ "Picking a reading order", "Looking for trouble", "Drafting comments", "Polishing the notes",
+}
+local PHRASE_SECONDS = 7
+
+-- The run going: a turning spark, the current phrase (keyed by phrase, so a new one enters and the
+-- rest stay still across the once-a-second redraw), bouncing dots, and the model and clock.
+local function busyRow(run: Agent.Run): Node
+ local clock = string.format("%d:%02d", math.floor(run.seconds / 60), run.seconds % 60)
+ local n = math.floor(run.seconds / PHRASE_SECONDS) % #PHRASES + 1
+ return el("div", { class = "gp-ai gp-ai-busy", key = "ai" }, {
+  el("span", { class = "gp-ai-spark", key = "spark", text = "✦" }),
+  el("span", { class = "gp-ai-phrase", key = "p" .. n, text = PHRASES[n] }),
+  el("span", { class = "gp-ai-dots", key = "dots" }, {
+   el("span", { class = "gp-ai-dot gp-ai-dot1", key = "d1" }),
+   el("span", { class = "gp-ai-dot gp-ai-dot2", key = "d2" }),
+   el("span", { class = "gp-ai-dot gp-ai-dot3", key = "d3" }),
+  }),
+  el("span", { class = "gp-ai-meta", key = "meta", text = Agent.label(run.agent) .. "  ·  " .. clock }),
+ })
+end
+
 -- A row offering the reader's AI agent to write a guide, with the model and effort it will use (a
 -- button opening the model dropdown, `box`, beneath it) and why the last run failed, or the run going.
 local function aiRow(run: Agent.Run, box: State.ModelBox?): Node
- if run.running then
-  local clock = string.format("%d:%02d", math.floor(run.seconds / 60), run.seconds % 60)
-  return el("div", { class = "gp-ai", key = "ai" }, { span("gp-ai-running", "Generating AI guided review with " .. Agent.label(run.agent) .. "… " .. clock) })
- end
+ if run.running then return busyRow(run) end
  local anchor = { el("span", { class = "gp-ai-model" .. (if box then " gp-ai-model-open" else ""), key = "button", actions = { click = "toggle-models" } }, {
   span("gp-ai-model-name", Agent.label(run.agent)),
   span("gp-ai-model-caret", "▾"),
@@ -49,7 +70,10 @@ local function aiRow(run: Agent.Run, box: State.ModelBox?): Node
   table.insert(anchor, ModelPanel.view(box, run.agent))
  end
  local kids = {
-  Ui.button("gp-btn-primary gp-ai-button", "Generate AI Guided Review", "generate-guide"),
+  el("span", { class = "gp-btn gp-btn-primary gp-ai-button", actions = { click = "generate-guide" } }, {
+   span("gp-ai-button-label", "Generate AI Guided Review"),
+   span("gp-act-key", "⇧G"),
+  }),
   el("span", { class = "gp-md-anchor", key = "anchor" }, anchor),
  }
  if run.error then table.insert(kids, span("gp-ai-error", "Couldn't generate it: " .. run.error)) end

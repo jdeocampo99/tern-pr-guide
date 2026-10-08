@@ -73,6 +73,7 @@ local function readingKey(s: State.State, key: Key): Action?
  if name == "c" then return act("comment-step") end
  if name == "r" then return act("open-review") end
  if name == "/" or key.text == "/" then return act("open-search") end
+ if (name == "g" and key.shift) or name == "G" then return act("generate-guide") end
  if name == "g" then return act("open-github") end
  if name == "i" then return act("toggle-description") end
  if (name == "m" and key.shift) or name == "M" then return act("toggle-models") end

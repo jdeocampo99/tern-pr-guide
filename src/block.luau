@@ -599,7 +599,7 @@ local block: BlockDef<Block> = {
   local action = Keys.action(s, key)
   if action then
    s.keyed = true
-   dispatch(s, cx, action)
+   if action.act == "generate-guide" then generate(b, cx) else dispatch(s, cx, action) end
    return true
   end
   local field = State.field(s)
