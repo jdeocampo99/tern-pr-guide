@@ -8,7 +8,7 @@ local el, span = Ui.el, Ui.span
 
 local M = {}
 
-function M.view(box: State.SearchBox): Node
+function M.view(box: State.SearchBox, guided: boolean): Node
  local query = box.field.text
  local rows = {}
  for n, result in box.results do
@@ -18,7 +18,8 @@ function M.view(box: State.SearchBox): Node
   }))
  end
  if #rows == 0 then
-  table.insert(rows, span("gp-sr-empty", if query == "" then "Search steps, files, comments and changed code." else "Nothing matches “" .. query .. "”."))
+  local empty = if guided then "Search steps, files, comments and changed code." else "Search files, comments and changed code."
+  table.insert(rows, span("gp-sr-empty", if query == "" then empty else "Nothing matches “" .. query .. "”."))
  end
  return el("div", { class = "gp-panel gp-search", key = "search" }, {
   el("div", { class = "gp-sr-box", key = "box" }, { span("gp-sr-slash", "/"), Fields.node(box.field, "field", "Search this PR…") }),

@@ -87,7 +87,7 @@ Behind the scenes it runs `gh pr view` once, fetches the PR into `refs/prguide/<
 
 ## Guides
 
-The page works on any PR as-is: one step per changed file. A **guide file** adds the walkthrough:
+The page works on any PR as-is: the changed files in a folder tree, like GitHub, one file at a time. A **guide file** adds the walkthrough:
 the overview, the diagram, the changes and their steps, suggested comments and a drafted summary.
 Any tool can write one (an AI reviewer, a script, a person). The format is in [GUIDE.md](GUIDE.md).
 

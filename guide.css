@@ -741,3 +741,18 @@
 .gp-pk-tag { font-family: -apple-system, "SF Pro Text", "Helvetica Neue", sans-serif; font-size: 12px; font-weight: 600; color: light-dark(#6e7580, #9aa0a9); }
 .gp-pk-stat { flex-shrink: 0; font-size: 12.5px; color: light-dark(#8a8f98, #7d838d); }
 .gp-pk-when { width: 64px; text-align: right; }
+/* the unguided page's folder tree in the left column */
+.gp-tree .gp-tree-rows { display: flex; flex-direction: column; margin: 10px 0 0 -8px; }
+.gp-tree-rows > * { flex-shrink: 0; }
+.gp-tree-row { display: flex; gap: 8px; align-items: center; padding: 4px 8px; border-radius: 7px; }
+.gp-tree-glyph { width: 14px; flex-shrink: 0; text-align: center; font-size: 12px; color: light-dark(#8a8f98, #7d838d); }
+.gp-tree-tick { cursor: pointer; }
+.gp-tree-folder-name { font-family: -apple-system, "SF Pro Text", "Helvetica Neue", sans-serif; font-size: 14px; color: light-dark(#555c66, #9ea4ad); }
+.gp-tree-go { flex-grow: 1; min-width: 0; display: flex; gap: 10px; align-items: center; cursor: pointer; }
+.gp-tree-file:hover { background: light-dark(#eef0f3, #2a2c31); }
+.gp-tree-file:hover .gp-cfile-name { text-decoration: underline; }
+.gp-tree-here, .gp-tree-here:hover { background: light-dark(#e9f0fc, #22304a); }
+.gp-tree-here .gp-cfile-name { font-weight: 650; color: light-dark(#0b1f44, #ffffff); }
+.gp-tree-here .gp-tree-tick { color: light-dark(#2f6fe0, #8ab4ff); }
+.gp-tree-d1 { padding-left: 24px; } .gp-tree-d2 { padding-left: 40px; } .gp-tree-d3 { padding-left: 56px; } .gp-tree-d4 { padding-left: 72px; }
+.gp-tree-d5 { padding-left: 88px; } .gp-tree-d6 { padding-left: 104px; } .gp-tree-d7 { padding-left: 120px; } .gp-tree-d8 { padding-left: 136px; }

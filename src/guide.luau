@@ -1,4 +1,5 @@
 --!strict
+local FileTree = require("./file-tree")
 local Pr = require("./pr")
 local Text = require("./text")
 
@@ -33,6 +34,8 @@ export type FlowItem = Box | Edge | Fork
 export type Flow = { title: string, subtitle: string, rows: { { FlowItem } } }
 
 export type Guide = {
+ -- Whether the steps came from a guide file; without one there is a step per file, in tree order.
+ guided: boolean,
  -- The PR commit the guide was written against.
  head: string?,
  -- Who suggested the comments.
@@ -113,7 +116,7 @@ end
 
 local function singleChange(pr: Pr.PR): { Change }
  local steps = {}
- for _, file in pr.files do
+ for _, file in FileTree.order(pr.files) do
   local from, to = diffSpan(file)
   table.insert(steps, { file = file.path, from = from, to = to, title = file.path, note = "" })
  end
@@ -237,8 +240,10 @@ function M.parse(raw: any, pr: Pr.PR): Guide?
  if type(raw) ~= "table" or raw.schema ~= SCHEMA then return nil end
  local files = indexFiles(pr)
  local changes = parseChanges(raw.changes, files)
- if #changes == 0 then changes = singleChange(pr) end
+ local guided = #changes > 0
+ if not guided then changes = singleChange(pr) end
  return {
+  guided = guided,
   head = if type(raw.head) == "string" then raw.head else nil,
   author = if type(raw.author) == "string" and raw.author ~= "" then raw.author else DEFAULT_AUTHOR,
   overview = text(raw.overview, ""),
@@ -254,6 +259,7 @@ end
 -- file spanning its diff, and nothing suggested.
 function M.defaultGuide(pr: Pr.PR): Guide
  return {
+  guided = false,
   head = pr.head,
   author = DEFAULT_AUTHOR,
   overview = "",

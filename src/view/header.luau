@@ -79,8 +79,8 @@ function M.view(s: State.State): Node
   status(s, counts),
  }
  if s.ai then table.insert(parts, aiRow(s.ai)) end
- if s.search then table.insert(parts, SearchPanel.view(s.search)) end
- if s.helpOpen then table.insert(parts, Help.view(s.closing.help == true)) end
+ if s.search then table.insert(parts, SearchPanel.view(s.search, s.review.guide.guided)) end
+ if s.helpOpen then table.insert(parts, Help.view(s.closing.help == true, s.review.guide.guided)) end
  if s.reviewOpen then table.insert(parts, ReviewPanel.view(s)) end
  return el("div", { class = "gp-header", key = "header" }, parts)
 end

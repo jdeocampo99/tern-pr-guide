@@ -1,7 +1,9 @@
 --!strict
 -- The left column beside one change: its place and reviewed tick, why, its files, then its steps.
+-- Without a guide it is the PR's changed files as a folder tree instead.
 -- Every change's row carries its own card pinned with position: sticky, so scrolling into the next
 -- row swaps in the next card: Tern gives plugins no scroll events to drive one shared copy.
+local FileTree = require("../file-tree")
 local Guide = require("../guide")
 local Review = require("../review")
 local State = require("../state")
@@ -49,8 +51,48 @@ local function stepList(r: Review.Review, change: Guide.Change, current: Guide.S
  return steps
 end
 
+-- Indents deeper than this line up with it.
+local MAX_DEPTH = 8
+
+-- The unguided page's one step per file: a GitHub-style tree whose file rows tick and jump like steps.
+local function fileTree(s: State.State): Node
+ local r = s.review
+ local stepOf: { [string]: Guide.Step } = {}
+ for _, step in r.steps do stepOf[step.file] = step end
+ local current = State.currentStep(s)
+ local rows = {}
+ for _, row in FileTree.rows(r.pr.files) do
+  local depth = " gp-tree-d" .. math.min(row.depth, MAX_DEPTH)
+  if row.kind == "folder" then
+   table.insert(rows, el("div", { class = "gp-tree-row gp-tree-folder" .. depth, key = "td-" .. Text.keyOf(row.path) }, {
+    span("gp-tree-glyph", "▾"),
+    span("gp-tree-folder-name", row.name),
+   }))
+  else
+   local file = row.file
+   local step = stepOf[file.path]
+   local here = step == current
+   table.insert(rows, el("div", { class = "gp-tree-row gp-tree-file" .. depth .. (if here then " gp-tree-here" else ""), key = "tf-" .. Text.keyOf(file.path) }, {
+    el("span", { class = "gp-tree-glyph gp-tree-tick", text = if r.reviewed[step.key] then "✓" else "○", actions = { click = "review-step=" .. step.key } }),
+    el("span", { class = "gp-tree-go", actions = { click = "goto-step=" .. step.position } }, {
+     Ui.fileIcon(file.path),
+     span("gp-cfile-name", Text.baseName(file.path)),
+     Ui.spacer(),
+     span("gp-adds", if file.adds > 0 then "+" .. file.adds else ""),
+     span("gp-dels", if file.dels > 0 then "−" .. file.dels else ""),
+    }),
+   }))
+  end
+ end
+ return el("div", { class = "gp-outline gp-sticky gp-ccard gp-tree", key = "outline" }, {
+  span("gp-band-label", #r.steps .. " " .. (if #r.steps == 1 then "file" else "files") .. " changed"),
+  el("div", { class = "gp-tree-rows" }, rows),
+ })
+end
+
 function M.view(s: State.State, n: number): Node
  local r = s.review
+ if not r.guide.guided then return fileTree(s) end
  local change = r.guide.changes[n]
  local keys = Review.keysOfChange(r, n)
  local done = Review.reviewedCount(r, keys)

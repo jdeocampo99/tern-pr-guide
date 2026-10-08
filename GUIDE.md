@@ -61,5 +61,6 @@ Changed files that no step visits are shown under "Supporting changes".
 
 ## Without a guide
 
-The page builds one change named after the PR, with one step per changed file covering its diff,
-no suggested comments, and an empty summary.
+The page lists the changed files as a folder tree, like GitHub, and walks them one file at a time
+in that order, with no suggested comments and an empty summary. A guide file whose changes all fail
+to match the PR gets the same tree.

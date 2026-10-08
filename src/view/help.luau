@@ -6,17 +6,24 @@ local el, span = Ui.el, Ui.span
 
 type Group = { title: string, keys: { { string } } }
 
-local GROUPS: { Group } = {
+local GUIDED: { Group } = {
  { title = "1  Read", keys = { { "j  k", "next / previous step" }, { "n  p", "next / previous suggestion" }, { "/", "search the PR" }, { "s", "supporting changes" }, { "o", "open every supporting file" }, { "g", "open on GitHub" } } },
  { title = "2  React", keys = { { "⏎", "step reviewed, move on" }, { "⇧ ⏎", "whole change reviewed" }, { "v", "whole file reviewed" }, { "a  d", "add / dismiss suggestion" }, { "c", "comment on this step" } } },
  { title = "3  Finish", keys = { { "r", "open your review" }, { "j  k", "move between comments" }, { "x", "include or leave out" }, { "a", "include / exclude all" }, { "1 2 3", "comment, approve, request changes" }, { "⌘ ⏎", "submit" } } },
 }
 
+-- Without a guide every step is a whole file and there is one change: the whole PR.
+local FILES: { Group } = {
+ { title = "1  Read", keys = { { "j  k", "next / previous file" }, { "/", "search the PR" }, { "g", "open on GitHub" } } },
+ { title = "2  React", keys = { { "⏎", "file reviewed, move on" }, { "⇧ ⏎", "every file reviewed" }, { "c", "comment on this file" } } },
+ GUIDED[3],
+}
+
 local M = {}
 
-function M.view(closing: boolean): Node
+function M.view(closing: boolean, guided: boolean): Node
  local cols = {}
- for _, group in GROUPS do
+ for _, group in if guided then GUIDED else FILES do
   local rows = { span("gp-panel-h", group.title) }
   for _, key in group.keys do
    table.insert(rows, el("div", { class = "gp-keyrow" }, { span("gp-kbd", key[1]), span("gp-keylabel", key[2]) }))

@@ -23,8 +23,9 @@ local PREVIEW_CHARS = 100
 
 local M = {}
 
--- Steps, files, comments and changed lines of the PR that contain `query`, in that order. A plain
--- substring scan per keystroke; a PR's rows are few enough that no index is needed.
+-- Steps, files, comments and changed lines of the PR that contain `query`, in that order; without
+-- a guide each step is a whole file, so files stand for them. A plain substring scan per
+-- keystroke; a PR's rows are few enough that no index is needed.
 function M.run(query: string, r: Review.Review, diffs: { [string]: Diff.FileDiff }): { Result }
  local results: { Result } = {}
  local needle = string.lower(query)
@@ -37,9 +38,11 @@ function M.run(query: string, r: Review.Review, diffs: { [string]: Diff.FileDiff
  end
  local author = r.guide.author
 
- for i, step in r.steps do
-  if has(step.title) or has(step.note) then
-   add({ kind = "Step", text = step.title, sub = "Change " .. step.change .. "  ·  " .. r.guide.changes[step.change].title, go = { step = i } })
+ if r.guide.guided then
+  for i, step in r.steps do
+   if has(step.title) or has(step.note) then
+    add({ kind = "Step", text = step.title, sub = "Change " .. step.change .. "  ·  " .. r.guide.changes[step.change].title, go = { step = i } })
+   end
   end
  end
  for _, file in r.pr.files do

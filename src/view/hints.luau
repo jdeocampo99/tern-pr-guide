@@ -19,7 +19,8 @@ local M = {}
 local function readingKeys(s: State.State): (string, { { string } })
  local r = s.review
  local step = State.currentStep(s)
- local keys = { { "j k", "next / previous step" }, { "⏎", "mark reviewed" } }
+ local unit = if r.guide.guided then "step" else "file"
+ local keys = { { "j k", "next / previous " .. unit }, { "⏎", "mark reviewed" } }
  local suggestion = Review.currentSuggestion(r)
  if suggestion and r.decisions[suggestion.id] == nil then
   table.insert(keys, { "a d", "add / dismiss " .. r.guide.author .. "'s " .. string.lower(Ui.kinds[suggestion.kind].word) })
@@ -27,6 +28,7 @@ local function readingKeys(s: State.State): (string, { { string } })
  table.insert(keys, { "c", "comment" })
  table.insert(keys, { "r", "submit review" })
  table.insert(keys, { "/", "search" })
+ if not r.guide.guided then return "File " .. r.cur .. " of " .. #r.steps .. "  ·  " .. step.file, keys end
  return "Step " .. r.cur .. " of " .. #r.steps .. "  ·  " .. step.title, keys
 end
 

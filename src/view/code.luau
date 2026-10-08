@@ -137,7 +137,7 @@ function M.step(s: State.State, motion: Ui.Motion, plan: State.Plan, step: Guide
  local reviewed = s.review.reviewed[key] == true
  local open = plan.open[key] == true
  local head = M.head(s, fd.file, {
-  label = "lines " .. step.from .. "–" .. step.to,
+  label = if s.review.guide.guided then "lines " .. step.from .. "–" .. step.to else nil,
   toggle = "peek=" .. key,
   expanded = open,
   blockId = key,
