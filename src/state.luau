@@ -10,13 +10,17 @@ local Review = require("./review")
 local Search = require("./search")
 
 -- Which keys the page listens for: the open text field or panel, else reading.
-export type Mode = "search" | "composer" | "summary" | "review" | "reading"
+export type Mode = "search" | "models" | "composer" | "summary" | "review" | "reading"
 
 -- A comment being written on lines from..to of `file`, hung under `to` in the step block keyed
 -- `step`, or in the file's own block when no step shows the line.
 export type Composer = { file: string, from: number, to: number, step: string?, field: Fields.Field }
 
 export type SearchBox = { field: Fields.Field, results: { Search.Result }, selected: number }
+
+-- The model dropdown: its filter, the highlighted model (an index into the models matching the
+-- filter) and the effort the next pick gets.
+export type ModelBox = { field: Fields.Field, selected: number, effort: string? }
 
 -- The changed line a search jumped to, marked until the next jump.
 export type Hit = { file: string, entry: number }
@@ -65,6 +69,7 @@ export type State = {
  search: SearchBox?,
  hit: Hit?,
  helpOpen: boolean,
+ models: ModelBox?,
  reviewOpen: boolean,
  -- The review panel's selected comment, an index into Review.items.
  reviewCursor: number,
@@ -99,7 +104,7 @@ function M.new(pr: Pr.PR, guide: Guide.Guide, to: { repo: string?, dryRunPath: s
   flowOpen = true, descriptionOpen = not guide.guided, foldedFolders = {}, supportingOpen = false, fileOpen = {}, pinned = {},
   flash = nil, flashCount = 0,
   composer = nil, search = nil, hit = nil,
-  helpOpen = false, reviewOpen = false, reviewCursor = 1, editingSummary = false,
+  helpOpen = false, models = nil, reviewOpen = false, reviewCursor = 1, editingSummary = false,
   keyed = false, submit = { repo = to.repo, dryRunPath = to.dryRunPath, sending = false, error = nil }, ai = nil,
   born = {}, booted = false,
  }
@@ -107,6 +112,7 @@ end
 
 function M.mode(s: State): Mode
  if s.search then return "search" end
+ if s.models then return "models" end
  if s.composer then return "composer" end
  if s.editingSummary then return "summary" end
  if s.reviewOpen then return "review" end
@@ -117,6 +123,7 @@ end
 function M.field(s: State): Fields.Field?
  local mode = M.mode(s)
  if mode == "search" then return (s.search :: SearchBox).field end
+ if mode == "models" then return (s.models :: ModelBox).field end
  if mode == "composer" then return (s.composer :: Composer).field end
  if mode == "summary" then return s.review.summary end
  return nil
@@ -408,6 +415,42 @@ function M.toggleItem(s: State, n: number)
   s.reviewCursor = n
   Review.include(s.review, item, not Review.isIncluded(s.review, item))
  end
+end
+
+-- The model dropdown, highlighting the model in use.
+function M.openModels(s: State, agent: Agent.Agent)
+ local selected = 1
+ for i, model in agent.models do
+  if model.selector == agent.model then selected = i end
+ end
+ s.models = { field = Fields.create(), selected = selected, effort = agent.effort }
+end
+
+-- The models matching the dropdown's filter.
+function M.modelChoices(box: ModelBox, agent: Agent.Agent): { Agent.Model }
+ return Agent.matching(agent.models, box.field.text)
+end
+
+function M.moveModel(box: ModelBox, agent: Agent.Agent, delta: number)
+ box.selected = math.clamp(box.selected + delta, 1, math.max(1, #M.modelChoices(box, agent)))
+end
+
+-- Steps the effort the highlighted model will get through the levels it takes.
+function M.stepEffort(box: ModelBox, agent: Agent.Agent, delta: number)
+ local model = M.modelChoices(box, agent)[box.selected]
+ if not model or #model.efforts == 0 then return end
+ local at = table.find(model.efforts, Agent.effortFor(model, box.effort) :: string) :: number
+ box.effort = model.efforts[(at - 1 + delta) % #model.efforts + 1]
+end
+
+-- Makes the highlighted model, with the effort it can take, the one runs use; false when the
+-- filter matches nothing.
+function M.chooseModel(box: ModelBox, agent: Agent.Agent): boolean
+ local model = M.modelChoices(box, agent)[box.selected]
+ if not model then return false end
+ agent.model, agent.effort = model.selector, Agent.effortFor(model, box.effort)
+ box.effort = agent.effort
+ return true
 end
 
 return M

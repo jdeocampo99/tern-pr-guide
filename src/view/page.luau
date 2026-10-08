@@ -88,6 +88,13 @@ function M.composerFieldPath(blockId: string): string
 end
 
 M.searchFieldPath = PAGE .. ".header.search.box.field"
+M.modelFieldPath = PAGE .. ".header.models.box.field"
+
+-- Row `n` of the model dropdown's list.
+function M.modelRowPath(n: number): string
+ return PAGE .. ".header.models.list.m" .. n
+end
+
 M.summaryFieldPath = PAGE .. ".header.review.cols.side.summary.field"
 
 function M.reviewRowPath(item: Review.Item): string

@@ -1,11 +1,15 @@
 --!strict
--- The reader's own AI agent (OMP) writing a guide: the model it reviews with and the files a run
--- reads. src/fetch.luau finds the agent and runs it.
+-- The reader's own AI agent (OMP) writing a guide: the model and effort it reviews with, the models
+-- it can pick from, and the files a run reads. src/fetch.luau finds the agent and runs it.
 local Pr = require("./pr")
 
+-- One model `omp models` lists: what `--model` takes, its display name, and the thinking levels
+-- `--thinking` takes for it (none when it can't think).
+export type Model = { selector: string, name: string, efforts: { string } }
+
 -- `omp` as the login shell finds it, that shell's PATH (`omp` runs on an interpreter found there),
--- the model of its review role, and that model without its provider for display.
-export type Agent = { command: string, path: string, model: string, name: string }
+-- the model and effort a run uses, and the models there are to choose from (empty until listed).
+export type Agent = { command: string, path: string, model: string, effort: string?, models: { Model } }
 
 -- Writing a guide for the page's PR: whether a run is going, the seconds it has taken so far, and
 -- the first line of why the last run failed.
@@ -13,13 +17,86 @@ export type Run = { agent: Agent, running: boolean, seconds: number, error: stri
 
 local MARKS = { ctx = " ", add = "+", del = "-" }
 
+-- Every thinking level `omp --thinking` takes.
+local EFFORTS: { [string]: boolean } = { off = true, minimal = true, low = true, medium = true, high = true, xhigh = true, max = true, auto = true }
+-- The effort a newly picked model gets when it can't keep the current one.
+local DEFAULT_EFFORT = "high"
+
 local M = {}
 
 -- OMP's settings, under the home directory.
 M.CONFIG = "/.omp/agent/config.yml"
 
-function M.new(command: string, path: string, model: string): Agent
- return { command = command, path = path, model = model, name = string.match(model, "[^/]+$") or model }
+-- `raw` as OMP writes a model role ("provider/id:effort"), split into the model and its effort.
+function M.parseChoice(raw: string): (string, string?)
+ local model, effort = string.match(raw, "^(.*):(%a+)$")
+ if model and EFFORTS[effort :: string] then return model, effort end
+ return raw, nil
+end
+
+function M.new(command: string, path: string, model: string, effort: string?): Agent
+ return { command = command, path = path, model = model, effort = effort, models = {} }
+end
+
+-- The model without its provider, as the page names it.
+function M.name(agent: Agent): string
+ return string.match(agent.model, "[^/]+$") or agent.model
+end
+
+-- The model and effort, as the model button shows them.
+function M.label(agent: Agent): string
+ return M.name(agent) .. (if agent.effort then " · " .. agent.effort else "")
+end
+
+-- The chat models in `omp models --json` output, decoded; empty when it isn't that shape.
+function M.parseModels(raw: any): { Model }
+ local models = {}
+ if type(raw) ~= "table" or type(raw.models) ~= "table" then return models end
+ for _, item in raw.models do
+  if type(item) == "table" and type(item.selector) == "string" and (item.kind == nil or item.kind == "chat") then
+   local efforts = {}
+   if type(item.thinking) == "table" then
+    for _, level in item.thinking do
+     if type(level) == "string" then table.insert(efforts, level) end
+    end
+   end
+   table.insert(models, { selector = item.selector, name = if type(item.name) == "string" then item.name else item.selector, efforts = efforts })
+  end
+ end
+ return models
+end
+
+-- The models whose name or selector contains `query`, ignoring case, in list order.
+function M.matching(models: { Model }, query: string): { Model }
+ local needle = string.lower(query)
+ if needle == "" then return models end
+ local found = {}
+ for _, model in models do
+  if string.find(string.lower(model.name), needle, 1, true) or string.find(string.lower(model.selector), needle, 1, true) then
+   table.insert(found, model)
+  end
+ end
+ return found
+end
+
+-- The effort `model` runs with when `wanted` was asked for: `wanted` when it takes it, else high,
+-- else its strongest; nil for a model that can't think.
+function M.effortFor(model: Model, wanted: string?): string?
+ if #model.efforts == 0 then return nil end
+ if wanted and table.find(model.efforts, wanted) then return wanted end
+ if table.find(model.efforts, DEFAULT_EFFORT) then return DEFAULT_EFFORT end
+ return model.efforts[#model.efforts]
+end
+
+-- The `omp` command that has `agent` follow the prompt at `promptPath`.
+function M.argv(agent: Agent, promptPath: string): { string }
+ local argv = { agent.command, "-p", "--model", agent.model }
+ if agent.effort then
+  table.insert(argv, "--thinking")
+  table.insert(argv, agent.effort)
+ end
+ table.insert(argv, M.request(promptPath))
+ return argv
 end
 
 -- The first `omp` in the directories of `path` (a colon-separated PATH value) that `exists`.

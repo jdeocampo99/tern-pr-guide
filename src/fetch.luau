@@ -335,17 +335,46 @@ function M.submitReview(pr: Pr.PR, payload: Review.Payload, to: Destination, don
  end)
 end
 
--- The reader's agent: `omp` on their shell's PATH with the model of its review role, else its
--- default role. Calls `done` once, with nil when either is missing. `omp` is looked up as a file
--- because an interactive shell may define it as an alias.
+-- Where the model and effort the reader last picked are kept, in the plugin's key/value store.
+local CHOICE_KEY = "model"
+
+-- The model the reader last picked, else the one of OMP's review role, else its default role, as
+-- the model and its effort; nil when there is none.
+local function chosenModel(config: string): (string?, string?)
+ local ok, saved = pcall(tern.kv.get, CHOICE_KEY)
+ if ok and type(saved) == "table" and type(saved.model) == "string" then
+  return saved.model, if type(saved.effort) == "string" then saved.effort else nil
+ end
+ local raw = if tern.fs.exists(config) then Agent.reviewModel(tern.fs.read(config)) else nil
+ if not raw then return nil, nil end
+ return Agent.parseChoice(raw)
+end
+
+-- The reader's agent: `omp` on their shell's PATH with the model they last picked or OMP's review
+-- model. Calls `done` once, with nil when either is missing. `omp` is looked up as a file because
+-- an interactive shell may define it as an alias.
 function M.findAgent(done: (agent: Agent.Agent?) -> ())
  local home = tern.getenv("HOME")
  if not home then return done(nil) end
  withShellPath(function(path)
   local command = Agent.findOnPath(path, tern.fs.exists)
-  local config = home .. Agent.CONFIG
-  local model = if command and tern.fs.exists(config) then Agent.reviewModel(tern.fs.read(config)) else nil
-  done(if model then Agent.new(command :: string, path, model) else nil)
+  if not command then return done(nil) end
+  local model, effort = chosenModel(home .. Agent.CONFIG)
+  done(if model then Agent.new(command, path, model, effort) else nil)
+ end)
+end
+
+-- Remembers `agent`'s model and effort for every PR and the next start.
+function M.saveChoice(agent: Agent.Agent)
+ pcall(tern.kv.set, CHOICE_KEY, { model = agent.model, effort = agent.effort })
+end
+
+-- The models `agent` can run with, from `omp models`. Calls `done` once; the list is empty when
+-- listing fails, which leaves the current model as the only choice.
+function M.listModels(agent: Agent.Agent, done: (models: { Agent.Model }) -> ())
+ run({ agent.command, "models", "--json" }, { env = { PATH = agent.path }, timeout_ms = GH_MS }, function() done({}) end, function(stdout)
+  local ok, raw = pcall(tern.json.decode, stdout)
+  done(if ok then Agent.parseModels(raw) else {})
  end)
 end
 
@@ -363,13 +392,12 @@ function M.generateGuide(agent: Agent.Agent, repo: Repo, pr: Pr.PR, done: (Guide
   tern.fs.write(diffPath, Agent.numberedDiff(pr.files))
   tern.fs.write(promptPath, Agent.prompt(tern.fs.read(PROMPT), {
    repo = pr.repo, number = tostring(pr.number), title = pr.title, head = pr.head,
-   base = refPrefix(pr.number) .. "/base", diffPath = diffPath, guidePath = guidePath, author = agent.name,
+   base = refPrefix(pr.number) .. "/base", diffPath = diffPath, guidePath = guidePath, author = Agent.name(agent),
   }))
  end)
  if not prepared then return fail(Text.errorLine(err)) end
- local argv = { agent.command, "-p", "--model", agent.model, Agent.request(promptPath) }
- run(argv, { cwd = repo.root, env = { PATH = agent.path }, timeout_ms = AGENT_MS }, fail, function()
-  if not tern.fs.exists(guidePath) then return fail(agent.name .. " finished without writing " .. guidePath) end
+ run(Agent.argv(agent, promptPath), { cwd = repo.root, env = { PATH = agent.path }, timeout_ms = AGENT_MS }, fail, function()
+  if not tern.fs.exists(guidePath) then return fail(Agent.name(agent) .. " finished without writing " .. guidePath) end
   local guide, problem = Guide.read(guidePath, pr)
   if guide then return done(guide, nil) end
   local kept = dir .. "/guide.json"

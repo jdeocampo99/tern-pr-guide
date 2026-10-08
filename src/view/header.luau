@@ -4,6 +4,7 @@ local Agent = require("../agent")
 local Guide = require("../guide")
 local Help = require("./help")
 local Review = require("../review")
+local ModelPanel = require("./model-panel")
 local ReviewPanel = require("./review-panel")
 local SearchPanel = require("./search-panel")
 local State = require("../state")
@@ -31,16 +32,19 @@ local function headerAction(label: string, keyHint: string?, action: string): No
  return el("span", { class = "gp-hdr-act", actions = { click = action } }, kids)
 end
 
--- A row offering the reader's AI agent to write a guide, with why the last run failed, or the run
--- going.
-local function aiRow(run: Agent.Run): Node
+-- A row offering the reader's AI agent to write a guide, with the model and effort it will use (a
+-- button opening the model dropdown) and why the last run failed, or the run going.
+local function aiRow(run: Agent.Run, open: boolean): Node
  if run.running then
   local clock = string.format("%d:%02d", math.floor(run.seconds / 60), run.seconds % 60)
-  return el("div", { class = "gp-ai" }, { span("gp-ai-running", "Generating AI guided review with " .. run.agent.name .. "… " .. clock) })
+  return el("div", { class = "gp-ai" }, { span("gp-ai-running", "Generating AI guided review with " .. Agent.label(run.agent) .. "… " .. clock) })
  end
  local kids = {
   Ui.button("gp-btn-primary gp-ai-button", "Generate AI Guided Review", "generate-guide"),
-  span("gp-ai-model", run.agent.name),
+  el("span", { class = "gp-ai-model" .. (if open then " gp-ai-model-open" else ""), actions = { click = "toggle-models" } }, {
+   span("gp-ai-model-name", Agent.label(run.agent)),
+   span("gp-ai-model-caret", if open then "▴" else "▾"),
+  }),
  }
  if run.error then table.insert(kids, span("gp-ai-error", "Couldn't generate it: " .. run.error)) end
  return el("div", { class = "gp-ai" }, kids)
@@ -81,7 +85,10 @@ function M.view(s: State.State): Node
   el("div", { class = "gp-title" }, { span("gp-title-num", "#" .. pr.number), span("gp-title-text", pr.title), Ui.spacer(), reviewButton(s, counts.included) }),
   status(s, counts),
  }
- if s.ai then table.insert(parts, aiRow(s.ai)) end
+ if s.ai then
+  table.insert(parts, aiRow(s.ai, s.models ~= nil))
+  if s.models then table.insert(parts, ModelPanel.view(s.models, s.ai.agent)) end
+ end
  if s.search then table.insert(parts, SearchPanel.view(s.search, s.review.guide.guided)) end
  if s.helpOpen then table.insert(parts, Help.view(s.closing.help == true, s.review.guide.guided)) end
  if s.reviewOpen then table.insert(parts, ReviewPanel.view(s)) end

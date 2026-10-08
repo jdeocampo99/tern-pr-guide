@@ -28,6 +28,16 @@ local function searchKey(key: Key): Action?
  return nil
 end
 
+local function modelsKey(key: Key): Action?
+ local name = key.name
+ if name == "down" then return act("models-move", 1) end
+ if name == "up" then return act("models-move", -1) end
+ if name == "tab" then return act("models-effort", if key.shift then -1 else 1) end
+ if name == "enter" then return act("models-pick") end
+ if name == "escape" then return act("toggle-models") end
+ return nil
+end
+
 local function reviewKey(s: State.State, key: Key): Action?
  local name = key.name
  local typed = key.text or name
@@ -75,6 +85,7 @@ end
 function M.action(s: State.State, key: Key): Action?
  local mode = State.mode(s)
  if mode == "search" then return searchKey(key) end
+ if mode == "models" then return modelsKey(key) end
  if mode == "composer" or mode == "summary" then return nil end
  if mode == "review" and not isQuestionMark(key) then return reviewKey(s, key) end
  return readingKey(s, key)
@@ -96,6 +107,8 @@ end
 function M.afterTyping(mode: State.Mode, outcome: Fields.Outcome): Action?
  if mode == "search" then
   return if outcome == "changed" then act("search-run") else nil
+ elseif mode == "models" then
+  return if outcome == "changed" then act("models-filter") else nil
  elseif mode == "composer" then
   if outcome == "submit" then return act("comment-save") end
   if outcome == "cancel" then return act("comment-cancel") end

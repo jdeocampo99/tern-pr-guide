@@ -323,6 +323,42 @@ local ACTIONS: { [string]: Handler } = {
  ["search-go"] = function(s, cx, n) searchGo(s, cx, tonumber(n) :: number) end,
  ["search-close"] = function(s) s.search = nil end,
 
+ -- the model dropdown
+ ["toggle-models"] = function(s, cx)
+  local run = s.ai
+  if s.models or not run or run.running then
+   s.models = nil
+   return
+  end
+  State.openModels(s, run.agent)
+  frameLater(cx, { { "focus", Page.modelFieldPath }, { "reveal", Page.modelRowPath((s.models :: State.ModelBox).selected), "nearest" } })
+ end,
+ ["models-filter"] = function(s) (s.models :: State.ModelBox).selected = 1 end,
+ ["models-move"] = function(s, cx, delta)
+  local box = s.models :: State.ModelBox
+  State.moveModel(box, (s.ai :: Agent.Run).agent, tonumber(delta) :: number)
+  frameLater(cx, { { "reveal", Page.modelRowPath(box.selected), "nearest" } })
+ end,
+ ["models-effort"] = function(s, _, delta) State.stepEffort(s.models :: State.ModelBox, (s.ai :: Agent.Run).agent, tonumber(delta) :: number) end,
+ ["models-pick"] = function(s)
+  local agent = (s.ai :: Agent.Run).agent
+  if State.chooseModel(s.models :: State.ModelBox, agent) then
+   Fetch.saveChoice(agent)
+   s.models = nil
+  end
+ end,
+ -- A click on a model or an effort applies it and leaves the dropdown open for the other.
+ ["model-row"] = function(s, _, n)
+  local box, agent = s.models :: State.ModelBox, (s.ai :: Agent.Run).agent
+  box.selected = tonumber(n) :: number
+  if State.chooseModel(box, agent) then Fetch.saveChoice(agent) end
+ end,
+ ["model-effort"] = function(s, _, effort)
+  local box, agent = s.models :: State.ModelBox, (s.ai :: Agent.Run).agent
+  box.effort = effort
+  if State.chooseModel(box, agent) then Fetch.saveChoice(agent) end
+ end,
+
  -- the review
  ["open-review"] = function(s) State.openReview(s) end,
  ["toggle-review"] = function(s, cx)
@@ -510,6 +546,10 @@ local block: BlockDef<Block> = {
     b.ai = { agent = agent, running = false, seconds = 0, error = nil }
     offerAgent(b)
     cx:render()
+    Fetch.listModels(agent, function(models)
+     agent.models = models
+     cx:render()
+    end)
    end)
    Fetch.findRepo(dir, function(repo, err)
     if not repo then

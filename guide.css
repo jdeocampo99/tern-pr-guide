@@ -783,3 +783,20 @@
 /* press feedback on buttons */
 .gp-btn, .gp-rv-button, .gp-rv-submit { transition: transform 120ms cubic-bezier(0.23, 1, 0.32, 1), background-color 160ms ease, border-color 160ms ease, color 160ms ease, filter 140ms ease; }
 .gp-btn:active, .gp-rv-button:active, .gp-rv-submit:active { transform: scale(0.97); }
+/* the model dropdown: a button beside the AI button, a filter, the models and their efforts */
+.gp-ai-model { display: flex; gap: 6px; align-items: center; padding: 3px 8px; border-radius: 6px; border: 1px solid transparent; cursor: pointer; font-family: ui-monospace, "SF Mono", Menlo, monospace; transition: background-color 140ms ease, border-color 140ms ease; }
+.gp-ai-model:hover, .gp-ai-model-open { background: light-dark(#eef0f3, #2a2c31); border-color: light-dark(#d0d4da, #3a3d45); color: light-dark(#111, #fff); }
+.gp-ai-model-caret { font-size: 10px; }
+.gp-md-list { max-height: 300px; overflow-y: auto; }
+.gp-md-row { display: flex; gap: 12px; align-items: baseline; padding: 6px 10px; border-radius: 7px; cursor: pointer; }
+.gp-md-row:hover { background: light-dark(#f2f3f5, #2a2c31); }
+.gp-md-row-on, .gp-md-row-on:hover { background: light-dark(#e9f0fc, #22304a); }
+.gp-md-check { width: 14px; flex-shrink: 0; color: light-dark(#2f6fe0, #8ab4ff); }
+.gp-md-name { font-family: -apple-system, "SF Pro Text", "Helvetica Neue", sans-serif; font-size: 14px; }
+.gp-md-sel { font-size: 12px; color: light-dark(#8a8f98, #7d838d); }
+.gp-md-efforts { display: flex; gap: 6px; align-items: center; padding: 10px 4px 2px; border-top: 1px solid light-dark(#e3e5e8, #2c2e33); margin-top: 6px; }
+.gp-md-label { font-family: -apple-system, "SF Pro Text", "Helvetica Neue", sans-serif; font-size: 12px; font-weight: 600; color: light-dark(#8a8f98, #7d838d); margin-right: 6px; }
+.gp-md-effort { padding: 3px 10px; border-radius: 6px; border: 1px solid light-dark(#d0d4da, #3a3d45); font-size: 12.5px; cursor: pointer; transition: background-color 140ms ease, border-color 140ms ease; }
+.gp-md-effort:hover { background: light-dark(#f2f3f5, #2a2c31); }
+.gp-md-effort-on, .gp-md-effort-on:hover { background: light-dark(#2f6fe0, #3b6fd8); border-color: transparent; color: #fff; }
+.gp-md-none, .gp-md-hint { font-family: -apple-system, "SF Pro Text", "Helvetica Neue", sans-serif; font-size: 12px; color: light-dark(#8a8f98, #7d838d); }

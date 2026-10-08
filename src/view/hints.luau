@@ -9,6 +9,7 @@ local el, span = Ui.el, Ui.span
 
 local FIXED: { [State.Mode]: { title: string, keys: { { string } } } } = {
  search = { title = "Searching", keys = { { "↑ ↓", "choose" }, { "⏎", "go there" }, { "esc", "close" } } },
+ models = { title = "Choosing a model", keys = { { "↑ ↓", "choose" }, { "tab", "effort" }, { "⏎", "use it" }, { "esc", "close" } } },
  composer = { title = "Writing a comment", keys = { { "⏎", "save" }, { "⇧ ⏎", "new line" }, { "esc", "cancel" } } },
  summary = { title = "Editing the summary", keys = { { "⏎", "done" }, { "⇧ ⏎", "new line" }, { "esc", "done" } } },
  review = { title = "Finishing your review", keys = { { "j k", "move" }, { "x", "include or leave out" }, { "a", "include / exclude all" }, { "1 2 3", "verdict" }, { "e", "edit summary" }, { "⌘ ⏎", "submit" }, { "esc", "close" } } },
