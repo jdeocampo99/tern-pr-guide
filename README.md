@@ -18,8 +18,8 @@ explanation.
   comment, approve, or request changes as one review.
 - **An AI reviewer you choose.** One button (or `⇧G`) has your own [OMP](https://omp.sh) agent read
   the PR and write a guided review, in the spirit of Linear Diffs. Pick any model and effort level
-  OMP offers.
-- **The PR as a story.** The guide opens with a short overview and a before/after diagram, then
+  OMP offers, and a [lens](#review-lenses) such as Security or Teaching to steer what it looks for.
+- **The PR as a story.** The review opens with a short overview and a before/after diagram, then
   breaks the PR into a few changes, each with small steps you tick off as you go.
 - **Comments you'd actually post.** Suggested comments are written like a kind, busy teammate:
   short, specific, and friendly. Keep the ones you agree with, drop the rest.
@@ -36,7 +36,7 @@ moves on. **Mark all reviewed** in the header (`m`) ticks every file at once, an
 
 ![A step with its code and a suggested comment](docs/screenshots/step.png)
 
-**Suggested comments, if you want them.** A guide can come with suggested review comments. Add the
+**Suggested comments, if you want them.** The AI review comes with suggested review comments. Add the
 ones you agree with (`a`), dismiss the rest (`d`), or write your own: hover a changed line and click
 `+`, or press `c` on a step.
 
@@ -74,14 +74,17 @@ To work on the plugin itself, clone it and use `tern plugin link /path/to/tern-p
 
 ## Review a PR
 
-In a terminal inside your clone, open the command palette, choose **Review a pull request**, and
+In a terminal inside your clone, open the command palette, choose **New PR review block**, and
 pick a PR. Type to filter by number, title, author or branch, or paste a PR number or link and
 press `⏎`. The PR for the branch you're on is listed first.
 
 ![Picking a pull request](docs/screenshots/picker.png)
 
-To open it with a key, bind the action `plugin.prguide.review` in Tern's keybind settings.
-**PR Guide: sample** in the palette opens a built-in sample, so you can try it without a PR.
+Two shortcuts work anywhere in Tern: `⌥⌘R` opens **New PR review block**, and `⌥⇧⌘R` opens **New AI
+generated PR review block**, which starts the AI review as soon as you pick a PR (see
+[AI guided review](#ai-guided-review)). To use other keys, bind the actions `plugin.prguide.review`
+and `plugin.prguide.generate` in Tern's keybind settings. **New PR Guide sample block** in the
+palette opens a built-in sample, so you can try it without a PR.
 
 Submitting posts to GitHub after that confirm step. To rehearse without posting, open the page
 from Lua with `post=false`: the button reads "Save (dry run)" and the review is saved to
@@ -97,29 +100,26 @@ cx:new_block("prguide.guide", {"pr=123", "repo=/path/to/your/clone"}, "tab")
 |---|---|
 | `repo=` | path inside your local clone; on its own, it opens the picker |
 | `pr=` | PR number or URL, opened straight away |
-| `guide=` | guide file to use instead of the clone's (see below) |
+| `guide=` | a saved review (JSON) to open instead of the clone's; see [GUIDE.md](GUIDE.md) |
 | `post=false` | dry run: save the review to `/tmp/prguide-review-<n>.json` instead of posting |
+| `generate=true` | start the AI guided review as soon as the PR opens; a PR that already has a review just opens |
 
 Behind the scenes it runs `gh pr view` once, fetches the PR into `refs/prguide/<n>/*` in your clone
 (your branches and working tree are untouched), and diffs locally. Lockfiles and files marked
 `linguist-generated` are left out. Remove the refs afterwards with
 `git update-ref -d refs/prguide/<n>/head` (and `/base`).
 
-## Guides
-
-The page works on any PR as-is: the changed files in a folder tree, like GitHub, one file at a time. A **guide file** adds the walkthrough:
-the overview, the diagram, the changes and their steps, suggested comments and a drafted summary.
-Any tool can write one (an AI reviewer, a script, a person). The format is in [GUIDE.md](GUIDE.md).
-
-Put a PR's guide at `.git/prguide/<number>.json` in your clone (worktrees share it, and nothing is
-committed). Opening that PR uses it, and the picker marks PRs that have one with **Guide**.
-
 ## AI guided review
 
-With [OMP](https://omp.sh) installed, a PR without a guide shows a **Generate AI Guided Review**
-button, with the model and effort it will use beside it. Click it (or press `⇧G`) and your agent
-reads the PR and writes the guide; the page turns into the guided review when it's done. It takes a
-few minutes, and you can keep reading meanwhile.
+With [OMP](https://omp.sh) installed, a PR without a guided review shows a **Generate AI Guided
+Review** button, with the lens, model and effort it will use beside it. Click it (or press `⇧G`) and
+your agent reads the PR and writes the review; the page turns into the walkthrough when it's done.
+It takes a few minutes, and you can keep reading meanwhile.
+
+To skip the button, choose **New AI generated PR review block** (`⌥⇧⌘R`) in the palette and pick a
+PR: the review starts as soon as it opens, with the model and lens you last picked. A PR that
+already has a review just opens, and if OMP or a model isn't available the PR opens as usual with a
+note saying why.
 
 - Click the model, or press `⇧M`, to pick another: type to search the models OMP lists, `↑`/`↓` for
   the model, `←`/`→` for the effort, `⏎` to use it. Your pick is remembered for every PR.
@@ -127,10 +127,47 @@ few minutes, and you can keep reading meanwhile.
   `~/.omp/agent/config.yml`, else `modelRoles.default`. Without `omp` on your login shell's PATH or
   a model, there is no button.
 - It runs on your model, so it costs about what a normal AI review does.
-- The guide is saved to `.git/prguide/<n>.json`, so reopening the PR is instant. Any tool can write
-  that file instead; the format is in [GUIDE.md](GUIDE.md).
+- Reviews are saved in your clone (worktrees share them, and nothing is committed), so reopening a
+  PR is instant and never runs the AI again.
+
+## Review lenses
+
+A lens tells the AI what to look for. Pick one in the same menu as the model (click it, or press
+`⇧M`, then click a lens or use `⇧←` `⇧→`). Your pick is remembered, and a finished review says which
+lens it was written with.
+
+- **Balanced** (the default): a clear walkthrough of the whole PR.
+- **Security**: reads the PR like an attacker, flagging anything that could be misused.
+- **Architecture**: how the change fits the codebase, and what it will cost to live with.
+- **Quick skim**: the big picture in a few steps, and only the comments that matter.
+- **Teaching**: explains the code for someone new to it.
+
+**Add your own.** Choose **Edit lenses…** in the menu (or press `⌃E`). It opens your lenses folder,
+with a README that explains the format. A lens is one markdown file: a `# Name`, a line saying what
+it's for, then your instructions.
+
+```markdown
+# Performance
+
+Hunts for slow paths and wasted work.
+
+Look for work done in loops that could be done once, queries inside loops, needless copying, and
+blocking calls on hot paths. Only comment on things that would matter at scale.
+```
+
+A lens with the name of a built-in one replaces it. The review is always written in the same format,
+whatever a lens says.
+
+## For tool authors
+
+A review is a JSON file at `.git/prguide/<number>.json` in the clone. Any tool (a script, another
+AI, a person) can write one, and the page uses it when that PR opens. The format is in
+[GUIDE.md](GUIDE.md).
 
 ## Keys
+
+Anywhere in Tern: `⌥⌘R` opens **New PR review block** and `⌥⇧⌘R` opens **New AI generated PR
+review block** (see [AI guided review](#ai-guided-review)).
 
 | Reading | | Reacting | | Finishing | |
 |---|---|---|---|---|---|

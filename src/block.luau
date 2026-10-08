@@ -21,7 +21,7 @@ type Handler = (s: State, cx: BlockCx, value: string) -> ()
 
 -- How the block was opened: a PR and its checkout, a directory to pick a PR from (empty when the
 -- palette command knew none), or neither for the bundled sample.
-type Options = { pr: string?, repo: string?, guide: string?, post: boolean }
+type Options = { pr: string?, repo: string?, guide: string?, post: boolean, generate: boolean? }
 
 -- The review page once its PR has loaded; before that, the PR picker or what loading is doing.
 type Block = {
@@ -36,9 +36,13 @@ type Block = {
  guided: boolean,
  -- The reader's AI agent, once found, and its run writing a guide.
  ai: Agent.Run?,
+ -- Why the agent isn't available, once looked for and missing.
+ noAgent: string?,
+ -- `generate=true` has been settled: a run started, or a reason not to.
+ autoDone: boolean?,
 }
 
-local ARGS = "repo=<directory> to pick a PR, or pr=<number or URL> with repo=<checkout path>, optionally guide=<file> and post=false for a dry run"
+local ARGS = "repo=<directory> to pick a PR, or pr=<number or URL> with repo=<checkout path>, optionally guide=<file>, post=false for a dry run and generate=true to start an AI guided review once the PR opens"
 local SAMPLE_GUIDE = "fixtures/guide-350.json"
 
 -- The closing animations in guide.css last 150-200 ms.
@@ -336,6 +340,7 @@ local ACTIONS: { [string]: Handler } = {
    s.models = nil
    return
   end
+  Fetch.refreshLenses(run.agent)
   State.openModels(s, run.agent)
   frameLater(cx, { { "focus", Page.modelFieldPath } })
  end,
@@ -364,6 +369,21 @@ local ACTIONS: { [string]: Handler } = {
   local box, agent = s.models :: State.ModelBox, (s.ai :: Agent.Run).agent
   box.effort = effort
   if State.chooseModel(box, agent) then Fetch.saveChoice(agent) end
+ end,
+ -- A lens applies at once and leaves the dropdown open, like an effort click.
+ ["models-lens"] = function(s, _, delta)
+  local agent = (s.ai :: Agent.Run).agent
+  State.stepLens(agent, tonumber(delta) :: number)
+  Fetch.saveChoice(agent)
+ end,
+ ["model-lens"] = function(s, _, n)
+  local agent = (s.ai :: Agent.Run).agent
+  if State.chooseLens(agent, tonumber(n) :: number) then Fetch.saveChoice(agent) end
+ end,
+ ["edit-lenses"] = function(s, cx)
+  local folder, err = Fetch.prepareLensFolder()
+  s.models = nil
+  if folder then cx:open(folder) else cx:toast("error", "Couldn't open your lenses folder", err) end
  end,
 
  -- the review
@@ -399,18 +419,21 @@ local function options(args: { string }): (Options?, string?)
  local given: { [string]: string } = {}
  for _, arg in args do
   local name, value = string.match(arg, "^(%a+)=(.*)$")
-  if name ~= "pr" and name ~= "repo" and name ~= "guide" and name ~= "post" then
+  if name ~= "pr" and name ~= "repo" and name ~= "guide" and name ~= "post" and name ~= "generate" then
    return nil, "Unknown argument \"" .. arg .. "\". The block takes " .. ARGS .. "."
   end
-  if name == "post" and value ~= "true" and value ~= "false" then
-   return nil, "post= takes true or false, not \"" .. value .. "\". The block takes " .. ARGS .. "."
+  if (name == "post" or name == "generate") and value ~= "true" and value ~= "false" then
+   return nil, name .. "= takes true or false, not \"" .. value .. "\". The block takes " .. ARGS .. "."
   end
   given[name :: string] = value :: string
  end
  local pr, repo = given.pr, given.repo
- if not pr and not repo then return { guide = given.guide or SAMPLE_GUIDE, post = false }, nil end
+ if not pr and not repo then
+  if given.generate == "true" then return nil, "generate=true needs repo=. The block takes " .. ARGS .. "." end
+  return { guide = given.guide or SAMPLE_GUIDE, post = false }, nil
+ end
  if pr and (repo or "") == "" then return nil, "pr= needs repo=. The block takes " .. ARGS .. "." end
- return { pr = pr, repo = repo, guide = given.guide, post = given.post ~= "false" }, nil
+ return { pr = pr, repo = repo, guide = given.guide, post = given.post ~= "false", generate = given.generate == "true" }, nil
 end
 
 local function nameOf(pr: string?): string
@@ -482,6 +505,22 @@ local function generate(b: Block, cx: BlockCx)
  end)
 end
 
+-- With `generate=true`, starts the run as soon as the PR's page and the agent are both ready: the
+-- page shows the run going. A PR with a guide opens as it is, and with no agent the page opens
+-- as usual and a toast says why. Decided once.
+local function autoGenerate(b: Block, cx: BlockCx)
+ if not b.opts.generate or b.autoDone or not b.page then return end
+ if b.guided then
+  b.autoDone = true
+ elseif b.ai then
+  b.autoDone = true
+  generate(b, cx)
+ elseif b.noAgent then
+  b.autoDone = true
+  cx:toast("info", "No AI guided review was started", "The page opened without one: " .. b.noAgent .. ".")
+ end
+end
+
 -- Loads `pr` from the block's checkout, showing each stage, then shows it.
 local function openPr(b: Block, cx: BlockCx, pr: string)
  b.picker, b.name = nil, nameOf(pr)
@@ -490,6 +529,7 @@ local function openPr(b: Block, cx: BlockCx, pr: string)
   cx:render()
  end, function(loaded, err)
   if loaded then showPr(b, loaded) else b.notice = Notice.failed(b.name, err :: string) end
+  autoGenerate(b, cx)
   cx:render()
  end)
 end
@@ -555,10 +595,15 @@ local block: BlockDef<Block> = {
   end
   -- Starts after init returns, so each stage renders over a block that exists.
   tern.timer(0, function()
-   Fetch.findAgent(function(agent)
-    if not agent then return end
+   Fetch.findAgent(function(agent, why)
+    if not agent then
+     b.noAgent = why or "the AI agent isn't available"
+     autoGenerate(b, cx)
+     return
+    end
     b.ai = { agent = agent, running = false, seconds = 0, expected = 0, error = nil }
     offerAgent(b)
+    autoGenerate(b, cx)
     cx:render()
     Fetch.listModels(agent, function(models)
      agent.models = models

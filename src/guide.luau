@@ -40,6 +40,8 @@ export type Guide = {
  head: string?,
  -- Who suggested the comments.
  author: string,
+ -- The review lens the guide was written through, when it says.
+ lens: string?,
  overview: string,
  flow: Flow?,
  changes: { Change },
@@ -212,6 +214,7 @@ function M.parse(raw: any, pr: Pr.PR): Guide?
   guided = guided,
   head = if type(raw.head) == "string" then raw.head else nil,
   author = if type(raw.author) == "string" and raw.author ~= "" then raw.author else DEFAULT_AUTHOR,
+  lens = if type(raw.lens) == "string" and raw.lens ~= "" then raw.lens else nil,
   overview = text(raw.overview, ""),
   flow = parseFlow(raw.flow, #changes),
   changes = changes,
@@ -227,6 +230,7 @@ function M.defaultGuide(pr: Pr.PR): Guide
   guided = false,
   head = pr.head,
   author = DEFAULT_AUTHOR,
+  lens = nil,
   overview = "",
   flow = nil,
   changes = singleChange(pr),
@@ -243,7 +247,7 @@ function M.read(path: string, pr: Pr.PR): (Guide?, string?)
  end)
  if not decoded then return nil, Text.errorLine(raw) end
  local guide = M.parse(raw, pr)
- if not guide then return nil, "not a guide file (expected \"schema\": " .. SCHEMA .. ")" end
+ if not guide then return nil, "not a guided review (expected \"schema\": " .. SCHEMA .. ")" end
  return guide, nil
 end
 

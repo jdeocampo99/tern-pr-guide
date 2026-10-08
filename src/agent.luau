@@ -1,6 +1,7 @@
 --!strict
 -- The reader's own AI agent (OMP) writing a guide: the model and effort it reviews with, the models
 -- it can pick from, and the files a run reads. src/fetch.luau finds the agent and runs it.
+local Lens = require("./lens")
 local Pr = require("./pr")
 
 -- One model `omp models` lists: what `--model` takes, its display name, and the thinking levels
@@ -8,8 +9,9 @@ local Pr = require("./pr")
 export type Model = { selector: string, name: string, efforts: { string } }
 
 -- `omp` as the login shell finds it, that shell's PATH (`omp` runs on an interpreter found there),
--- the model and effort a run uses, and the models there are to choose from (empty until listed).
-export type Agent = { command: string, path: string, model: string, effort: string?, models: { Model } }
+-- the model and effort a run uses, the models there are to choose from (empty until listed), the
+-- lenses there are to review through and the name of the one a run uses.
+export type Agent = { command: string, path: string, model: string, effort: string?, models: { Model }, lenses: { Lens.Lens }, lens: string }
 
 -- Writing a guide for the page's PR: whether a run is going, the seconds it has taken so far, how
 -- long a run is expected to take, and the first line of why the last run failed.
@@ -41,8 +43,8 @@ function M.parseChoice(raw: string): (string, string?)
  return raw, nil
 end
 
-function M.new(command: string, path: string, model: string, effort: string?): Agent
- return { command = command, path = path, model = model, effort = effort, models = {} }
+function M.new(command: string, path: string, model: string, effort: string?, lens: string): Agent
+ return { command = command, path = path, model = model, effort = effort, models = {}, lenses = {}, lens = lens }
 end
 
 -- The model without its provider, as the page names it.
@@ -53,6 +55,11 @@ end
 -- The model and effort, as the model button shows them.
 function M.label(agent: Agent): string
  return M.name(agent) .. (if agent.effort then " · " .. agent.effort else "")
+end
+
+-- The lens a run reviews through.
+function M.currentLens(agent: Agent): Lens.Lens
+ return Lens.pick(agent.lenses, agent.lens)
 end
 
 -- The chat models in `omp models --json` output, decoded; empty when it isn't that shape.
@@ -174,6 +181,16 @@ function M.prompt(template: string, values: { [string]: string }): string
  return (string.gsub(template, "{{(%w+)}}", function(name: string): string
   return values[name] or "{{" .. name .. "}}"
  end))
+end
+
+-- The prompt section that has the agent review through `lens`: nothing for a lens without
+-- instructions, so a plain review reads as it always did.
+function M.focus(lens: Lens.Lens): string
+ if lens.instructions == "" then return "" end
+ return "## Review lens: " .. lens.name .. "\n\n"
+  .. "The reader chose this lens. It changes what you look for and how you word things, never the "
+  .. "format you write below, which stays exactly the same.\n\n"
+  .. lens.instructions .. "\n\n"
 end
 
 -- The one message `omp -p` gets.

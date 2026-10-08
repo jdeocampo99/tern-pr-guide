@@ -1,11 +1,12 @@
 --!strict
 -- Where the plugin reaches outside itself: `gh` for the PR list, the PR's metadata and posting the
 -- review, `git` in the local checkout for the PR's changes and files, the checkout's guide files,
--- and the reader's AI agent writing one. Each step starts the next from its callback; the first
--- failure ends the chain with a message naming the step.
+-- the review lens files, and the reader's AI agent writing a guide. Each step starts the next from
+-- its callback; the first failure ends the chain with a message naming the step.
 local Agent = require("./agent")
 local GitOutput = require("./git-output")
 local Guide = require("./guide")
+local Lens = require("./lens")
 local Picker = require("./picker")
 local Pr = require("./pr")
 local Review = require("./review")
@@ -31,6 +32,9 @@ local GIT_FETCH_MS = 300_000
 local AGENT_MS = 20 * 60_000
 
 local PROMPT = "prompts/guide.md"
+-- The plugin's own lenses, and the most a lens file may be.
+local LENSES = "lenses"
+local LENS_BYTES = 64 * 1024
 
 -- What went wrong: stderr's first line, plus GitHub's own explanation, which `gh api` prints to stdout.
 local function reason(result: ProcessResult): string
@@ -335,14 +339,19 @@ function M.submitReview(pr: Pr.PR, payload: Review.Payload, to: Destination, don
  end)
 end
 
--- Where the model and effort the reader last picked are kept, in the plugin's key/value store.
+-- Where the model, effort and lens the reader last picked are kept, in the plugin's key/value store.
 local CHOICE_KEY = "model"
+
+local function savedChoice(): { [string]: any }
+ local ok, saved = pcall(tern.kv.get, CHOICE_KEY)
+ return if ok and type(saved) == "table" then saved else {}
+end
 
 -- The model the reader last picked, else the one of OMP's review role, else its default role, as
 -- the model and its effort; nil when there is none.
 local function chosenModel(config: string): (string?, string?)
- local ok, saved = pcall(tern.kv.get, CHOICE_KEY)
- if ok and type(saved) == "table" and type(saved.model) == "string" then
+ local saved = savedChoice()
+ if type(saved.model) == "string" then
   return saved.model, if type(saved.effort) == "string" then saved.effort else nil
  end
  local raw = if tern.fs.exists(config) then Agent.reviewModel(tern.fs.read(config)) else nil
@@ -351,22 +360,65 @@ local function chosenModel(config: string): (string?, string?)
 end
 
 -- The reader's agent: `omp` on their shell's PATH with the model they last picked or OMP's review
--- model. Calls `done` once, with nil when either is missing. `omp` is looked up as a file because
--- an interactive shell may define it as an alias.
-function M.findAgent(done: (agent: Agent.Agent?) -> ())
+-- model, and the lens they last picked. Calls `done` once, with nil and why when `omp` or the
+-- model is missing. `omp` is looked up as a file because an interactive shell may define it as an alias.
+function M.findAgent(done: (agent: Agent.Agent?, why: string?) -> ())
  local home = tern.getenv("HOME")
- if not home then return done(nil) end
+ if not home then return done(nil, "your home directory is unknown") end
  withShellPath(function(path)
   local command = Agent.findOnPath(path, tern.fs.exists)
-  if not command then return done(nil) end
+  if not command then return done(nil, "omp isn't installed (it isn't on your shell's PATH)") end
   local model, effort = chosenModel(home .. Agent.CONFIG)
-  done(if model then Agent.new(command, path, model, effort) else nil)
+  if not model then return done(nil, "omp has no model set (pick one in omp first)") end
+  local lens = savedChoice().lens
+  local agent = Agent.new(command, path, model, effort, if type(lens) == "string" then lens else Lens.DEFAULT)
+  M.refreshLenses(agent)
+  done(agent)
  end)
 end
 
--- Remembers `agent`'s model and effort for every PR and the next start.
+-- Remembers `agent`'s model, effort and lens for every PR and the next start.
 function M.saveChoice(agent: Agent.Agent)
- pcall(tern.kv.set, CHOICE_KEY, { model = agent.model, effort = agent.effort })
+ pcall(tern.kv.set, CHOICE_KEY, { model = agent.model, effort = agent.effort, lens = agent.lens })
+end
+
+-- The folder the reader's own lenses live in.
+function M.lensFolder(): string
+ return tern.plugin.data .. "/lenses"
+end
+
+-- The text of every lens file in `dir`: the `.md` files but the README, none when it can't be read.
+local function lensTexts(dir: string): { string }
+ local texts = {}
+ if not tern.fs.exists(dir) then return texts end
+ local listed, names = pcall(tern.fs.list, dir)
+ if not listed then return texts end
+ for _, name in names do
+  if string.lower(string.sub(name, -3)) == ".md" and string.lower(name) ~= "readme.md" and string.sub(name, 1, 1) ~= "." then
+   local read, text = pcall(tern.fs.read, dir .. "/" .. name, LENS_BYTES)
+   if read then table.insert(texts, text) end
+  end
+ end
+ return texts
+end
+
+-- Lists the lenses `agent` can review through again: the plugin's own and the reader's, which
+-- may have changed since the last look.
+function M.refreshLenses(agent: Agent.Agent)
+ agent.lenses = Lens.assemble(lensTexts(LENSES), lensTexts(M.lensFolder()))
+end
+
+-- Makes sure the reader's lens folder exists, with the README explaining lenses in it, and gives
+-- its path; or says why it can't.
+function M.prepareLensFolder(): (string?, string?)
+ local dir = M.lensFolder()
+ local ok, err = pcall(function()
+  tern.fs.mkdir(dir)
+  local readme = dir .. "/README.md"
+  if not tern.fs.exists(readme) then tern.fs.write(readme, tern.fs.read(LENSES .. "/README.md")) end
+ end)
+ if ok then return dir, nil end
+ return nil, Text.errorLine(err)
 end
 
 -- How long the last finished run took, which the next run's progress is estimated from; three
@@ -398,6 +450,8 @@ end
 function M.generateGuide(agent: Agent.Agent, repo: Repo, pr: Pr.PR, done: (Guide.Guide?, string?) -> ())
  local dir = Agent.workDir(pr)
  local diffPath, promptPath, guidePath = dir .. "/diff.txt", dir .. "/prompt.md", M.guidePath(repo, pr.number)
+ M.refreshLenses(agent)
+ local lens = Agent.currentLens(agent)
  local fail = function(message: string) done(nil, message) end
  local prepared, err = pcall(function()
   tern.fs.mkdir(dir)
@@ -406,6 +460,7 @@ function M.generateGuide(agent: Agent.Agent, repo: Repo, pr: Pr.PR, done: (Guide
   tern.fs.write(promptPath, Agent.prompt(tern.fs.read(PROMPT), {
    repo = pr.repo, number = tostring(pr.number), title = pr.title, head = pr.head,
    base = refPrefix(pr.number) .. "/base", diffPath = diffPath, guidePath = guidePath, author = Agent.name(agent),
+   lens = tern.json.encode(lens.name), focus = Agent.focus(lens),
   }))
  end)
  if not prepared then return fail(Text.errorLine(err)) end

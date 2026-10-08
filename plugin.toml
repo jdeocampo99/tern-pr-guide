@@ -1,7 +1,7 @@
 schema = 1
 id = "prguide"
 name = "PR Guide"
-version = "0.2.14"
+version = "0.3.0"
 host = "host.luau"
 window = "window.luau"
 styles = ["guide.css"]
@@ -9,4 +9,4 @@ styles = ["guide.css"]
 [[blocks]]
 id = "guide"
 title = "PR Guide"
-palette = true
+palette = false

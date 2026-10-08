@@ -78,11 +78,13 @@ local function busyRow(run: Agent.Run): Node
  })
 end
 
--- A row offering the reader's AI agent to write a guide, with the model and effort it will use (a
--- button opening the model dropdown, `box`, beneath it) and why the last run failed, or the run going.
+-- A row offering the reader's AI agent to write a guide, with the lens, model and effort it will use
+-- (a button opening the model dropdown, `box`, beneath it) and why the last run failed, or the run going.
 local function aiRow(run: Agent.Run, box: State.ModelBox?): Node
  if run.running then return busyRow(run) end
  local anchor = { el("span", { class = "gp-ai-model" .. (if box then " gp-ai-model-open" else ""), key = "button", actions = { click = "toggle-models" } }, {
+  span("gp-ai-model-lens", Agent.currentLens(run.agent).name),
+  span("gp-ai-model-sep", "·"),
   span("gp-ai-model-name", Agent.label(run.agent)),
   span("gp-ai-model-caret", "▾"),
   span("gp-act-key", "⇧M"),
@@ -111,6 +113,10 @@ local function status(s: State.State, counts: Review.Counts): Node
   el("div", { class = "gp-meter" }, cells),
   span("gp-status-text", counts.filesReviewed .. " of " .. total .. " files reviewed"),
  }
+ if r.guide.lens then
+  table.insert(kids, span("gp-status-sep", "·"))
+  table.insert(kids, span("gp-status-text gp-status-lens", r.guide.lens .. " lens"))
+ end
  if counts.waiting > 0 then
   table.insert(kids, span("gp-status-sep", "·"))
   table.insert(kids, el("span", {
@@ -121,7 +127,7 @@ local function status(s: State.State, counts: Review.Counts): Node
  end
  if Guide.isStale(r.guide, r.pr) then
   table.insert(kids, span("gp-status-sep", "·"))
-  table.insert(kids, span("gp-status-text", "Guide written for an older version of this PR"))
+  table.insert(kids, span("gp-status-text", "Review written for an older version of this PR"))
  end
  table.insert(kids, Ui.spacer())
  table.insert(kids, headerAction(if counts.filesReviewed == total then "Unmark all reviewed" else "Mark all reviewed", "m", "mark-all"))

@@ -21,7 +21,7 @@ you only point at it.
   tests, builds, installs or formatters, and change no file except the guide.
 - Only claim what the code supports; say so when you're unsure.
 
-## Write
+{{focus}}## Write
 
 Write one valid JSON object (no comments, no trailing commas) to `{{guidePath}}` and nothing else
 there. Format:
@@ -31,6 +31,7 @@ there. Format:
   "schema": 1,
   "head": "{{head}}",
   "author": "{{author}}",
+  "lens": {{lens}},
   "overview": "...",
   "flow": null,
   "changes": [
@@ -41,6 +42,7 @@ there. Format:
 }
 ```
 
+- `lens`: the review lens you were asked to use; keep it exactly as written above.
 - `overview`: a TL;DR in 2-4 plain sentences for someone who doesn't know the project: what the PR
   does and why, at a high level. Everyday words; skip internal names unless unavoidable.
 - `changes`: 1-4 changes in reading order, about 3-12 steps in all. Each change has a short `title`

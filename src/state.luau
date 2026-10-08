@@ -5,6 +5,7 @@ local Diff = require("./diff")
 local FileTree = require("./file-tree")
 local Fields = require("./text-field")
 local Guide = require("./guide")
+local Lens = require("./lens")
 local Pr = require("./pr")
 local Review = require("./review")
 local Search = require("./search")
@@ -466,6 +467,19 @@ function M.chooseModel(box: ModelBox, agent: Agent.Agent): boolean
  if not model then return false end
  agent.model, agent.effort = model.selector, Agent.effortFor(model, box.effort)
  box.effort = agent.effort
+ return true
+end
+
+-- Has runs use the lens after (`delta` 1) or before (-1) the current one, wrapping round.
+function M.stepLens(agent: Agent.Agent, delta: number)
+ agent.lens = Lens.step(agent.lenses, agent.lens, delta).name
+end
+
+-- Has runs use lens number `n` of the list; false when there is none.
+function M.chooseLens(agent: Agent.Agent, n: number): boolean
+ local lens = agent.lenses[n]
+ if not lens then return false end
+ agent.lens = lens.name
  return true
 end
 

@@ -29,12 +29,17 @@ local function searchKey(key: Key): Action?
 end
 
 -- Arrows: up and down pick the model, left and right its effort (the filter's cursor gives them up;
--- model names are short). Tab steps the effort too.
+-- model names are short). Tab steps the effort too. Shift with left and right steps the review
+-- lens, and ctrl-E opens the folder of the reader's own lenses.
 local function modelsKey(key: Key): Action?
  local name = key.name
  local plain = not (key.shift or key.ctrl or key.meta or key.alt)
  if name == "down" then return act("models-move", 1) end
  if name == "up" then return act("models-move", -1) end
+ local shifted = key.shift and not (key.ctrl or key.meta or key.alt)
+ if shifted and name == "right" then return act("models-lens", 1) end
+ if shifted and name == "left" then return act("models-lens", -1) end
+ if key.ctrl and name == "e" then return act("edit-lenses") end
  if plain and name == "right" then return act("models-effort", 1) end
  if plain and name == "left" then return act("models-effort", -1) end
  if name == "tab" then return act("models-effort", if key.shift then -1 else 1) end

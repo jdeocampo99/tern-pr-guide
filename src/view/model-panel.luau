@@ -1,6 +1,6 @@
 --!strict
 -- The model dropdown, a popover under the model button: a filter, the models matching it grouped by
--- provider, and the efforts the highlighted model takes as one segmented control.
+-- provider, the efforts the highlighted model takes as one segmented control, and the review lens.
 local Agent = require("../agent")
 local Fields = require("../text-field")
 local State = require("../state")
@@ -37,6 +37,35 @@ local function efforts(box: State.ModelBox, model: Agent.Model?): Node?
  })
 end
 
+-- The review lens control: every lens as a segment, the chosen one's description under them, and
+-- the way to the folder of the reader's own lenses.
+local function lenses(agent: Agent.Agent): Node
+ local current = Agent.currentLens(agent)
+ local segments = {}
+ for n, lens in agent.lenses do
+  table.insert(segments, el("span", {
+   class = "gp-md-seg" .. (if lens.name == current.name then " gp-md-seg-on" else ""),
+   key = "l" .. n,
+   text = lens.name,
+   actions = { click = "model-lens=" .. n },
+  }))
+ end
+ return el("div", { class = "gp-md-foot gp-md-lens", key = "lenses" }, {
+  el("div", { class = "gp-md-lens-row", key = "pick" }, {
+   span("gp-md-label", "Lens"),
+   el("div", { class = "gp-md-segs gp-md-segs-wrap", key = "segs" }, segments),
+   span("gp-act-key", "⇧← →"),
+  }),
+  el("div", { class = "gp-md-lens-row", key = "about" }, {
+   span("gp-md-lens-desc", current.description),
+   el("span", { class = "gp-md-edit", key = "edit", actions = { click = "edit-lenses" } }, {
+    span("gp-md-edit-label", "Edit lenses…"),
+    span("gp-act-key", "⌃E"),
+   }),
+  }),
+ })
+end
+
 -- The list starts at match `box.top`, under a row offering the ones above it. Its key changes with
 -- `top`, so the list draws as a fresh scroller at its own start and the wheel scrolls it freely.
 function M.view(box: State.ModelBox, agent: Agent.Agent): Node
@@ -70,6 +99,7 @@ function M.view(box: State.ModelBox, agent: Agent.Agent): Node
  }
  local foot = efforts(box, choices[box.selected])
  if foot then table.insert(kids, foot) end
+ table.insert(kids, lenses(agent))
  return el("div", { class = "gp-md-pop", key = "models" }, kids)
 end
 
