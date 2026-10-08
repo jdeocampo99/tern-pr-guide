@@ -24,10 +24,6 @@ function M.findingRepo(): Notice
  return { title = "Review a pull request", text = "Finding the repository…", error = false }
 end
 
-function M.noRepo(): Notice
- return { title = "Review a pull request", text = "Open this from a terminal inside a GitHub repository.", error = false }
-end
-
 function M.view(notice: Notice): Node
  return el("div", {}, { el("div", { class = "gp-root gp-page", key = "page" }, {
   el("div", { class = "gp-notice", key = "notice" }, {

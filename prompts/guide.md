@@ -6,14 +6,16 @@ you only point at it.
 
 ## Where things are
 
-- You are in a clone of the repository, but its working tree may be on another branch: read the
-  PR's files with `git show {{head}}:<path>`. The PR's changes are `git diff {{base}}...{{head}}`
-  (three dots: from where it branched) and its commits `git log {{base}}..{{head}}`.
+- You are in a git clone of the repository, but its working tree may be on another branch or
+  missing (a bare, partial clone): read the PR's files with `git show {{head}}:<path>`, never from
+  the working tree. The PR's changes are `git diff {{base}}...{{head}}` (three dots: from where it
+  branched) and its commits `git log {{base}}..{{head}}`.
 - PR title: {{title}}
 - Start with `{{diffPath}}`: every changed file's diff, with the new-file line number in front of
   each context and added line. Removed lines have no number and can't take a comment. Take every
   line number you write from it.
-- Read the repository's own guidance (AGENTS.md, CLAUDE.md, CONTRIBUTING.md) when present.
+- Read the repository's own guidance (AGENTS.md, CLAUDE.md, CONTRIBUTING.md) when present, with
+  `git show {{head}}:<file>`.
 
 ## Rules
 

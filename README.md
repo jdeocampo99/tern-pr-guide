@@ -67,16 +67,20 @@ draws the code near where you are, so an 85-file PR stays responsive.
 tern plugin install github.com/jdeocampo99/tern-pr-guide
 ```
 
-You also need the [GitHub CLI](https://cli.github.com) logged in (`gh auth login`) and a local
-clone of the repository whose PR you're reviewing, with `origin` pointing at it on GitHub.
+You also need the [GitHub CLI](https://cli.github.com) logged in (`gh auth login`). A local clone
+of the repository isn't required.
 
 To work on the plugin itself, clone it and use `tern plugin link /path/to/tern-pr-guide` instead.
 
 ## Review a PR
 
-In a terminal inside your clone, open the command palette, choose **New PR review block**, and
-pick a PR. Type to filter by number, title, author or branch, or paste a PR number or link and
-press `⏎`. The PR for the branch you're on is listed first.
+Open the command palette, choose **New PR review block**, and pick a PR. It works from any
+terminal, inside a clone or not, and any GitHub PR link opens: paste it and press `⏎`.
+
+In a terminal inside a clone, the picker lists that repo's open PRs, the one for your branch first.
+Type to filter by number, title, author or branch, or paste a PR number or link. Anywhere else, it
+lists your open PRs across GitHub: the ones waiting for your review first, then your own. Type to
+filter (the repo name counts too). A bare number doesn't say which repo, so paste the link there.
 
 ![Picking a pull request](docs/screenshots/picker.png)
 
@@ -104,7 +108,7 @@ cx:new_block("prguide.guide", {"pr=123", "repo=/path/to/your/clone"}, "tab")
 | `post=false` | dry run: save the review to `/tmp/prguide-review-<n>.json` instead of posting |
 | `generate=true` | start the AI guided review as soon as the PR opens; a PR that already has a review just opens |
 
-Behind the scenes it runs `gh pr view` once, fetches the PR into `refs/prguide/<n>/*` in your clone
+Behind the scenes it runs `gh pr view` once, fetches the PR into `refs/prguide/<n>/*` in a clone
 (your branches and working tree are untouched), and diffs locally. Lockfiles and files marked
 `linguist-generated` are left out. Remove the refs afterwards with
 `git update-ref -d refs/prguide/<n>/head` (and `/base`).
@@ -127,7 +131,7 @@ note saying why.
   `~/.omp/agent/config.yml`, else `modelRoles.default`. Without `omp` on your login shell's PATH or
   a model, there is no button.
 - It runs on your model, so it costs about what a normal AI review does.
-- Reviews are saved in your clone (worktrees share them, and nothing is committed), so reopening a
+- Reviews are saved in the clone (worktrees share them, and nothing is committed), so reopening a
   PR is instant and never runs the AI again.
 
 ## Review lenses
@@ -183,8 +187,12 @@ review block** (see [AI guided review](#ai-guided-review)).
 
 - GitHub only accepts review comments on lines the PR changed, so only those lines get a `+`, and a
   comment range stays within one block of changes.
-- The picker lists up to 50 open PRs. For any other PR, paste its number or link.
-- A link to a PR in a different repo works too, if you have a clone of that repo in the same folder
-  as this one (for example both in `~/Code`). PR Guide finds it and opens the PR there.
+- The picker lists up to 50 open PRs. For any other PR, paste its link (or, in a clone, its number).
+- A link to a PR in another repo opens from your clone of that repo when there is one in the same
+  folder as this clone (for example both in `~/Code`). Without one, PR Guide downloads a light copy
+  of the repo (history only, no files; even a huge repo takes about half a minute) into its own
+  folder, `~/Library/Application Support/Tern/plugin-data/prguide/repos/<owner>/<repo>.git`, the
+  first time you open a PR of it. Later PRs of that repo reuse the copy, and saved AI reviews live
+  there too. Delete the folder any time to reclaim the space. Private repos work through `gh`'s login.
 - To keep every keypress fast, the page draws at most about 600 lines of code at once. Steps further
   away show just their file header and open when you reach them or click them.

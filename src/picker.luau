@@ -1,9 +1,10 @@
 --!strict
--- The page that picks a PR to review: the checkout's open PRs, filtered by what the reader types,
--- and the PR a typed or pasted number or link names.
+-- The page that picks a PR to review: the checkout's open PRs, or, away from a GitHub checkout, the
+-- reader's open PRs across GitHub; filtered by what the reader types, plus the PR a typed or pasted
+-- number or link names.
 local Fields = require("./text-field")
 
--- An open PR as the list shows it.
+-- An open PR as the list shows it. The statistics come with a checkout's list only.
 export type Summary = {
  number: number,
  title: string,
@@ -12,9 +13,15 @@ export type Summary = {
  draft: boolean,
  -- When it last changed, as GitHub's ISO time.
  updated: string,
- adds: number,
- dels: number,
- files: number,
+ adds: number?,
+ dels: number?,
+ files: number?,
+ -- "owner/repo" in a list across GitHub; nil in a checkout's own list.
+ repo: string?,
+ -- The label this PR sits under in a list across GitHub.
+ group: string?,
+ -- What names the row on the page.
+ key: string,
 }
 
 export type Picker = {
@@ -30,6 +37,8 @@ export type Picker = {
  selected: number,
  -- When the list loaded, in seconds since the epoch; "2h ago" counts from here.
  loadedAt: number,
+ -- The list is the reader's PRs across GitHub, not a checkout's: a bare number names no repo.
+ anywhere: boolean,
 }
 
 export type Row = { pr: Summary, thisBranch: boolean }
@@ -37,9 +46,14 @@ export type Row = { pr: Summary, thisBranch: boolean }
 local M = {}
 
 M.LIST_FIELDS = "number,title,author,headRefName,isDraft,updatedAt,additions,deletions,changedFiles"
+M.SEARCH_FIELDS = "repository,number,title,author,isDraft,updatedAt"
 
-function M.new(guided: { [number]: boolean }): Picker
- return { field = Fields.create(), prs = nil, current = nil, error = nil, guided = guided, selected = 1, loadedAt = 0 }
+-- How many PRs a list across GitHub keeps, and the labels it groups them under.
+M.ANYWHERE_CAP = 50
+M.REQUESTED, M.OWN = "Review requested", "Yours"
+
+function M.new(guided: { [number]: boolean }, anywhere: boolean): Picker
+ return { field = Fields.create(), prs = nil, current = nil, error = nil, guided = guided, selected = 1, loadedAt = 0, anywhere = anywhere }
 end
 
 -- Reads `gh pr list --json <LIST_FIELDS>`.
@@ -56,7 +70,46 @@ function M.parse(stdout: string): { Summary }
    adds = raw.additions,
    dels = raw.deletions,
    files = raw.changedFiles,
+   key = "pr" .. raw.number,
   })
+ end
+ return prs
+end
+
+-- Reads `gh search prs --json <SEARCH_FIELDS>`, the PRs under the label `group`; `combine` keys them.
+function M.parseSearch(stdout: string, group: string): { Summary }
+ local prs = {}
+ for _, raw in tern.json.decode(stdout) do
+  local repo = if type(raw.repository) == "table" then raw.repository.nameWithOwner else nil
+  if type(repo) == "string" and type(raw.number) == "number" then
+   table.insert(prs, {
+    number = raw.number,
+    title = raw.title or "",
+    author = if type(raw.author) == "table" and type(raw.author.login) == "string" then raw.author.login else "",
+    branch = "",
+    draft = raw.isDraft == true,
+    updated = raw.updatedAt or "",
+    repo = repo,
+    group = group,
+    key = "",
+   })
+  end
+ end
+ return prs
+end
+
+-- The lists joined in order, each PR once (the first list's label wins) and at most `cap` of them.
+function M.combine(lists: { { Summary } }, cap: number): { Summary }
+ local prs, seen = {}, {}
+ for _, list in lists do
+  for _, pr in list do
+   local id = string.lower(pr.repo or "") .. "#" .. pr.number
+   if not seen[id] and #prs < cap then
+    seen[id] = true
+    table.insert(prs, pr)
+    pr.key = "pr" .. #prs
+   end
+  end
  end
  return prs
 end
@@ -87,6 +140,17 @@ function M.linkRepo(text: string): string?
  return string.match(trim(text), "^https?://[^/]+/([^/]+/[^/]+)/pull/%d+")
 end
 
+-- The host a GitHub PR link is on.
+function M.linkHost(text: string): string?
+ return string.match(trim(text), "^https?://([^/]+)/[^/]+/[^/]+/pull/%d+")
+end
+
+-- What opens `pr` from the page: its number in a checkout's list, else its link.
+function M.reference(pr: Summary): string
+ if pr.repo then return "https://github.com/" .. pr.repo .. "/pull/" .. pr.number end
+ return tostring(pr.number)
+end
+
 -- The "owner/repo" a git remote URL points at: https, ssh:// and scp-like `git@host:owner/repo.git`.
 function M.remoteRepo(url: string): string?
  local trimmed = trim(url)
@@ -102,7 +166,7 @@ function M.sameRepo(a: string?, b: string?): boolean
 end
 
 local function matches(pr: Summary, needle: string): boolean
- for _, text in { "#" .. pr.number, pr.title, pr.author, pr.branch } do
+ for _, text in { "#" .. pr.number, pr.title, pr.author, pr.branch, pr.repo or "" } do
   if string.find(string.lower(text), needle, 1, true) then return true end
  end
  return false
@@ -126,13 +190,14 @@ function M.move(p: Picker, delta: number)
  p.selected = math.clamp(p.selected + delta, 1, math.max(1, #M.rows(p)))
 end
 
--- What ⏎ opens: a pasted PR link as it is, the number the field names, else the selected row's.
+-- What ⏎ opens: a pasted PR link as it is, else the number the field names (in a checkout's list
+-- only: across GitHub a number names no repo), else the selected row's.
 function M.choice(p: Picker): string?
  if M.linkRepo(p.field.text) then return trim(p.field.text) end
  local named = M.named(p.field.text)
- if named then return tostring(named) end
+ if named then return if p.anywhere then nil else tostring(named) end
  local row = M.rows(p)[p.selected]
- return if row then tostring(row.pr.number) else nil
+ return if row then M.reference(row.pr) else nil
 end
 
 -- Seconds since the epoch of an ISO time like "2026-10-08T09:12:33Z".

@@ -1,8 +1,9 @@
 --!strict
 -- Where the plugin reaches outside itself: `gh` for the PR list, the PR's metadata and posting the
--- review, `git` in the local checkout for the PR's changes and files, the checkout's guide files,
--- the review lens files, and the reader's AI agent writing a guide. Each step starts the next from
--- its callback; the first failure ends the chain with a message naming the step.
+-- review, `git` in a checkout (the reader's own, or PR Guide's saved light copy of a repo) for the
+-- PR's changes and files, the checkout's guide files, the review lens files, and the reader's AI
+-- agent writing a guide. Each step starts the next from its callback; the first failure ends the
+-- chain with a message naming the step.
 local Agent = require("./agent")
 local GitOutput = require("./git-output")
 local Guide = require("./guide")
@@ -12,23 +13,29 @@ local Pr = require("./pr")
 local Review = require("./review")
 local Text = require("./text")
 
--- A PR as the reader named it (number, URL or branch) and the root of its repository's checkout.
-export type Target = { pr: string, repo: string }
+-- A PR as the reader named it (number, URL or branch), the root of its repository's checkout, and
+-- the repo's "owner/repo" when that checkout is PR Guide's own saved copy.
+export type Target = { pr: string, repo: string, cache: string? }
 
 -- A checkout: its root, and the directory holding guides for its PRs, shared by its worktrees.
-export type Repo = { root: string, guides: string }
+-- `cache` is the repo's "owner/repo" when the checkout is PR Guide's saved copy: a bare clone
+-- that has no files, only history, with file contents fetched as they are read.
+export type Repo = { root: string, guides: string, cache: string? }
 
 -- Where a submitted review goes: in a dry run, the file at `dryRunPath`; otherwise GitHub. Without
 -- a `repo` (the bundled sample) there is no PR to check or post to.
 export type Destination = { repo: string?, dryRunPath: string? }
 
 type Fail = (message: string) -> ()
-type Job = { repo: string, fail: Fail }
+-- `partial` is set for a saved copy, whose fetches leave out trees and file contents.
+type Job = { repo: string, fail: Fail, partial: boolean? }
 type Meta = { number: number, title: string, body: string?, url: string, author: { login: string }?, baseRefName: string, headRefOid: string, mergeCommit: { oid: string }? }
 
 local GH_MS = 30_000
 local GIT_MS = 60_000
-local GIT_FETCH_MS = 300_000
+-- The first fetch of a big repo's history takes a while.
+local GIT_FETCH_MS = 20 * 60_000
+
 local AGENT_MS = 20 * 60_000
 
 local PROMPT = "prompts/guide.md"
@@ -121,7 +128,9 @@ end
 local function git(job: Job, what: string, args: { string }, stdin: string?, ok: (stdout: string) -> ())
  local argv = { "git", "--literal-pathspecs", "-C", job.repo }
  table.move(args, 1, #args, #argv + 1, argv)
- run(argv, { stdin = stdin, timeout_ms = if args[1] == "fetch" then GIT_FETCH_MS else GIT_MS }, named(what, job.fail), ok)
+ -- A git that needs a password must fail, not wait for one nobody can type.
+ local opts = { stdin = stdin, timeout_ms = if args[1] == "fetch" then GIT_FETCH_MS else GIT_MS, env = { GIT_TERMINAL_PROMPT = "0" } }
+ run(argv, opts, named(what, job.fail), ok)
 end
 
 local function trimmed(text: string): string
@@ -151,6 +160,8 @@ local function fetchRefs(job: Job, meta: Meta, ok: (head: string, mergeBase: str
   "+refs/pull/" .. meta.number .. "/head:" .. prefix .. "/head",
   "+refs/heads/" .. meta.baseRefName .. ":" .. prefix .. "/base",
  }
+ -- Commits only: a saved copy reads the trees and files a PR changes in one batch, later.
+ if job.partial then table.insert(fetch, 2, "--filter=tree:0") end
  git(job, "git fetch", fetch, nil, function()
   git(job, "git rev-parse", { "rev-parse", prefix .. "/head" }, nil, function(head)
    git(job, "git merge-base", { "merge-base", prefix .. "/head", prefix .. "/base" }, nil, function(mergeBase)
@@ -205,6 +216,28 @@ local function readPatches(job: Job, mergeBase: string, head: string, changes: {
  end)
 end
 
+-- Fetches the files `paths` have at `head` that a saved copy lacks, in one request: its `git diff`
+-- fetches the changed files it shows in one batch, but a rename or a mode change shows none, and
+-- `git cat-file` would fetch each of those on its own.
+local function prefetchSources(job: Job, head: string, paths: { string }, ok: () -> ())
+ if not job.partial or #paths == 0 then return ok() end
+ local listing = { "ls-tree", "-z", head, "--" }
+ table.move(paths, 1, #paths, #listing + 1, listing)
+ git(job, "git ls-tree", listing, nil, function(tree)
+  local oids = {}
+  for oid in string.gmatch(tree, "%d+ blob (%x+)\t") do table.insert(oids, oid) end
+  if #oids == 0 then return ok() end
+  local wanted = table.concat(oids, "\n") .. "\n"
+  git(job, "git cat-file", { "--no-lazy-fetch", "cat-file", "--batch-check" }, wanted, function(checked)
+   local missing = {}
+   for oid in string.gmatch(checked, "(%x+) missing") do table.insert(missing, oid) end
+   if #missing == 0 then return ok() end
+   local fetch = { "-c", "fetch.negotiationAlgorithm=noop", "fetch", "--no-tags", "--no-write-fetch-head", "--recurse-submodules=no", "--filter=blob:none", "--stdin", "origin" }
+   git(job, "git fetch", fetch, table.concat(missing, "\n") .. "\n", function() ok() end)
+  end)
+ end)
+end
+
 -- The whole new side of `paths` at `head`, all through one `git cat-file --batch`.
 local function readSources(job: Job, head: string, paths: { string }, ok: (blobs: { [string]: string }) -> ())
  if #paths == 0 then return ok({}) end
@@ -250,6 +283,59 @@ local function post(repo: string, pr: Pr.PR, payload: Review.Payload, done: (Rev
  end)
 end
 
+-- Work on one saved copy at a time: `go` gets a `release` to call when it is done with the copy
+-- (calling it again does nothing); a `go` that arrives while another holds the copy waits its
+-- turn. Two PR links into one repo then never fetch into it together.
+local holders: { [string]: { (release: () -> ()) -> () } } = {}
+
+local function acquire(key: string, go: (release: () -> ()) -> ())
+ local waiting = holders[key]
+ if waiting then
+  table.insert(waiting, go)
+  return
+ end
+ local queue: { (release: () -> ()) -> () } = {}
+ holders[key] = queue
+ local function hand(next: (release: () -> ()) -> ())
+  local released = false
+  next(function()
+   if released then return end
+   released = true
+   local following = table.remove(queue, 1)
+   if following then hand(following) else holders[key] = nil end
+  end)
+ end
+ hand(go)
+end
+
+-- The file that says a saved copy is set up, and the one that says its first download finished.
+local READY, DOWNLOADED = "/prguide-ready", "/prguide-downloaded"
+
+-- Makes the bare repo at `root` for the GitHub repo `slug` if it isn't set up: an empty repo that
+-- fetches from GitHub and asks `gh` for a login, so a private repo works as `gh` does. Setting up
+-- again after an interrupted attempt does the same steps over. Calls `done` once, with why it
+-- failed or nil.
+local function prepareCache(root: string, slug: string, done: (err: string?) -> ())
+ if tern.fs.exists(root .. READY) then return done(nil) end
+ local made, err = pcall(tern.fs.mkdir, root)
+ if not made then return done("making " .. root .. ": " .. Text.errorLine(err)) end
+ local job: Job = { repo = root, fail = done }
+ withShellPath(function(path)
+  local helper = "!\"" .. located("gh", path) .. "\" auth git-credential"
+  run({ "git", "init", "--bare", "-q", root }, { timeout_ms = GIT_MS }, named("git init", done), function()
+   git(job, "git config", { "config", "remote.origin.url", "https://github.com/" .. slug .. ".git" }, nil, function()
+    -- The empty value drops the reader's own credential helpers, which would ask for a password.
+    git(job, "git config", { "config", "--replace-all", "credential.helper", "" }, nil, function()
+     git(job, "git config", { "config", "--add", "credential.helper", helper }, nil, function()
+      local marked, problem = pcall(tern.fs.write, root .. READY, "")
+      done(if marked then nil else "writing " .. root .. READY .. ": " .. Text.errorLine(problem))
+     end)
+    end)
+   end)
+  end)
+ end)
+end
+
 local M = {}
 
 function M.dryRunPath(number: number): string
@@ -287,19 +373,36 @@ local function originOf(root: string, done: (slug: string?) -> ())
  end)
 end
 
+-- The "owner/repo" the checkout `repo` is a clone of, or nil when it isn't on GitHub.
+function M.originOf(repo: Repo, done: (slug: string?) -> ())
+ originOf(repo.root, done)
+end
+
+-- The most folders-worth of candidates whose origin is looked up.
+local CANDIDATE_CAP = 40
+
 -- A checkout of the GitHub repo `slug` ("owner/repo"), for a PR link: `near` when its origin is that
--- repo, else a checkout in the folder holding `near` or holding its main checkout, preferring one
--- named like the repo. Calls `done` once, with it or with why there is none.
-function M.checkoutFor(near: Repo, slug: string, done: (repo: Repo?, err: string?) -> ())
- originOf(near.root, function(own)
-  if Picker.sameRepo(own, slug) then return done(near, nil) end
-  local candidates, seen = {}, { [near.root] = true }
-  -- `guides` is <common git dir>/prguide; the main checkout holds the common git dir.
-  local mainCheckout = parentOf(parentOf(near.guides) or "")
-  for _, folder in { parentOf(near.root), if mainCheckout then parentOf(mainCheckout) else nil } do
+-- repo, else a checkout in the folder holding `near` or holding its main checkout, or, with no
+-- `near`, in `dir` or the folder holding it; preferring one named like the repo. Calls `done`
+-- once, with it, or with nil when there is none.
+function M.checkoutFor(near: Repo?, dir: string, slug: string, done: (repo: Repo?) -> ())
+ local function search()
+  local candidates, seen = {}, {}
+  local folders: { string? } = {}
+  if near then
+   seen[near.root] = true
+   -- `guides` is <common git dir>/prguide; the main checkout holds the common git dir.
+   local mainCheckout = parentOf(parentOf(near.guides) or "")
+   folders = { parentOf(near.root), if mainCheckout then parentOf(mainCheckout) else nil }
+  elseif dir ~= "" then
+   folders = { dir, parentOf(dir) }
+  end
+  for _, folder in folders do
    if folder and not seen[folder] and tern.fs.exists(folder) then
     seen[folder] = true
-    for _, name in tern.fs.list(folder) do
+    local listed, found = pcall(tern.fs.list, folder)
+    local names: { string } = if listed then found else {}
+    for _, name in names do
      local path = folder .. "/" .. name
      if not seen[path] and tern.fs.exists(path .. "/.git") then
       seen[path] = true
@@ -309,18 +412,18 @@ function M.checkoutFor(near: Repo, slug: string, done: (repo: Repo?, err: string
    end
   end
   local repoName = string.lower(string.match(slug, "/(.+)$") :: string)
+  local function ranks(a: { name: string }, b: { name: string }): boolean
+   local aNamed, bNamed = string.lower(a.name) == repoName, string.lower(b.name) == repoName
+   if aNamed ~= bNamed then return aNamed end
+   return a.name < b.name
+  end
+  table.sort(candidates, ranks)
+  while #candidates > CANDIDATE_CAP do table.remove(candidates) end
   local matches, waiting = {}, #candidates
   local function finish()
-   if #matches == 0 then
-    return done(nil, "That PR is in " .. slug .. ", but this checkout is " .. (own or "not on GitHub")
-     .. " and no checkout of " .. slug .. " was found next to it. Open a terminal in a checkout of " .. slug .. " and paste the link there.")
-   end
-   table.sort(matches, function(a, b)
-    local aNamed, bNamed = string.lower(a.name) == repoName, string.lower(b.name) == repoName
-    if aNamed ~= bNamed then return aNamed end
-    return a.name < b.name
-   end)
-   M.findRepo(matches[1].path, done)
+   if #matches == 0 then return done(nil) end
+   table.sort(matches, ranks)
+   M.findRepo(matches[1].path, function(repo) done(repo) end)
   end
   if waiting == 0 then return finish() end
   for _, candidate in candidates do
@@ -330,7 +433,48 @@ function M.checkoutFor(near: Repo, slug: string, done: (repo: Repo?, err: string
     if waiting == 0 then finish() end
    end)
   end
+ end
+ if not near then return search() end
+ originOf(near.root, function(own)
+  if Picker.sameRepo(own, slug) then done(near) else search() end
  end)
+end
+
+-- PR Guide's own saved copy of the GitHub repo `slug`, which a PR link on `host` names; nothing is
+-- downloaded until a PR of it opens. Gives why when the link can't have one.
+function M.savedCopy(host: string?, slug: string): (Repo?, string?)
+ local owner, name = string.match(slug, "^(%w[%w._-]*)/(%w[%w._-]*)$")
+ if not owner or not name or string.lower(host or "") ~= "github.com" then
+  return nil, "No checkout of " .. slug .. " was found next to this one, and PR Guide only downloads its own copy of repos on github.com."
+ end
+ local root = tern.plugin.data .. "/repos/" .. string.lower(owner) .. "/" .. string.lower(name) .. ".git"
+ return { root = root, guides = root .. "/prguide", cache = slug }, nil
+end
+
+-- The reader's open PRs across GitHub, those waiting on their review first, then their own. Calls
+-- `done` once, with the list or with the first line of what `gh` said went wrong; one of the two
+-- searches failing leaves the other's list.
+function M.listAnywhere(done: (prs: { Picker.Summary }?, err: string?) -> ())
+ local searches = { { "--review-requested=@me", Picker.REQUESTED }, { "--author=@me", Picker.OWN } }
+ local lists: { { Picker.Summary }? } = { nil, nil }
+ local problem: string? = nil
+ local waiting = #searches
+ local function finish()
+  waiting -= 1
+  if waiting > 0 then return end
+  if not lists[1] and not lists[2] then return done(nil, problem) end
+  done(Picker.combine({ lists[1] or {}, lists[2] or {} }, Picker.ANYWHERE_CAP), nil)
+ end
+ for i, search in searches do
+  local argv = { "gh", "search", "prs", search[1], "--state=open", "--sort=updated", "--limit", tostring(Picker.ANYWHERE_CAP), "--json", Picker.SEARCH_FIELDS }
+  run(argv, { timeout_ms = GH_MS }, function(message)
+   problem = problem or message
+   finish()
+  end, function(stdout)
+   lists[i] = Picker.parseSearch(stdout, search[2])
+   finish()
+  end)
+ end
 end
 
 -- The open PRs of the checkout at `root` and the number of its current branch's PR, if it has one.
@@ -356,23 +500,59 @@ function M.listPrs(root: string, done: (prs: { Picker.Summary }?, current: numbe
  end)
 end
 
+-- What the fetch stage says: for a saved copy, whether it is the first download.
+local function fetchStage(target: Target): string
+ local slug = target.cache
+ if not slug then return "Fetching its commits into " .. target.repo end
+ if tern.fs.exists(target.repo .. DOWNLOADED) then return "Checking " .. slug .. " for new commits" end
+ return "Downloading " .. slug .. " (first time only)"
+end
+
 -- Loads `target` from GitHub and its checkout, reporting each stage as it starts. Calls `done`
--- once, with the PR or with what failed.
+-- once, with the PR or with what failed. A saved copy is set up first if need be, and held while
+-- its commits are fetched, so that PRs of one repo opening together take turns.
 function M.openPr(target: Target, progress: (stage: string) -> (), done: (pr: Pr.PR?, err: string?) -> ())
- local job: Job = { repo = target.repo, fail = function(message: string) done(nil, message) end }
- progress("Reading the PR from GitHub")
- readMeta(job, target.pr, function(meta)
-  progress("Fetching its commits into " .. target.repo)
-  fetchRefs(job, meta, function(head, mergeBase)
-   progress("Reading the changes")
-   listChanges(job, mergeBase, head, function(changes)
-    readPatches(job, mergeBase, head, changes, function(patches)
-     progress("Reading the changed files")
-     readSources(job, head, GitOutput.textPaths(changes, patches), function(blobs)
-      done(prOf(meta, head, GitOutput.files(changes, patches, blobs)), nil)
+ local function open(release: () -> ())
+  local job: Job = {
+   repo = target.repo,
+   fail = function(message: string)
+    release()
+    done(nil, message)
+   end,
+   partial = target.cache ~= nil,
+  }
+  progress("Reading the PR from GitHub")
+  readMeta(job, target.pr, function(meta)
+   progress(fetchStage(target))
+   fetchRefs(job, meta, function(head, mergeBase)
+    if target.cache then pcall(tern.fs.write, target.repo .. DOWNLOADED, "") end
+    release()
+    progress("Reading the changes")
+    listChanges(job, mergeBase, head, function(changes)
+     readPatches(job, mergeBase, head, changes, function(patches)
+      progress("Reading the changed files")
+      local paths = GitOutput.textPaths(changes, patches)
+      prefetchSources(job, head, paths, function()
+       readSources(job, head, paths, function(blobs)
+        done(prOf(meta, head, GitOutput.files(changes, patches, blobs)), nil)
+       end)
+      end)
      end)
     end)
    end)
+  end)
+ end
+ local slug = target.cache
+ if not slug then return open(function() end) end
+ progress("Preparing a saved copy of " .. slug)
+ acquire(target.repo, function(release)
+  prepareCache(target.repo, slug, function(err)
+   if err then
+    release()
+    done(nil, err)
+   else
+    open(release)
+   end
   end)
  end)
 end

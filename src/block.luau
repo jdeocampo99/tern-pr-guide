@@ -19,13 +19,15 @@ local State = require("./state")
 type State = State.State
 type Handler = (s: State, cx: BlockCx, value: string) -> ()
 
--- How the block was opened: a PR and its checkout, a directory to pick a PR from (empty when the
--- palette command knew none), or neither for the bundled sample.
+-- How the block was opened: a PR and its checkout, a directory to pick a PR from (a GitHub checkout's
+-- own PRs; anywhere else, the reader's PRs across GitHub), or neither for the bundled sample.
 type Options = { pr: string?, repo: string?, guide: string?, post: boolean, generate: boolean? }
 
 -- The review page once its PR has loaded; before that, the PR picker or what loading is doing.
 type Block = {
  opts: Options,
+ -- The directory the block was opened in; a PR link may name a checkout beside or below it.
+ dir: string,
  -- The PR as the reader named it ("#350"), for the title and the loading page.
  name: string,
  repo: Fetch.Repo?,
@@ -42,7 +44,7 @@ type Block = {
  autoDone: boolean?,
 }
 
-local ARGS = "repo=<directory> to pick a PR, or pr=<number or URL> with repo=<checkout path>, optionally guide=<file>, post=false for a dry run and generate=true to start an AI guided review once the PR opens"
+local ARGS = "repo=<directory> to pick a PR (any directory works), or pr=<number or URL> with repo=<checkout path>, optionally guide=<file>, post=false for a dry run and generate=true to start an AI guided review once the PR opens"
 local SAMPLE_GUIDE = "fixtures/guide-350.json"
 
 -- The closing animations in guide.css last 150-200 ms.
@@ -523,7 +525,8 @@ end
 
 -- Loads `pr` from the block's checkout, showing each stage, then shows it.
 local function loadPr(b: Block, cx: BlockCx, pr: string)
- Fetch.openPr({ pr = pr, repo = (b.repo :: Fetch.Repo).root }, function(stage)
+ local repo = b.repo :: Fetch.Repo
+ Fetch.openPr({ pr = pr, repo = repo.root, cache = repo.cache }, function(stage)
   b.notice = Notice.loading(b.name, stage)
   cx:render()
  end, function(loaded, err)
@@ -534,33 +537,63 @@ local function loadPr(b: Block, cx: BlockCx, pr: string)
 end
 
 -- Opens `pr`, a number or a GitHub PR link. A link to another repo's PR first moves the block to a
--- checkout of that repo, since numbers and commits only mean something there.
+-- checkout of that repo, since numbers and commits only mean something there: one next to this
+-- block's, else PR Guide's own saved copy, which the first open of that repo downloads.
 local function openPr(b: Block, cx: BlockCx, pr: string)
  b.picker, b.name = nil, nameOf(pr)
  local slug = Picker.linkRepo(pr)
- if not slug then return loadPr(b, cx, pr) end
+ if not slug then
+  if b.repo then return loadPr(b, cx, pr) end
+  b.notice = Notice.failed(b.name, "A PR number needs a checkout to read it from. Paste the PR's link instead.")
+  return
+ end
  b.notice = Notice.loading(b.name, "Finding a checkout of " .. slug)
- Fetch.checkoutFor(b.repo :: Fetch.Repo, slug, function(repo, err)
-  if repo then
-   b.repo = repo
+ Fetch.checkoutFor(b.repo, b.dir, slug, function(found)
+  if found then
+   b.repo = found
    loadPr(b, cx, pr)
   else
-   b.notice = Notice.failed(b.name, err :: string)
+   local saved, why = Fetch.savedCopy(Picker.linkHost(pr), slug)
+   if saved then
+    b.repo = saved
+    loadPr(b, cx, pr)
+   else
+    b.notice = Notice.failed(b.name, why :: string)
+   end
   end
   cx:render()
  end)
 end
 
--- Shows the checkout's open PRs to pick from, with the filter field focused.
-local function openPicker(b: Block, cx: BlockCx)
- local repo = b.repo :: Fetch.Repo
- local p = Picker.new(Fetch.guidedPrs(repo))
+-- Shows `p`, the page's PR list to pick from, with the filter field focused.
+local function showPicker(b: Block, cx: BlockCx, p: Picker.Picker)
  b.picker = p
- Fetch.listPrs(repo.root, function(prs, current, err)
-  p.prs, p.current, p.error, p.loadedAt = prs, current, err, os.time()
-  cx:render()
- end)
+ cx:render()
  frameLater(cx, { { "focus", PickerView.fieldPath } })
+end
+
+-- Shows the open PRs of the block's directory: its checkout's when it is a clone of a GitHub repo,
+-- else the reader's across GitHub.
+local function openPicker(b: Block, cx: BlockCx)
+ local repo = b.repo
+ local function anywhere()
+  local p = Picker.new({}, true)
+  showPicker(b, cx, p)
+  Fetch.listAnywhere(function(prs, err)
+   p.prs, p.error, p.loadedAt = prs, err, os.time()
+   cx:render()
+  end)
+ end
+ if not repo then return anywhere() end
+ Fetch.originOf(repo, function(slug)
+  if not slug then return anywhere() end
+  local p = Picker.new(Fetch.guidedPrs(repo), false)
+  showPicker(b, cx, p)
+  Fetch.listPrs(repo.root, function(prs, current, err)
+   p.prs, p.current, p.error, p.loadedAt = prs, current, err, os.time()
+   cx:render()
+  end)
+ end)
 end
 
 type PickerHandler = (b: Block, p: Picker.Picker, cx: BlockCx, value: string) -> ()
@@ -569,7 +602,7 @@ local PICKER_ACTIONS: { [string]: PickerHandler } = {
  ["picker-move"] = function(_, p, cx, delta)
   Picker.move(p, tonumber(delta) :: number)
   local row = Picker.rows(p)[p.selected]
-  if row then frameLater(cx, { { "reveal", PickerView.rowPath(row.pr.number), "nearest" } }) end
+  if row then frameLater(cx, { { "reveal", PickerView.rowPath(row.pr), "nearest" } }) end
  end,
  ["picker-open"] = function(b, p, cx)
   local choice = Picker.choice(p)
@@ -599,15 +632,11 @@ end
 local block: BlockDef<Block> = {
  init = function(cx: BlockCx, args: { string }): Block
   local opts, problem = options(args)
-  if not opts then return { opts = { post = false }, name = "", notice = Notice.failed("", problem :: string), guided = false } end
+  if not opts then return { opts = { post = false }, dir = "", name = "", notice = Notice.failed("", problem :: string), guided = false } end
   local pr, dir = opts.pr, opts.repo
-  local b: Block = { opts = opts, name = nameOf(pr), notice = if pr then Notice.loading(nameOf(pr), "") else Notice.findingRepo(), guided = false }
+  local b: Block = { opts = opts, dir = dir or "", name = nameOf(pr), notice = if pr then Notice.loading(nameOf(pr), "") else Notice.findingRepo(), guided = false }
   if not dir then
    showPr(b, Pr.sample())
-   return b
-  end
-  if dir == "" then
-   b.notice = Notice.noRepo()
    return b
   end
   -- Starts after init returns, so each stage renders over a block that exists.
@@ -627,15 +656,19 @@ local block: BlockDef<Block> = {
      cx:render()
     end)
    end)
-   Fetch.findRepo(dir, function(repo, err)
-    if not repo then
-     b.notice = if pr then Notice.failed(b.name, err :: string) else Notice.noRepo()
+   -- A directory that is no checkout still opens a PR link and lists the reader's PRs.
+   local function found(repo: Fetch.Repo?, err: string?)
+    b.repo = repo
+    if not pr then
+     openPicker(b, cx)
+    elseif repo or Picker.linkRepo(pr) then
+     openPr(b, cx, pr)
     else
-     b.repo = repo
-     if pr then openPr(b, cx, pr) else openPicker(b, cx) end
+     b.notice = Notice.failed(b.name, err or "A PR number needs a checkout to read it from.")
     end
     cx:render()
-   end)
+   end
+   if dir == "" then found(nil, nil) else Fetch.findRepo(dir, found) end
   end)
   return b
  end,
@@ -647,7 +680,7 @@ local block: BlockDef<Block> = {
  view = function(b: Block): BlockView
   local s = b.page
   if not s then
-   if b.picker then return { main = PickerView.view(b.picker, (b.repo :: Fetch.Repo).root) } end
+   if b.picker then return { main = PickerView.view(b.picker, if b.repo then b.repo.root else nil) } end
    return { main = Notice.view(b.notice) }
   end
   local motion = { born = s.born, next = {}, booted = s.booted, animate = not s.keyed }

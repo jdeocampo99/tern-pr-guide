@@ -1,5 +1,6 @@
 --!strict
--- The page that picks a PR: a filter field over the checkout's open PRs, the current branch's first.
+-- The page that picks a PR: a filter field over the checkout's open PRs, the current branch's first,
+-- or, away from a GitHub checkout, over the reader's open PRs across GitHub.
 local Fields = require("../text-field")
 local Picker = require("../picker")
 local Text = require("../text")
@@ -13,8 +14,8 @@ local KEYS = { { "↑ ↓", "move" }, { "⏎", "open" }, { "esc", "clear" } }
 
 local M = {}
 
-function M.rowKey(number: number): string
- return "pr" .. number
+local function rowKey(pr: Picker.Summary): string
+ return pr.key
 end
 
 local function row(p: Picker.Picker, item: Picker.Row, on: boolean): Node
@@ -22,25 +23,36 @@ local function row(p: Picker.Picker, item: Picker.Row, on: boolean): Node
  local title = { span("gp-sr-text", pr.title) }
  if p.guided[pr.number] then table.insert(title, span("gp-pk-tag", "Guide")) end
  if pr.draft then table.insert(title, span("gp-pk-tag", "Draft")) end
- return el("div", { class = "gp-sr-row gp-pk-row" .. (if on then " gp-sr-row-on" else ""), key = M.rowKey(pr.number), actions = { click = "pick-pr=" .. pr.number } }, {
-  span("gp-pk-num", "#" .. pr.number),
-  el("span", { class = "gp-pk-main" }, {
-   el("span", { class = "gp-pk-title" }, title),
-   span("gp-sr-sub", pr.author .. "  ·  " .. pr.branch),
-  }),
-  Ui.spacer(),
-  span("gp-adds", "+" .. pr.adds),
-  span("gp-dels", "−" .. pr.dels),
-  span("gp-pk-stat", pr.files .. (if pr.files == 1 then " file" else " files")),
-  span("gp-pk-stat gp-pk-when", Picker.ago(pr.updated, p.loadedAt)),
- })
+ local sub = if pr.repo then pr.repo .. " #" .. pr.number .. "  ·  " .. pr.author else pr.author .. "  ·  " .. pr.branch
+ local cells = {}
+ if not pr.repo then table.insert(cells, span("gp-pk-num", "#" .. pr.number)) end
+ table.insert(cells, el("span", { class = "gp-pk-main" }, {
+  el("span", { class = "gp-pk-title" }, title),
+  span("gp-sr-sub", sub),
+ }))
+ table.insert(cells, Ui.spacer())
+ if pr.adds and pr.dels and pr.files then
+  table.insert(cells, span("gp-adds", "+" .. pr.adds))
+  table.insert(cells, span("gp-dels", "−" .. pr.dels))
+  table.insert(cells, span("gp-pk-stat", pr.files .. (if pr.files == 1 then " file" else " files")))
+ end
+ table.insert(cells, span("gp-pk-stat gp-pk-when", Picker.ago(pr.updated, p.loadedAt)))
+ return el("div", { class = "gp-sr-row gp-pk-row" .. (if on then " gp-sr-row-on" else ""), key = rowKey(pr), actions = { click = "pick-pr=" .. Picker.reference(pr) } }, cells)
+end
+
+-- What the field's text names, when it names a PR.
+local function named(p: Picker.Picker): string?
+ local n = Picker.named(p.field.text)
+ if not n then return nil end
+ if not p.anywhere or Picker.linkRepo(p.field.text) then return "⏎ opens #" .. n end
+ return "A number alone doesn't say which repository: paste the PR's link to open #" .. n .. "."
 end
 
 -- Rows under section labels, or what the list has instead of rows.
 local function list(p: Picker.Picker, repoName: string): { Node }
  local kids = {}
- local named = Picker.named(p.field.text)
- if named then table.insert(kids, span("gp-sr-empty", "⏎ opens #" .. named)) end
+ local hint = named(p)
+ if hint then table.insert(kids, span("gp-sr-empty", hint)) end
  if p.error then
   table.insert(kids, span("gp-sr-empty gp-notice-error", p.error))
   return kids
@@ -52,25 +64,32 @@ local function list(p: Picker.Picker, repoName: string): { Node }
  local rows = Picker.rows(p)
  if #rows == 0 then
   if #(p.prs :: { Picker.Summary }) == 0 then
-   table.insert(kids, span("gp-sr-empty", "No open pull requests in " .. repoName .. "."))
-  elseif not named then
+   table.insert(kids, span("gp-sr-empty", if p.anywhere then "None of your open pull requests are waiting on a review or yours. Paste a PR link to open one." else "No open pull requests in " .. repoName .. "."))
+  elseif not hint then
    table.insert(kids, span("gp-sr-empty", "No open pull request matches “" .. p.field.text .. "”."))
   end
   return kids
  end
- -- With the current branch's PR on top, labels set it apart from the rest.
+ -- With the current branch's PR on top, labels set it apart from the rest; across GitHub the
+ -- labels say why each PR is listed.
  local split = rows[1].thisBranch
+ local label: string? = nil
  for n, item in rows do
-  if split and n <= 2 then table.insert(kids, span("gp-panel-h gp-pk-section", if n == 1 then "This branch" else "Open")) end
+  local group = if p.anywhere then item.pr.group elseif split and n <= 2 then (if n == 1 then "This branch" else "Open") else nil
+  if group and group ~= label then
+   table.insert(kids, span("gp-panel-h gp-pk-section", group))
+   label = group
+  end
   table.insert(kids, row(p, item, n == p.selected))
  end
  return kids
 end
 
-function M.view(p: Picker.Picker, root: string): Node
- local repoName = Text.baseName(root)
+function M.view(p: Picker.Picker, root: string?): Node
+ local repoName = if root then Text.baseName(root) else ""
+ local placeholder = if p.anywhere then "Filter, or paste a PR link…" else "Filter, or paste a PR number or link…"
  local panel = {
-  el("div", { class = "gp-sr-box", key = "box" }, { span("gp-sr-slash", "#"), Fields.node(p.field, "field", "Filter, or paste a PR number or link…") }),
+  el("div", { class = "gp-sr-box", key = "box" }, { span("gp-sr-slash", "#"), Fields.node(p.field, "field", placeholder) }),
  }
  for _, node in list(p, repoName) do table.insert(panel, node) end
  local hints = { span("gp-hb-mode", "Pick a pull request"), Ui.spacer() }
@@ -79,7 +98,7 @@ function M.view(p: Picker.Picker, root: string): Node
  end
  return el("div", {}, { el("div", { class = "gp-root gp-page", key = "page" }, {
   el("div", { class = "gp-header", key = "header" }, {
-   el("div", { class = "gp-title" }, { span("gp-title-text", "Pull requests"), span("gp-title-num", root) }),
+   el("div", { class = "gp-title" }, { span("gp-title-text", "Pull requests"), span("gp-title-num", if p.anywhere then "on GitHub" else (root or "")) }),
   }),
   el("div", { class = "gp-panel gp-search gp-picker", key = "picker" }, panel),
   el("div", { class = "gp-hintbar", key = "hints" }, hints),
@@ -88,8 +107,8 @@ end
 
 M.fieldPath = PICKER .. ".box.field"
 
-function M.rowPath(number: number): string
- return PICKER .. "." .. M.rowKey(number)
+function M.rowPath(pr: Picker.Summary): string
+ return PICKER .. "." .. rowKey(pr)
 end
 
 return M
