@@ -117,7 +117,8 @@ keep reading meanwhile.
 | `/` | search | `v` | whole file reviewed | `a` | include / exclude all |
 | `s` | supporting changes | `a` `d` | add / dismiss suggestion | `1` `2` `3` | comment, approve, request changes |
 | `o` | open every supporting file | `c` | comment on this step | `⌘⏎` | submit |
-| `g` | open on GitHub | `i` | PR description | `?` | all shortcuts |
+| `g` | open on GitHub | | | `?` | all shortcuts |
+| `i` | PR description | | | | |
 
 ## Good to know
 
