@@ -18,9 +18,10 @@ export type Composer = { file: string, from: number, to: number, step: string?, 
 
 export type SearchBox = { field: Fields.Field, results: { Search.Result }, selected: number }
 
--- The model dropdown: its filter, the highlighted model (an index into the models matching the
--- filter) and the effort the next pick gets.
-export type ModelBox = { field: Fields.Field, selected: number, effort: string? }
+-- The model dropdown: its filter and the text the list was last filtered by, the highlighted model
+-- (an index into the models matching the filter), the effort the next pick gets, and the first
+-- match its list shows.
+export type ModelBox = { field: Fields.Field, query: string, selected: number, effort: string?, top: number }
 
 -- The changed line a search jumped to, marked until the next jump.
 export type Hit = { file: string, entry: number }
@@ -423,7 +424,7 @@ function M.openModels(s: State, agent: Agent.Agent)
  for i, model in agent.models do
   if model.selector == agent.model then selected = i end
  end
- s.models = { field = Fields.create(), selected = selected, effort = agent.effort }
+ s.models = { field = Fields.create(), query = "", selected = selected, effort = agent.effort, top = math.max(1, selected - 3) }
 end
 
 -- The models matching the dropdown's filter.
@@ -431,8 +432,22 @@ function M.modelChoices(box: ModelBox, agent: Agent.Agent): { Agent.Model }
  return Agent.matching(agent.models, box.field.text)
 end
 
+-- Rows the model list fits before it scrolls.
+local MODEL_ROWS = 8
+
+-- Starts the list far enough down that the highlighted model is among the rows it fits. The list
+-- is never scrolled to it: Tern's reveal into a scroller pins it, so the wheel stops working.
+function M.keepModelShown(box: ModelBox)
+ if box.selected < box.top then
+  box.top = box.selected
+ elseif box.selected >= box.top + MODEL_ROWS then
+  box.top = box.selected - MODEL_ROWS + 1
+ end
+end
+
 function M.moveModel(box: ModelBox, agent: Agent.Agent, delta: number)
  box.selected = math.clamp(box.selected + delta, 1, math.max(1, #M.modelChoices(box, agent)))
+ M.keepModelShown(box)
 end
 
 -- Steps the effort the highlighted model will get through the levels it takes.

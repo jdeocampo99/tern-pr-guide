@@ -20,13 +20,14 @@ local PAGE = "main.page"
 
 local M = {}
 
--- Without a guide: the header, then the file tree and the code side by side, each scrolling on its
--- own, with the description at the top of the code. Keys match the guided page's first change row,
--- so block paths are the same.
+-- Without a guide: the header, then the file tree pinned beside the code with a scroll of its own,
+-- and the description at the top of the code. The code scrolls with the page: Tern's reveal into
+-- a nested scroller left the wheel unable to scroll past the revealed block. Keys match the guided
+-- page's first change row, so block paths are the same.
 local function split(s: State.State, motion: Ui.Motion, plan: State.Plan): Node
  local blocks = { Description.view(s, motion) }
  for _, step in s.review.steps do table.insert(blocks, Code.step(s, motion, plan, step)) end
- return el("div", { class = "gp-fill" }, { el("div", { class = "gp-root gp-page gp-split", key = "page" }, {
+ return el("div", {}, { el("div", { class = "gp-root gp-page gp-split", key = "page" }, {
   Header.view(s),
   el("div", { class = "gp-split-row", key = "ch1" }, {
    el("div", { class = "gp-split-left", key = "tree" }, { Change.view(s, 1) }),
@@ -58,11 +59,6 @@ function M.view(s: State.State, motion: Ui.Motion): Node
  return el("div", {}, { el("div", { class = "gp-root gp-page", key = "page" }, page) })
 end
 
--- Where page-up, page-down, home and end scroll: the page, or the code beside the file tree.
-function M.scrollPath(s: State.State): string
- return if s.review.guide.guided then "main" else PAGE .. ".ch1.code"
-end
-
 -- The code block `blockId`: a step's block in its change row, or a supporting file's.
 function M.blockPath(blockId: string): string
  local file = State.supportingPath(blockId)
@@ -89,11 +85,6 @@ end
 
 M.searchFieldPath = PAGE .. ".header.search.box.field"
 M.modelFieldPath = PAGE .. ".header.ai.anchor.models.box.field"
-
--- Row `n` of the model dropdown's list.
-function M.modelRowPath(n: number): string
- return PAGE .. ".header.ai.anchor.models.list.m" .. n
-end
 
 M.summaryFieldPath = PAGE .. ".header.review.cols.side.summary.field"
 

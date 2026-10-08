@@ -273,7 +273,7 @@ local ACTIONS: { [string]: Handler } = {
   s.review.focus = nil
   if s.helpOpen then toggleHelp(s, cx) end
  end,
- ["scroll"] = function(s, cx, how) cx:frame({ { "scroll", Page.scrollPath(s), how } }) end,
+ ["scroll"] = function(_, cx, how) cx:frame({ { "scroll", "main", how } }) end,
  ["open-github"] = function(s, cx) cx:open(s.review.pr.url) end,
 
  -- marking
@@ -331,14 +331,15 @@ local ACTIONS: { [string]: Handler } = {
    return
   end
   State.openModels(s, run.agent)
-  frameLater(cx, { { "focus", Page.modelFieldPath }, { "reveal", Page.modelRowPath((s.models :: State.ModelBox).selected), "nearest" } })
+  frameLater(cx, { { "focus", Page.modelFieldPath } })
  end,
- ["models-filter"] = function(s) (s.models :: State.ModelBox).selected = 1 end,
- ["models-move"] = function(s, cx, delta)
+ ["models-filter"] = function(s)
   local box = s.models :: State.ModelBox
-  State.moveModel(box, (s.ai :: Agent.Run).agent, tonumber(delta) :: number)
-  frameLater(cx, { { "reveal", Page.modelRowPath(box.selected), "nearest" } })
+  if box.field.text == box.query then return end
+  box.query, box.selected, box.top = box.field.text, 1, 1
  end,
+ ["models-move"] = function(s, _, delta) State.moveModel(s.models :: State.ModelBox, (s.ai :: Agent.Run).agent, tonumber(delta) :: number) end,
+ ["models-top"] = function(s) (s.models :: State.ModelBox).top = 1 end,
  ["models-effort"] = function(s, _, delta) State.stepEffort(s.models :: State.ModelBox, (s.ai :: Agent.Run).agent, tonumber(delta) :: number) end,
  ["models-pick"] = function(s)
   local agent = (s.ai :: Agent.Run).agent

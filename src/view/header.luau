@@ -44,7 +44,10 @@ local function aiRow(run: Agent.Run, box: State.ModelBox?): Node
   span("gp-ai-model-caret", "▾"),
   span("gp-act-key", "⇧M"),
  }) }
- if box then table.insert(anchor, ModelPanel.view(box, run.agent)) end
+ if box then
+  table.insert(anchor, el("div", { class = "gp-md-scrim", key = "scrim", actions = { click = "toggle-models" } }))
+  table.insert(anchor, ModelPanel.view(box, run.agent))
+ end
  local kids = {
   Ui.button("gp-btn-primary gp-ai-button", "Generate AI Guided Review", "generate-guide"),
   el("span", { class = "gp-md-anchor", key = "anchor" }, anchor),

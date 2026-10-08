@@ -37,10 +37,17 @@ local function efforts(box: State.ModelBox, model: Agent.Model?): Node?
  })
 end
 
+-- The list starts at match `box.top`, under a row offering the ones above it. Its key changes with
+-- `top`, so the list draws as a fresh scroller at its own start and the wheel scrolls it freely.
 function M.view(box: State.ModelBox, agent: Agent.Agent): Node
  local choices = State.modelChoices(box, agent)
  local rows, group = {}, nil
- for n, model in choices do
+ if box.top > 1 then
+  local above = box.top - 1
+  table.insert(rows, el("div", { class = "gp-md-more", key = "above", text = "↑  " .. above .. " more", actions = { click = "models-top" } }))
+ end
+ for n = box.top, #choices do
+  local model = choices[n]
   local name = provider(model)
   if name ~= group then
    group = name
@@ -59,7 +66,7 @@ function M.view(box: State.ModelBox, agent: Agent.Agent): Node
  end
  local kids = {
   el("div", { class = "gp-md-search", key = "box" }, { span("gp-md-glass", "⌕"), Fields.node(box.field, "field", "Search models") }),
-  el("div", { class = "gp-md-list", key = "list" }, rows),
+  el("div", { class = "gp-md-list", key = "list" .. box.top }, rows),
  }
  local foot = efforts(box, choices[box.selected])
  if foot then table.insert(kids, foot) end
