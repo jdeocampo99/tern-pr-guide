@@ -101,8 +101,8 @@ button, with the model and effort it will use beside it. Click it and your agent
 writes the guide; the page turns into the guided review when it's done. It takes a few minutes, and
 you can keep reading meanwhile.
 
-- Click the model to pick another: type to search the models OMP lists, `↑`/`↓` to choose, `tab` or
-  a click to set the effort, `⏎` to use it. Your pick is remembered for every PR.
+- Click the model, or press `⇧M`, to pick another: type to search the models OMP lists, `↑`/`↓` for
+  the model, `←`/`→` for the effort, `⏎` to use it. Your pick is remembered for every PR.
 - Until you pick one, it uses your OMP review model: `modelRoles.review` in
   `~/.omp/agent/config.yml`, else `modelRoles.default`. Without `omp` on your login shell's PATH or
   a model, there is no button.

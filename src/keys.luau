@@ -28,10 +28,15 @@ local function searchKey(key: Key): Action?
  return nil
 end
 
+-- Arrows: up and down pick the model, left and right its effort (the filter's cursor gives them up;
+-- model names are short). Tab steps the effort too.
 local function modelsKey(key: Key): Action?
  local name = key.name
+ local plain = not (key.shift or key.ctrl or key.meta or key.alt)
  if name == "down" then return act("models-move", 1) end
  if name == "up" then return act("models-move", -1) end
+ if plain and name == "right" then return act("models-effort", 1) end
+ if plain and name == "left" then return act("models-effort", -1) end
  if name == "tab" then return act("models-effort", if key.shift then -1 else 1) end
  if name == "enter" then return act("models-pick") end
  if name == "escape" then return act("toggle-models") end
@@ -70,6 +75,7 @@ local function readingKey(s: State.State, key: Key): Action?
  if name == "/" or key.text == "/" then return act("open-search") end
  if name == "g" then return act("open-github") end
  if name == "i" then return act("toggle-description") end
+ if (name == "m" and key.shift) or name == "M" then return act("toggle-models") end
  if name == "m" then return act("mark-all") end
  if (name == "s" and key.shift) or name == "S" then return act("mark-supporting") end
  if name == "s" then return act("toggle-group") end

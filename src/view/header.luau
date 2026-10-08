@@ -33,21 +33,24 @@ local function headerAction(label: string, keyHint: string?, action: string): No
 end
 
 -- A row offering the reader's AI agent to write a guide, with the model and effort it will use (a
--- button opening the model dropdown) and why the last run failed, or the run going.
-local function aiRow(run: Agent.Run, open: boolean): Node
+-- button opening the model dropdown, `box`, beneath it) and why the last run failed, or the run going.
+local function aiRow(run: Agent.Run, box: State.ModelBox?): Node
  if run.running then
   local clock = string.format("%d:%02d", math.floor(run.seconds / 60), run.seconds % 60)
-  return el("div", { class = "gp-ai" }, { span("gp-ai-running", "Generating AI guided review with " .. Agent.label(run.agent) .. "… " .. clock) })
+  return el("div", { class = "gp-ai", key = "ai" }, { span("gp-ai-running", "Generating AI guided review with " .. Agent.label(run.agent) .. "… " .. clock) })
  end
+ local anchor = { el("span", { class = "gp-ai-model" .. (if box then " gp-ai-model-open" else ""), key = "button", actions = { click = "toggle-models" } }, {
+  span("gp-ai-model-name", Agent.label(run.agent)),
+  span("gp-ai-model-caret", "▾"),
+  span("gp-act-key", "⇧M"),
+ }) }
+ if box then table.insert(anchor, ModelPanel.view(box, run.agent)) end
  local kids = {
   Ui.button("gp-btn-primary gp-ai-button", "Generate AI Guided Review", "generate-guide"),
-  el("span", { class = "gp-ai-model" .. (if open then " gp-ai-model-open" else ""), actions = { click = "toggle-models" } }, {
-   span("gp-ai-model-name", Agent.label(run.agent)),
-   span("gp-ai-model-caret", if open then "▴" else "▾"),
-  }),
+  el("span", { class = "gp-md-anchor", key = "anchor" }, anchor),
  }
  if run.error then table.insert(kids, span("gp-ai-error", "Couldn't generate it: " .. run.error)) end
- return el("div", { class = "gp-ai" }, kids)
+ return el("div", { class = "gp-ai", key = "ai" }, kids)
 end
 
 local function status(s: State.State, counts: Review.Counts): Node
@@ -85,10 +88,7 @@ function M.view(s: State.State): Node
   el("div", { class = "gp-title" }, { span("gp-title-num", "#" .. pr.number), span("gp-title-text", pr.title), Ui.spacer(), reviewButton(s, counts.included) }),
   status(s, counts),
  }
- if s.ai then
-  table.insert(parts, aiRow(s.ai, s.models ~= nil))
-  if s.models then table.insert(parts, ModelPanel.view(s.models, s.ai.agent)) end
- end
+ if s.ai then table.insert(parts, aiRow(s.ai, s.models)) end
  if s.search then table.insert(parts, SearchPanel.view(s.search, s.review.guide.guided)) end
  if s.helpOpen then table.insert(parts, Help.view(s.closing.help == true, s.review.guide.guided)) end
  if s.reviewOpen then table.insert(parts, ReviewPanel.view(s)) end

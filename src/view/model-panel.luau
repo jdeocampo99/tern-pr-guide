@@ -1,6 +1,6 @@
 --!strict
--- The model dropdown under the AI row: a filter, the models matching it, and the efforts the
--- highlighted model takes.
+-- The model dropdown, a popover under the model button: a filter, the models matching it grouped by
+-- provider, and the efforts the highlighted model takes as one segmented control.
 local Agent = require("../agent")
 local Fields = require("../text-field")
 local State = require("../state")
@@ -10,46 +10,60 @@ local el, span = Ui.el, Ui.span
 
 local M = {}
 
-local function effortRow(box: State.ModelBox, agent: Agent.Agent, model: Agent.Model?): Node
- local kids = { span("gp-md-label", "Effort") }
- if not model then
-  table.insert(kids, span("gp-md-none", "No model matches"))
- elseif #model.efforts == 0 then
-  table.insert(kids, span("gp-md-none", "This model doesn't take an effort"))
- else
-  local current = Agent.effortFor(model, box.effort)
-  for _, effort in model.efforts do
-   table.insert(kids, el("span", {
-    class = "gp-md-effort" .. (if effort == current then " gp-md-effort-on" else ""),
-    text = effort,
-    actions = { click = "model-effort=" .. effort },
-   }))
-  end
+local function provider(model: Agent.Model): string
+ return string.match(model.selector, "^([^/]+)/") or ""
+end
+
+-- The effort control for `model`; nil when nothing matches the filter, which the list already says.
+local function efforts(box: State.ModelBox, model: Agent.Model?): Node?
+ if not model then return nil end
+ if #model.efforts == 0 then
+  return el("div", { class = "gp-md-foot", key = "efforts" }, { span("gp-md-none", "This model has no effort setting") })
  end
- return el("div", { class = "gp-md-efforts", key = "efforts" }, kids)
+ local current = Agent.effortFor(model, box.effort)
+ local segments = {}
+ for _, effort in model.efforts do
+  table.insert(segments, el("span", {
+   class = "gp-md-seg" .. (if effort == current then " gp-md-seg-on" else ""),
+   text = effort,
+   actions = { click = "model-effort=" .. effort },
+  }))
+ end
+ return el("div", { class = "gp-md-foot", key = "efforts" }, {
+  span("gp-md-label", "Effort"),
+  el("div", { class = "gp-md-segs" }, segments),
+  Ui.spacer(),
+  span("gp-act-key", "← →"),
+ })
 end
 
 function M.view(box: State.ModelBox, agent: Agent.Agent): Node
  local choices = State.modelChoices(box, agent)
- local rows = {}
+ local rows, group = {}, nil
  for n, model in choices do
-  local inUse = model.selector == agent.model
+  local name = provider(model)
+  if name ~= group then
+   group = name
+   table.insert(rows, el("div", { class = "gp-md-group", key = "g-" .. name, text = name }))
+  end
   table.insert(rows, el("div", { class = "gp-md-row" .. (if n == box.selected then " gp-md-row-on" else ""), key = "m" .. n, actions = { click = "model-row=" .. n } }, {
-   span("gp-md-check", if inUse then "✓" else ""),
    span("gp-md-name", model.name),
-   span("gp-md-sel", model.selector),
+   Ui.spacer(),
+   span("gp-md-check", if model.selector == agent.model then "✓" else ""),
   }))
  end
  if #agent.models == 0 then
-  table.insert(rows, span("gp-sr-empty", "Listing models…"))
+  table.insert(rows, span("gp-md-empty", "Listing models…"))
  elseif #rows == 0 then
-  table.insert(rows, span("gp-sr-empty", "Nothing matches “" .. box.field.text .. "”."))
+  table.insert(rows, span("gp-md-empty", "Nothing matches “" .. box.field.text .. "”"))
  end
- return el("div", { class = "gp-panel gp-search gp-models", key = "models" }, {
-  el("div", { class = "gp-sr-box", key = "box" }, { span("gp-sr-slash", "⌕"), Fields.node(box.field, "field", "Search models…") }),
-  el("div", { class = "gp-sr-list gp-md-list", key = "list" }, rows),
-  effortRow(box, agent, choices[box.selected]),
- })
+ local kids = {
+  el("div", { class = "gp-md-search", key = "box" }, { span("gp-md-glass", "⌕"), Fields.node(box.field, "field", "Search models") }),
+  el("div", { class = "gp-md-list", key = "list" }, rows),
+ }
+ local foot = efforts(box, choices[box.selected])
+ if foot then table.insert(kids, foot) end
+ return el("div", { class = "gp-md-pop", key = "models" }, kids)
 end
 
 return M
