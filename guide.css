@@ -756,3 +756,14 @@
 .gp-tree-here .gp-tree-tick { color: light-dark(#2f6fe0, #8ab4ff); }
 .gp-tree-d1 { padding-left: 24px; } .gp-tree-d2 { padding-left: 40px; } .gp-tree-d3 { padding-left: 56px; } .gp-tree-d4 { padding-left: 72px; }
 .gp-tree-d5 { padding-left: 88px; } .gp-tree-d6 { padding-left: 104px; } .gp-tree-d7 { padding-left: 120px; } .gp-tree-d8 { padding-left: 136px; }
+.gp-tree-folder { cursor: pointer; }
+.gp-tree-folder:hover { background: light-dark(#eef0f3, #2a2c31); }
+.gp-tree-holds .gp-tree-folder-name { font-weight: 650; color: light-dark(#0b1f44, #ffffff); }
+/* the PR description under the header */
+.gp-desc { display: flex; flex-direction: column; padding: 10px 0 6px; border-bottom: 1px solid light-dark(#e3e5e8, #2c2e33); }
+.gp-desc > * { flex-shrink: 0; }
+.gp-desc-head { display: flex; gap: 10px; align-items: baseline; padding: 4px 4px; border-radius: 6px; cursor: pointer; }
+.gp-desc-head:hover { background: light-dark(#eef0f3, #2a2c31); }
+.gp-desc-title { font-family: -apple-system, "SF Pro Text", "Helvetica Neue", sans-serif; font-size: 15px; font-weight: 650; }
+.gp-desc-by { font-family: -apple-system, "SF Pro Text", "Helvetica Neue", sans-serif; font-size: 13px; color: light-dark(#8a8f98, #7d838d); }
+.gp-desc-md { max-width: 860px; padding: 8px 4px 12px 26px; }

@@ -54,18 +54,26 @@ end
 -- Indents deeper than this line up with it.
 local MAX_DEPTH = 8
 
--- The unguided page's one step per file: a GitHub-style tree whose file rows tick and jump like steps.
+-- The unguided page's one step per file: a GitHub-style tree whose file rows tick and jump like
+-- steps, and whose folders fold on a click. A folded folder hiding the file you are on is marked.
 local function fileTree(s: State.State): Node
  local r = s.review
  local stepOf: { [string]: Guide.Step } = {}
  for _, step in r.steps do stepOf[step.file] = step end
  local current = State.currentStep(s)
  local rows = {}
+ -- The depth of the folded folder whose contents are being skipped.
+ local hiddenBelow = math.huge
  for _, row in FileTree.rows(r.pr.files) do
+  if row.depth > hiddenBelow then continue end
+  hiddenBelow = math.huge
   local depth = " gp-tree-d" .. math.min(row.depth, MAX_DEPTH)
   if row.kind == "folder" then
-   table.insert(rows, el("div", { class = "gp-tree-row gp-tree-folder" .. depth, key = "td-" .. Text.keyOf(row.path) }, {
-    span("gp-tree-glyph", "▾"),
+   local folded = s.foldedFolders[row.path] == true
+   if folded then hiddenBelow = row.depth end
+   local holds = folded and string.sub(current.file, 1, #row.path + 1) == row.path .. "/"
+   table.insert(rows, el("div", { class = "gp-tree-row gp-tree-folder" .. depth .. (if holds then " gp-tree-holds" else ""), key = "td-" .. Text.keyOf(row.path), actions = { click = "toggle-folder=" .. row.path } }, {
+    span("gp-tree-glyph", if folded then "▸" else "▾"),
     span("gp-tree-folder-name", row.name),
    }))
   else

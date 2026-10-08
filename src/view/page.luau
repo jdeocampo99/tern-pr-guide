@@ -1,9 +1,10 @@
 --!strict
--- The page: header, overview, each change's card beside its code, the supporting files, and the
--- hint bar. Also the node paths the block scrolls to and focuses, which follow these keys.
+-- The page: header, description, overview, each change's card beside its code, the supporting
+-- files, and the hint bar. Also the node paths the block scrolls to and focuses, which follow these keys.
 local Change = require("./change")
 local Code = require("./code")
 local Comments = require("./comments")
+local Description = require("./description")
 local Header = require("./header")
 local Hints = require("./hints")
 local Overview = require("./overview")
@@ -21,7 +22,7 @@ local M = {}
 
 function M.view(s: State.State, motion: Ui.Motion): Node
  local plan = State.plan(s)
- local page = { Header.view(s) }
+ local page = { Header.view(s), Description.view(s, motion) }
  local overview = Overview.view(s, motion)
  if overview then table.insert(page, overview) end
  for n, change in s.review.guide.changes do

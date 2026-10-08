@@ -263,6 +263,10 @@ local ACTIONS: { [string]: Handler } = {
  ["toggle-flow"] = function(s, cx)
   if s.flowOpen then closeAfter(s, cx, { "flow" }, function() s.flowOpen = false end) else s.flowOpen = true end
  end,
+ ["toggle-description"] = function(s, cx)
+  if s.descriptionOpen then closeAfter(s, cx, { "description" }, function() s.descriptionOpen = false end) else s.descriptionOpen = true end
+ end,
+ ["toggle-folder"] = function(s, _, path) s.foldedFolders[path] = if s.foldedFolders[path] then nil else true end,
  ["toggle-group"] = function(s, cx)
   if s.supportingOpen then closeAfter(s, cx, { "group" }, function() s.supportingOpen = false end) else s.supportingOpen = true end
  end,

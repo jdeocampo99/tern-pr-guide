@@ -20,6 +20,8 @@ export type PR = {
  repo: string,
  number: number,
  title: string,
+ -- The PR description, Markdown; empty when it has none.
+ body: string,
  url: string,
  author: string,
  baseRef: string,

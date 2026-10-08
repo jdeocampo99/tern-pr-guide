@@ -12,7 +12,7 @@ go, without leaving your terminal.
 ## What it does
 
 **Starts with the big picture.** A short overview anyone can follow, and an optional before/after
-diagram of what the PR changes.
+diagram of what the PR changes. The author's own description is one click (or `i`) away.
 
 **Walks you through the code.** Each change has a sticky card on the left with its steps; the code
 for the step you're on sits on the right. `j`/`k` move between steps, `⏎` marks a step reviewed and
@@ -117,7 +117,7 @@ keep reading meanwhile.
 | `/` | search | `v` | whole file reviewed | `a` | include / exclude all |
 | `s` | supporting changes | `a` `d` | add / dismiss suggestion | `1` `2` `3` | comment, approve, request changes |
 | `o` | open every supporting file | `c` | comment on this step | `⌘⏎` | submit |
-| `g` | open on GitHub | | | `?` | all shortcuts |
+| `g` | open on GitHub | `i` | PR description | `?` | all shortcuts |
 
 ## Good to know
 

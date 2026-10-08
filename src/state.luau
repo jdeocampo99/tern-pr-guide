@@ -49,6 +49,10 @@ export type State = {
  -- Bodies and panels playing their closing animation.
  closing: { [string]: boolean },
  flowOpen: boolean,
+ -- The PR description, folded to its heading until opened.
+ descriptionOpen: boolean,
+ -- Folders of the file tree the reader folded, by path.
+ foldedFolders: { [string]: boolean },
  supportingOpen: boolean,
  fileOpen: { [string]: boolean },
  -- Blocks the reader opened by hand, by block id; the budget never folds them.
@@ -91,7 +95,7 @@ function M.new(pr: Pr.PR, guide: Guide.Guide, to: { repo: string?, dryRunPath: s
  return {
   review = Review.new(pr, guide), diffs = diffs,
   peek = {}, folded = {}, reveals = {}, whole = {}, closing = {},
-  flowOpen = true, supportingOpen = false, fileOpen = {}, pinned = {},
+  flowOpen = true, descriptionOpen = false, foldedFolders = {}, supportingOpen = false, fileOpen = {}, pinned = {},
   flash = nil, flashCount = 0,
   composer = nil, search = nil, hit = nil,
   helpOpen = false, reviewOpen = false, reviewCursor = 1, editingSummary = false,

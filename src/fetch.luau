@@ -23,7 +23,7 @@ export type Destination = { repo: string?, dryRunPath: string? }
 
 type Fail = (message: string) -> ()
 type Job = { repo: string, fail: Fail }
-type Meta = { number: number, title: string, url: string, author: { login: string }?, baseRefName: string, headRefOid: string, mergeCommit: { oid: string }? }
+type Meta = { number: number, title: string, body: string?, url: string, author: { login: string }?, baseRefName: string, headRefOid: string, mergeCommit: { oid: string }? }
 
 local GH_MS = 30_000
 local GIT_MS = 60_000
@@ -125,7 +125,7 @@ local function trimmed(text: string): string
 end
 
 local function readMeta(job: Job, pr: string, ok: (meta: Meta) -> ())
- local argv = { "gh", "pr", "view", pr, "--json", "number,title,url,author,baseRefName,headRefOid,mergeCommit" }
+ local argv = { "gh", "pr", "view", pr, "--json", "number,title,body,url,author,baseRefName,headRefOid,mergeCommit" }
  run(argv, { cwd = job.repo, timeout_ms = GH_MS }, named("gh pr view", job.fail), function(stdout)
   ok(tern.json.decode(stdout))
  end)
@@ -216,6 +216,7 @@ local function prOf(meta: Meta, head: string, files: { Pr.File }): Pr.PR
   repo = string.match(meta.url, "^https?://[^/]+/([^/]+/[^/]+)/pull/") or "",
   number = meta.number,
   title = meta.title,
+  body = meta.body or "",
   url = meta.url,
   author = if meta.author then meta.author.login else "",
   baseRef = meta.baseRefName,
