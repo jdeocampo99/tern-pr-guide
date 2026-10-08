@@ -22,6 +22,15 @@ function M.new(command: string, path: string, model: string): Agent
  return { command = command, path = path, model = model, name = string.match(model, "[^/]+$") or model }
 end
 
+-- The first `omp` in the directories of `path` (a colon-separated PATH value) that `exists`.
+function M.findOnPath(path: string, exists: (string) -> boolean): string?
+ for dir in string.gmatch(path, "[^:]+") do
+  local candidate = dir .. "/omp"
+  if exists(candidate) then return candidate end
+ end
+ return nil
+end
+
 -- A YAML scalar without its quotes or trailing comment.
 local function scalar(raw: string): string
  local quoted = string.match(raw, "^\"([^\"]*)\"") or string.match(raw, "^'([^']*)'")

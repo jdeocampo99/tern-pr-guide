@@ -279,14 +279,19 @@ function M.submitReview(pr: Pr.PR, payload: Review.Payload, to: Destination, don
  end)
 end
 
--- The reader's agent: `omp` on the login shell's PATH with the model of its review role, else its
--- default role. Calls `done` once, with nil when either is missing.
+-- The reader's agent: `omp` on their interactive shell's PATH with the model of its review role,
+-- else its default role. Calls `done` once, with nil when either is missing. Tern started from the
+-- Dock has a bare PATH, and tools like `omp` (often in ~/.bun/bin) are usually added by the shell's
+-- rc file, so the PATH comes from an interactive login shell and `omp` is looked up on it here
+-- (`command -v` would report an alias instead of the file).
 function M.findAgent(done: (agent: Agent.Agent?) -> ())
  local home = tern.getenv("HOME")
  if not home then return done(nil) end
+ local shell = tern.getenv("SHELL") or "/bin/zsh"
  local missing = function() done(nil) end
- run({ "/bin/sh", "-lc", "command -v omp && printf %s \"$PATH\"" }, { timeout_ms = GH_MS }, missing, function(stdout)
-  local command, path = string.match(stdout, "([^\n]+)\n([^\n]*)$")
+ run({ shell, "-lic", "printf '\\n%s%s' PRGUIDE_PATH= \"$PATH\"" }, { timeout_ms = GH_MS }, missing, function(stdout)
+  local path = string.match(stdout, "PRGUIDE_PATH=([^\n]*)%s*$")
+  local command = if path then Agent.findOnPath(path, tern.fs.exists) else nil
   local config = home .. Agent.CONFIG
   local model = if command and tern.fs.exists(config) then Agent.reviewModel(tern.fs.read(config)) else nil
   done(if model then Agent.new(command :: string, path :: string, model) else nil)
