@@ -69,8 +69,8 @@ export type State = {
  -- The review panel's selected comment, an index into Review.items.
  reviewCursor: number,
  editingSummary: boolean,
- -- A mark is playing out; a second press would see the blocks ticked and unmark them.
- marking: boolean,
+ -- The change being drawn came from a key press, so it shows at once instead of animating.
+ keyed: boolean,
  submit: Submit,
  -- The reader's AI agent writing a guide, offered while the page has none.
  ai: Agent.Run?,
@@ -100,7 +100,7 @@ function M.new(pr: Pr.PR, guide: Guide.Guide, to: { repo: string?, dryRunPath: s
   flash = nil, flashCount = 0,
   composer = nil, search = nil, hit = nil,
   helpOpen = false, reviewOpen = false, reviewCursor = 1, editingSummary = false,
-  marking = false, submit = { repo = to.repo, dryRunPath = to.dryRunPath, sending = false, error = nil }, ai = nil,
+  keyed = false, submit = { repo = to.repo, dryRunPath = to.dryRunPath, sending = false, error = nil }, ai = nil,
   born = {}, booted = false,
  }
 end

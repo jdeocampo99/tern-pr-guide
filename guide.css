@@ -131,11 +131,9 @@
 
 /* motion */
 @keyframes gp-rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
-@keyframes gp-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes gp-fold { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(-8px); } }
 .gp-card, .gp-panel { animation: gp-rise 200ms ease-out; }
-.gp-ol-step, .gp-ol-stepbody { animation: gp-fade 200ms ease-out; }
-.gp-closing-panel { animation: gp-fold 180ms ease-in forwards; }
+.gp-closing-panel { animation: gp-fold 150ms cubic-bezier(0.23, 1, 0.32, 1) forwards; }
 .gp-btn, .gp-ol-step, .gp-check, .gp-check-box, .gp-status-link { transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease; }
 .gp-card, .gp-fhead { transition: background-color 220ms ease, border-color 220ms ease, opacity 220ms ease; }
 .gp-cell { transition: background-color 300ms ease; }
@@ -548,19 +546,19 @@
 @keyframes gp-land-frame1 { 0% { border-color: light-dark(#4f86e8, #5b8ff0); } 100% { border-color: light-dark(#dfe2e6, #33363d); } }
 @keyframes gp-land-head0 { 0% { background-color: light-dark(#dce8fb, #2a3a55); } 100% { background-color: light-dark(#f6f7f9, #24262b); } }
 @keyframes gp-land-head1 { 0% { background-color: light-dark(#dce8fb, #2a3a55); } 100% { background-color: light-dark(#f6f7f9, #24262b); } }
-.gp-flash0 { animation: gp-land-frame0 900ms ease-out; }
-.gp-flash1 { animation: gp-land-frame1 900ms ease-out; }
-.gp-flash0 > .gp-fhead { animation: gp-land-head0 900ms ease-out; }
-.gp-flash1 > .gp-fhead { animation: gp-land-head1 900ms ease-out; }
-.gp-supporting.gp-flash0 > .gp-sup-row { animation: gp-land-head0 900ms ease-out; border-radius: 8px; }
-.gp-supporting.gp-flash1 > .gp-sup-row { animation: gp-land-head1 900ms ease-out; border-radius: 8px; }
+.gp-flash0 { animation: gp-land-frame0 400ms ease-out; }
+.gp-flash1 { animation: gp-land-frame1 400ms ease-out; }
+.gp-flash0 > .gp-fhead { animation: gp-land-head0 400ms ease-out; }
+.gp-flash1 > .gp-fhead { animation: gp-land-head1 400ms ease-out; }
+.gp-supporting.gp-flash0 > .gp-sup-row { animation: gp-land-head0 400ms ease-out; border-radius: 8px; }
+.gp-supporting.gp-flash1 > .gp-sup-row { animation: gp-land-head1 400ms ease-out; border-radius: 8px; }
 .gp-ccard .gp-band-label { font-size: 12px; margin-bottom: 6px; }
 .gp-band-steps { font-family: -apple-system, "SF Pro Text", "Helvetica Neue", sans-serif; font-size: 13px; color: light-dark(#8a8f98, #8b919a); }
 /* comment "+" in the gutter, shown on hover like GitHub; range being commented on is tinted */
 .gp-plus, .gp-plus-none { width: 20px; flex-shrink: 0; margin: 0 2px; }
 .gp-plus { text-align: center; font-size: 13px; font-weight: 700; line-height: 17px; border-radius: 5px; color: #fff; background: light-dark(#2f6fe0, #3b6fd8); opacity: 0; cursor: pointer; transition: opacity 120ms ease, transform 120ms ease; }
 .gp-row:hover .gp-plus { opacity: 1; }
-.gp-plus:hover { transform: scale(1.15); }
+.gp-plus:hover { transform: scale(1.05); }
 .gp-selected, .gp-selected.gp-add, .gp-selected.gp-del, .gp-selected.gp-ctx { background: light-dark(#fff3c4, #3d3620); }
 .gp-gap-gut { width: 116px; }
 /* your review: the button in the title row and the panel it opens */
@@ -780,3 +778,8 @@
 .gp-split-right .gp-desc { padding-top: 0; }
 .gp-split > .gp-hintbar { position: static; margin-top: 0; flex-shrink: 0; }
 .gp-split-right .gp-fhead { top: 0; }
+/* keys feel instant: the search box appears without motion */
+.gp-search { animation: none; }
+/* press feedback on buttons */
+.gp-btn, .gp-rv-button, .gp-rv-submit { transition: transform 120ms cubic-bezier(0.23, 1, 0.32, 1), background-color 160ms ease, border-color 160ms ease, color 160ms ease, filter 140ms ease; }
+.gp-btn:active, .gp-rv-button:active, .gp-rv-submit:active { transform: scale(0.97); }

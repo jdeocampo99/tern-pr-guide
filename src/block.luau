@@ -41,9 +41,7 @@ type Block = {
 local ARGS = "repo=<directory> to pick a PR, or pr=<number or URL> with repo=<checkout path>, optionally guide=<file> and post=true"
 local SAMPLE_GUIDE = "fixtures/guide-350.json"
 
--- How long a fresh tick shows on still-open code before the code folds.
-local TICK_HOLD_MS = 380
--- The closing animations in guide.css last 180-200 ms.
+-- The closing animations in guide.css last 150-200 ms.
 local CLOSE_MS = 190
 
 -- Sends frame ops after the render that draws their targets. A target the render dropped makes
@@ -54,22 +52,24 @@ local function frameLater(cx: BlockCx, ops: { any })
  end)
 end
 
--- Moves straight to `path` and flashes the block `flashKey`, so the jump reads as intended. Tern's
--- reveal cannot animate and a glide faked from line scrolls stuttered.
+-- Moves straight to `path`, flashing the block `flashKey` so a clicked jump reads as intended.
+-- Tern's reveal cannot animate and a glide faked from line scrolls stuttered.
 local function jump(s: State, cx: BlockCx, path: string, align: string, flashKey: string?)
  s.flash, s.flashCount = flashKey, s.flashCount + 1
  frameLater(cx, { { "reveal", path, align } })
 end
 
--- Explicit jumps (clicking a step, file, or diagram box) land the block at the top; j/k only scroll
--- when the next block is off screen, and only as far as needed. Both flash the block landed on.
+-- Explicit jumps (clicking a step, file, or diagram box) land the block at the top and flash it;
+-- j/k only scroll when the next block is off screen, only as far as needed, and never flash.
 local function follow(s: State, cx: BlockCx, explicit: boolean)
  local key = State.currentStep(s).key
- jump(s, cx, Page.blockPath(key), if explicit then "start" else "nearest", key)
+ jump(s, cx, Page.blockPath(key), if explicit then "start" else "nearest", if explicit then key else nil)
 end
 
--- Plays the closing animation of `ids`, then applies the change that removes them.
+-- Plays the closing animation of `ids`, then applies the change that removes them. A key press
+-- applies it at once: keys are pressed too often to wait on motion.
 local function closeAfter(s: State, cx: BlockCx, ids: { string }, apply: () -> ())
+ if s.keyed then return apply() end
  for _, id in ids do s.closing[id] = true end
  cx:render()
  tern.timer(CLOSE_MS, function()
@@ -79,11 +79,9 @@ local function closeAfter(s: State, cx: BlockCx, ids: { string }, apply: () -> (
  end)
 end
 
--- Marks the steps `keys` reviewed or, when all already are, unmarks them. Marking plays out in
--- order so the move is legible: the tick lands with the code still open, then the code folds, the
--- next step slides up into its place, and the change card points at the next unreviewed step.
-local function markSteps(s: State, cx: BlockCx, keys: { string })
- if s.marking then return end
+-- Marks the steps `keys` reviewed, folding their code and moving past the last one, or, when all
+-- already are, unmarks them. Instant: marking is the most pressed key of a review.
+local function markSteps(s: State, keys: { string })
  local r = s.review
  if Review.allReviewed(r, keys) then
   Review.unmark(r, keys)
@@ -91,62 +89,35 @@ local function markSteps(s: State, cx: BlockCx, keys: { string })
   return
  end
  local last = Review.lastStep(r, keys)
- local fresh = Review.mark(r, keys)
- local ids = {}
- for _, key in fresh do
-  s.peek[key] = true
-  table.insert(ids, "block:" .. key)
- end
- s.marking = true
- cx:render()
- tern.timer(TICK_HOLD_MS, function()
-  closeAfter(s, cx, ids, function()
-   for _, key in fresh do State.setOpen(s, key, false) end
-   s.marking = false
-   if last > 0 then Review.advance(r, last) end
-  end)
- end)
+ for _, key in Review.mark(r, keys) do State.setOpen(s, key, false) end
+ if last > 0 then Review.advance(r, last) end
 end
 
-local function markFile(s: State, cx: BlockCx, path: string)
+local function markFile(s: State, _: BlockCx, path: string)
  local r = s.review
  local keys = Review.keysOfFile(r, path)
  if #keys > 0 then
-  markSteps(s, cx, keys)
+  markSteps(s, keys)
  elseif r.filesViewed[path] then
   r.filesViewed[path] = nil
- elseif s.fileOpen[path] then
-  closeAfter(s, cx, { "file:" .. path }, function()
-   State.setOpen(s, State.supportingBlock(path), false)
-   r.filesViewed[path] = true
-  end)
  else
+  if s.fileOpen[path] then State.setOpen(s, State.supportingBlock(path), false) end
   r.filesViewed[path] = true
  end
 end
 
 -- Marks every supporting file reviewed, folding the open ones, or unmarks them all when all are.
-local function markSupporting(s: State, cx: BlockCx)
+local function markSupporting(s: State)
  local r = s.review
  local files = Review.supportingFiles(r)
  local all = true
  for _, file in files do
   if not r.filesViewed[file.path] then all = false end
  end
- if all then
-  for _, file in files do r.filesViewed[file.path] = nil end
-  return
- end
- local ids = {}
  for _, file in files do
-  if s.supportingOpen and s.fileOpen[file.path] then table.insert(ids, "file:" .. file.path) end
+  r.filesViewed[file.path] = if all then nil else true
+  if not all then State.setOpen(s, State.supportingBlock(file.path), false) end
  end
- closeAfter(s, cx, ids, function()
-  for _, file in files do
-   r.filesViewed[file.path] = true
-   State.setOpen(s, State.supportingBlock(file.path), false)
-  end
- end)
 end
 
 local function toggleHelp(s: State, cx: BlockCx)
@@ -288,8 +259,8 @@ local ACTIONS: { [string]: Handler } = {
  ["open-github"] = function(s, cx) cx:open(s.review.pr.url) end,
 
  -- marking
- ["review-step"] = function(s, cx, key) markSteps(s, cx, { key }) end,
- ["mark-change"] = function(s, cx, n) markSteps(s, cx, Review.keysOfChange(s.review, tonumber(n) :: number)) end,
+ ["review-step"] = function(s, _, key) markSteps(s, { key }) end,
+ ["mark-change"] = function(s, _, n) markSteps(s, Review.keysOfChange(s.review, tonumber(n) :: number)) end,
  ["mark-file"] = markFile,
  ["mark-supporting"] = markSupporting,
 
@@ -544,7 +515,7 @@ local block: BlockDef<Block> = {
    if b.picker then return { main = PickerView.view(b.picker, (b.repo :: Fetch.Repo).root) } end
    return { main = Notice.view(b.notice) }
   end
-  local motion = { born = s.born, next = {}, booted = s.booted }
+  local motion = { born = s.born, next = {}, booted = s.booted, animate = not s.keyed }
   local main = Page.view(s, motion)
   s.born, s.booted = motion.next, true
   return { main = main }
@@ -552,6 +523,7 @@ local block: BlockDef<Block> = {
  event = function(b: Block, ev: UiEvent, cx: BlockCx)
   if ev.ev ~= "action" then return end
   local action = { act = ev.act, value = ev.value }
+  if b.page then b.page.keyed = false end
   if action.act == "generate-guide" then
    generate(b, cx)
   elseif b.page then
@@ -566,13 +538,17 @@ local block: BlockDef<Block> = {
   if not s then return false end
   local action = Keys.action(s, key)
   if action then
+   s.keyed = true
    dispatch(s, cx, action)
    return true
   end
   local field = State.field(s)
   if field then
    local next = Keys.afterTyping(State.mode(s), Fields.key(field, key))
-   if next then dispatch(s, cx, next) end
+   if next then
+    s.keyed = true
+    dispatch(s, cx, next)
+   end
    return true
   end
   -- Panels swallow the keys they don't use.

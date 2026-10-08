@@ -4,8 +4,9 @@ local Guide = require("../guide")
 local Text = require("../text")
 
 -- Remembers each collapsible body's unroll class across renders: views read the last render's
--- `born` and record this render's into `next`.
-export type Motion = { born: { [string]: string }, next: { [string]: string }, booted: boolean }
+-- `born` and record this render's into `next`. Bodies born in a render a key caused (`animate`
+-- false) never unroll.
+export type Motion = { born: { [string]: string }, next: { [string]: string }, booted: boolean, animate: boolean }
 
 export type KindLabel = { verb: string, word: string, icon: string }
 
@@ -83,7 +84,7 @@ end
 -- restart the animation; `closing` plays the roll-up before the body goes.
 function M.body(motion: Motion, id: string, closing: boolean, height: number, children: { Node }): Node
  local bucket = math.clamp(math.ceil(height / 40), 1, 75)
- local born = motion.born[id] or (if motion.booted then "gp-hb" .. bucket else "")
+ local born = motion.born[id] or (if motion.booted and motion.animate then "gp-hb" .. bucket else "")
  motion.next[id] = born
  return el("div", { class = "gp-body gp-rb" .. bucket .. " " .. born .. (if closing then " gp-closing" else ""), key = "body" }, children)
 end

@@ -144,7 +144,6 @@ function M.step(s: State.State, motion: Ui.Motion, plan: State.Plan, step: Guide
   done = reviewed,
   check = Ui.check(reviewed, "Reviewed", "review-step=" .. key),
  })
- local closingId = if s.closing["block:" .. key] then "block:" .. key else "peek:" .. key
  -- The landing flash alternates two identical animations so landing on the same block replays it.
  local flash = if s.flash == key then " gp-flash" .. (s.flashCount % 2) else ""
  local class = "gp-excerpt" .. flash .. (if State.currentStep(s).key == key then " gp-current" else "")
@@ -153,7 +152,7 @@ function M.step(s: State.State, motion: Ui.Motion, plan: State.Plan, step: Guide
  end
  local show = State.show(s, step.file, key, step)
  local rows, height = M.rows(s, fd, key, show, plan.plain[key] == true, Comments.forBlock(s, step.file, key, true))
- return el("div", { class = class, key = key }, { head, Ui.body(motion, "x:" .. key, s.closing[closingId] == true, height, rows) })
+ return el("div", { class = class, key = key }, { head, Ui.body(motion, "x:" .. key, s.closing["peek:" .. key] == true, height, rows) })
 end
 
 return M
