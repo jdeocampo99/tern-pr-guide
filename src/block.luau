@@ -1,7 +1,7 @@
 --!strict
--- The review page block: opens the PR its arguments name (or the bundled sample), draws the page,
--- and turns clicks and keys into state changes plus the scrolling, focusing and animation timing
--- only a live window can do.
+-- The review page block: lets the reader pick a PR from a checkout, opens the PR its arguments name
+-- (or the bundled sample), draws the page, and turns clicks and keys into state changes plus the
+-- scrolling, focusing and animation timing only a live window can do.
 local Diff = require("./diff")
 local Fetch = require("./fetch")
 local Fields = require("./text-field")
@@ -9,6 +9,8 @@ local Guide = require("./guide")
 local Keys = require("./keys")
 local Notice = require("./view/notice")
 local Page = require("./view/page")
+local Picker = require("./picker")
+local PickerView = require("./view/picker")
 local Pr = require("./pr")
 local Review = require("./review")
 local State = require("./state")
@@ -16,19 +18,22 @@ local State = require("./state")
 type State = State.State
 type Handler = (s: State, cx: BlockCx, value: string) -> ()
 
--- How the block was opened: a PR and its checkout, or neither for the bundled sample.
-type Options = { target: Fetch.Target?, guide: string?, post: boolean }
+-- How the block was opened: a PR and its checkout, a directory to pick a PR from (empty when the
+-- palette command knew none), or neither for the bundled sample.
+type Options = { pr: string?, repo: string?, guide: string?, post: boolean }
 
--- The review page once its PR has loaded; until then, what loading is doing or why it failed.
+-- The review page once its PR has loaded; before that, the PR picker or what loading is doing.
 type Block = {
+ opts: Options,
  -- The PR as the reader named it ("#350"), for the title and the loading page.
  name: string,
- stage: string,
- failure: string?,
+ repo: Fetch.Repo?,
+ picker: Picker.Picker?,
+ notice: Notice.Notice,
  page: State?,
 }
 
-local ARGS = "pr=<number or URL> and repo=<checkout path>, optionally guide=<file> and post=true"
+local ARGS = "repo=<directory> to pick a PR, or pr=<number or URL> with repo=<checkout path>, optionally guide=<file> and post=true"
 local SAMPLE_GUIDE = "fixtures/guide-350.json"
 
 -- How long a fresh tick shows on still-open code before the code folds.
@@ -358,47 +363,112 @@ local function options(args: { string }): (Options?, string?)
  end
  local pr, repo = given.pr, given.repo
  if not pr and not repo then return { guide = given.guide or SAMPLE_GUIDE, post = false }, nil end
- if not pr or not repo then return nil, "pr= and repo= go together. The block takes " .. ARGS .. "." end
- return { target = { pr = pr, repo = repo }, guide = given.guide, post = given.post == "true" }, nil
+ if pr and (repo or "") == "" then return nil, "pr= needs repo=. The block takes " .. ARGS .. "." end
+ return { pr = pr, repo = repo, guide = given.guide, post = given.post == "true" }, nil
 end
 
-local function nameOf(target: Fetch.Target?): string
- if not target then return "" end
- local number = string.match(target.pr, "^#?(%d+)$") or string.match(target.pr, "/pull/(%d+)")
- return if number then "#" .. number else target.pr
+local function nameOf(pr: string?): string
+ if not pr then return "" end
+ local number = string.match(pr, "^#?(%d+)$") or string.match(pr, "/pull/(%d+)")
+ return if number then "#" .. number else pr
 end
 
--- Shows `pr` with the guide the options name, or the default walkthrough. Unless real posting was
--- asked for, submitting is a dry run.
-local function showPr(b: Block, pr: Pr.PR, opts: Options)
+-- Shows `pr` with the guide the options name, else the checkout's guide for it, else the default
+-- walkthrough. Unless real posting was asked for, submitting is a dry run.
+local function showPr(b: Block, pr: Pr.PR)
+ local path = b.opts.guide
+ if not path and b.repo and tern.fs.exists(Fetch.guidePath(b.repo, pr.number)) then path = Fetch.guidePath(b.repo, pr.number) end
  local guide, problem = Guide.defaultGuide(pr), nil
- if opts.guide then guide, problem = Guide.read(opts.guide, pr) end
+ if path then guide, problem = Guide.read(path, pr) end
  if not guide then
-  b.failure = "Couldn't use the guide " .. (opts.guide :: string) .. ": " .. (problem :: string)
+  b.notice = Notice.failed(b.name, "Couldn't use the guide " .. (path :: string) .. ": " .. (problem :: string))
   return
  end
- local repo = if opts.target then opts.target.repo else nil
- local dryRunPath = if opts.post and repo then nil else Fetch.dryRunPath(pr.number)
+ local repo = if b.repo then b.repo.root else nil
+ local dryRunPath = if b.opts.post and repo then nil else Fetch.dryRunPath(pr.number)
  b.page = State.new(pr, guide, { repo = repo, dryRunPath = dryRunPath })
+end
+
+-- Loads `pr` from the block's checkout, showing each stage, then shows it.
+local function openPr(b: Block, cx: BlockCx, pr: string)
+ b.picker, b.name = nil, nameOf(pr)
+ Fetch.openPr({ pr = pr, repo = (b.repo :: Fetch.Repo).root }, function(stage)
+  b.notice = Notice.loading(b.name, stage)
+  cx:render()
+ end, function(loaded, err)
+  if loaded then showPr(b, loaded) else b.notice = Notice.failed(b.name, err :: string) end
+  cx:render()
+ end)
+end
+
+-- Shows the checkout's open PRs to pick from, with the filter field focused.
+local function openPicker(b: Block, cx: BlockCx)
+ local repo = b.repo :: Fetch.Repo
+ local p = Picker.new(Fetch.guidedPrs(repo))
+ b.picker = p
+ Fetch.listPrs(repo.root, function(prs, current, err)
+  p.prs, p.current, p.error, p.loadedAt = prs, current, err, os.time()
+  cx:render()
+ end)
+ frameLater(cx, { { "focus", PickerView.fieldPath } })
+end
+
+type PickerHandler = (b: Block, p: Picker.Picker, cx: BlockCx, value: string) -> ()
+
+local PICKER_ACTIONS: { [string]: PickerHandler } = {
+ ["picker-move"] = function(_, p, cx, delta)
+  Picker.move(p, tonumber(delta) :: number)
+  local row = Picker.rows(p)[p.selected]
+  if row then frameLater(cx, { { "reveal", PickerView.rowPath(row.pr.number), "nearest" } }) end
+ end,
+ ["picker-open"] = function(b, p, cx)
+  local number = Picker.choice(p)
+  if number then openPr(b, cx, tostring(number)) end
+ end,
+ ["picker-clear"] = function(_, p) p.field, p.selected = Fields.create(), 1 end,
+ ["pick-pr"] = function(b, _, cx, number) openPr(b, cx, number) end,
+}
+
+local function pickerDispatch(b: Block, p: Picker.Picker, cx: BlockCx, action: Keys.Action)
+ local handler = PICKER_ACTIONS[action.act]
+ if handler then handler(b, p, cx, action.value or "") end
+end
+
+local function pickerKey(b: Block, p: Picker.Picker, key: Key, cx: BlockCx): boolean
+ local action = Keys.pickerAction(p, key)
+ if action then
+  pickerDispatch(b, p, cx, action)
+  return true
+ end
+ local before = p.field.text
+ if Fields.key(p.field, key) == "ignored" then return false end
+ if p.field.text ~= before then p.selected = 1 end
+ return true
 end
 
 local block: BlockDef<Block> = {
  init = function(cx: BlockCx, args: { string }): Block
   local opts, problem = options(args)
-  local b: Block = { name = nameOf(opts and opts.target), stage = "", failure = problem, page = nil }
-  if not opts then return b end
-  local target = opts.target
-  if not target then
-   showPr(b, Pr.sample(), opts)
+  if not opts then return { opts = { post = false }, name = "", notice = Notice.failed("", problem :: string) } end
+  local pr, dir = opts.pr, opts.repo
+  local b: Block = { opts = opts, name = nameOf(pr), notice = if pr then Notice.loading(nameOf(pr), "") else Notice.findingRepo() }
+  if not dir then
+   showPr(b, Pr.sample())
+   return b
+  end
+  if dir == "" then
+   b.notice = Notice.noRepo()
    return b
   end
   -- Starts after init returns, so each stage renders over a block that exists.
   tern.timer(0, function()
-   Fetch.openPr(target, function(stage)
-    b.stage = stage
-    cx:render()
-   end, function(pr, err)
-    if pr then showPr(b, pr, opts) else b.failure = err end
+   Fetch.findRepo(dir, function(repo, err)
+    if not repo then
+     b.notice = if pr then Notice.failed(b.name, err :: string) else Notice.noRepo()
+    else
+     b.repo = repo
+     if pr then openPr(b, cx, pr) else openPicker(b, cx) end
+    end
     cx:render()
    end)
   end)
@@ -406,20 +476,27 @@ local block: BlockDef<Block> = {
  end,
  title = function(b: Block): string?
   if b.page then return "Review · #" .. b.page.review.pr.number end
+  if b.picker then return "Pull requests" end
   return if b.name ~= "" then "PR " .. b.name else "PR Guide"
  end,
  view = function(b: Block): BlockView
   local s = b.page
-  if not s then return { main = Notice.view(b.name, b.stage, b.failure) } end
+  if not s then
+   if b.picker then return { main = PickerView.view(b.picker, (b.repo :: Fetch.Repo).root) } end
+   return { main = Notice.view(b.notice) }
+  end
   local motion = { born = s.born, next = {}, booted = s.booted }
   local main = Page.view(s, motion)
   s.born, s.booted = motion.next, true
   return { main = main }
  end,
  event = function(b: Block, ev: UiEvent, cx: BlockCx)
-  if b.page and ev.ev == "action" then dispatch(b.page, cx, { act = ev.act, value = ev.value }) end
+  if ev.ev ~= "action" then return end
+  local action = { act = ev.act, value = ev.value }
+  if b.page then dispatch(b.page, cx, action) elseif b.picker then pickerDispatch(b, b.picker, cx, action) end
  end,
  key = function(b: Block, key: Key, cx: BlockCx): boolean?
+  if b.picker then return pickerKey(b, b.picker, key, cx) end
   local s = b.page
   if not s then return false end
   local action = Keys.action(s, key)

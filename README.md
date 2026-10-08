@@ -55,7 +55,19 @@ To work on the plugin itself, clone it and use `tern plugin link /path/to/tern-p
 
 ## Review a PR
 
-Open the review page from Lua, for example in Carly:
+In a terminal inside your clone, open the command palette, choose **Review a pull request**, and
+pick a PR. Type to filter by number, title, author or branch, or paste a PR number or link and
+press `⏎`. The PR for the branch you're on is listed first.
+
+![Picking a pull request](docs/screenshots/picker.png)
+
+To open it with a key, bind the action `plugin.prguide.review` in Tern's keybind settings.
+**PR Guide: sample** in the palette opens a built-in sample, so you can try it without a PR.
+
+Submitting is a dry run by default: the review is saved to `/tmp/prguide-review-<n>.json` and
+nothing is sent. To post to GitHub, open the page from Lua with `post=true`.
+
+**Advanced / scripting.** The page is the block `prguide.guide`:
 
 ```lua
 cx:new_block("prguide.guide", {"pr=123", "repo=/path/to/your/clone"}, "tab")
@@ -63,12 +75,10 @@ cx:new_block("prguide.guide", {"pr=123", "repo=/path/to/your/clone"}, "tab")
 
 | Argument | Meaning |
 |---|---|
-| `pr=` | PR number or URL |
-| `repo=` | path to your local clone |
-| `guide=` | optional guide file (see below) |
-| `post=true` | actually post to GitHub; without it, submitting saves the review to `/tmp/prguide-review-<n>.json` and sends nothing |
-
-**PR Guide** in the command palette opens a built-in sample, so you can try it without a PR.
+| `repo=` | path inside your local clone; on its own, it opens the picker |
+| `pr=` | PR number or URL, opened straight away |
+| `guide=` | guide file to use instead of the clone's (see below) |
+| `post=true` | actually post to GitHub |
 
 Behind the scenes it runs `gh pr view` once, fetches the PR into `refs/prguide/<n>/*` in your clone
 (your branches and working tree are untouched), and diffs locally. Lockfiles and files marked
@@ -80,6 +90,9 @@ Behind the scenes it runs `gh pr view` once, fetches the PR into `refs/prguide/<
 The page works on any PR as-is: one step per changed file. A **guide file** adds the walkthrough:
 the overview, the diagram, the changes and their steps, suggested comments and a drafted summary.
 Any tool can write one (an AI reviewer, a script, a person). The format is in [GUIDE.md](GUIDE.md).
+
+Put a PR's guide at `.git/prguide/<number>.json` in your clone (worktrees share it, and nothing is
+committed). Opening that PR uses it, and the picker marks PRs that have one with **Guide**.
 
 ## Keys
 
@@ -96,6 +109,6 @@ Any tool can write one (an AI reviewer, a script, a person). The format is in [G
 
 - GitHub only accepts review comments on lines the PR changed, so only those lines get a `+`, and a
   comment range stays within one block of changes.
-- Tern has no way for a plugin to ask for input yet, which is why a PR is opened with a line of Lua.
+- The picker lists up to 50 open PRs. For any other PR, paste its number or link.
 - To keep every keypress fast, the page draws at most about 600 lines of code at once. Steps further
   away show just their file header and open when you reach them or click them.

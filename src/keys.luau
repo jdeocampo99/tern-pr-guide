@@ -1,6 +1,7 @@
 --!strict
 -- What each key does in each mode, as the same actions the page's clicks send.
 local Fields = require("./text-field")
+local Picker = require("./picker")
 local Review = require("./review")
 local State = require("./state")
 
@@ -75,6 +76,18 @@ function M.action(s: State.State, key: Key): Action?
  if mode == "composer" or mode == "summary" then return nil end
  if mode == "review" and not isQuestionMark(key) then return reviewKey(s, key) end
  return readingKey(s, key)
+end
+
+-- The action `key` triggers on the PR picker, or nil when it types into the filter field. j and k
+-- move only while the field is empty, so they can still be typed.
+function M.pickerAction(p: Picker.Picker, key: Key): Action?
+ local name = key.name
+ local empty = p.field.text == "" and not (key.ctrl or key.meta or key.alt or key.shift)
+ if name == "down" or (empty and name == "j") then return act("picker-move", 1) end
+ if name == "up" or (empty and name == "k") then return act("picker-move", -1) end
+ if name == "enter" then return act("picker-open") end
+ if name == "escape" then return act("picker-clear") end
+ return nil
 end
 
 -- The action that follows a key typed into a text mode's field.

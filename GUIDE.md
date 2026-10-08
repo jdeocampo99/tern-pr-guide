@@ -4,7 +4,8 @@ A guide tells the review page how to walk a reader through one pull request: a p
 PR split into a few changes with ordered steps, and suggested review comments. The plugin works
 without one; a guide only adds the walkthrough and suggestions.
 
-Any tool can write a guide. The plugin never needs to know which.
+Any tool can write a guide. The plugin never needs to know which. Save the guide for PR `<number>`
+as `.git/prguide/<number>.json` in the clone and the plugin picks it up when that PR opens.
 
 ```json
 {

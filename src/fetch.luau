@@ -1,14 +1,19 @@
 --!strict
--- The plugin's only processes: `gh` for the PR's metadata and for posting the review, `git` in the
--- local checkout for the PR's changes and files. Each step starts the next from its callback; the
--- first failure ends the chain with a message naming the step.
+-- Where the plugin reaches outside itself: `gh` for the PR list, the PR's metadata and posting the
+-- review, `git` in the local checkout for the PR's changes and files, and the checkout's guide
+-- files. Each step starts the next from its callback; the first failure ends the chain with a
+-- message naming the step.
 local GitOutput = require("./git-output")
+local Picker = require("./picker")
 local Pr = require("./pr")
 local Review = require("./review")
 local Text = require("./text")
 
--- A PR as the reader named it (number, URL or branch) and the path of its repository's checkout.
+-- A PR as the reader named it (number, URL or branch) and the root of its repository's checkout.
 export type Target = { pr: string, repo: string }
+
+-- A checkout: its root, and the directory holding guides for its PRs, shared by its worktrees.
+export type Repo = { root: string, guides: string }
 
 -- Where a submitted review goes: in a dry run, the file at `dryRunPath`; otherwise GitHub. Without
 -- a `repo` (the bundled sample) there is no PR to check or post to.
@@ -38,23 +43,28 @@ local function reason(result: ProcessResult): string
 end
 
 -- Runs `argv` and hands its stdout to `ok`; a failed run, or an error from `ok` reading unexpected
--- output, goes to `fail` prefixed with `what`.
-local function run(what: string, argv: { string }, opts: ProcessOptions, fail: Fail, ok: (stdout: string) -> ())
+-- output, goes to `fail`.
+local function run(argv: { string }, opts: ProcessOptions, fail: Fail, ok: (stdout: string) -> ())
  local spawned, err = pcall(tern.process.run, argv, opts, function(result: ProcessResult)
   if result.status ~= 0 then
-   fail(what .. ": " .. reason(result))
+   fail(reason(result))
    return
   end
   local handled, problem = pcall(ok, result.stdout)
-  if not handled then fail(what .. ": " .. Text.errorLine(problem)) end
+  if not handled then fail(Text.errorLine(problem)) end
  end)
- if not spawned then fail(what .. ": " .. Text.errorLine(err)) end
+ if not spawned then fail(Text.errorLine(err)) end
+end
+
+-- `fail` with each message prefixed by the step that failed.
+local function named(what: string, fail: Fail): Fail
+ return function(message: string) fail(what .. ": " .. message) end
 end
 
 local function git(job: Job, what: string, args: { string }, stdin: string?, ok: (stdout: string) -> ())
  local argv = { "git", "--literal-pathspecs", "-C", job.repo }
  table.move(args, 1, #args, #argv + 1, argv)
- run(what, argv, { stdin = stdin, timeout_ms = if args[1] == "fetch" then GIT_FETCH_MS else GIT_MS }, job.fail, ok)
+ run(argv, { stdin = stdin, timeout_ms = if args[1] == "fetch" then GIT_FETCH_MS else GIT_MS }, named(what, job.fail), ok)
 end
 
 local function trimmed(text: string): string
@@ -63,7 +73,7 @@ end
 
 local function readMeta(job: Job, pr: string, ok: (meta: Meta) -> ())
  local argv = { "gh", "pr", "view", pr, "--json", "number,title,url,author,baseRefName,headRefOid" }
- run("gh pr view", argv, { cwd = job.repo, timeout_ms = GH_MS }, job.fail, function(stdout)
+ run(argv, { cwd = job.repo, timeout_ms = GH_MS }, named("gh pr view", job.fail), function(stdout)
   ok(tern.json.decode(stdout))
  end)
 end
@@ -164,7 +174,7 @@ end
 local function post(repo: string, pr: Pr.PR, payload: Review.Payload, done: (Review.Delivery?, string?) -> ())
  local fail = function(message: string) done(nil, message) end
  local argv = { "gh", "api", "--method", "POST", "repos/" .. pr.repo .. "/pulls/" .. pr.number .. "/reviews", "--input", "-" }
- run("gh api", argv, { cwd = repo, stdin = requestJson(payload), timeout_ms = GH_MS }, fail, function(stdout)
+ run(argv, { cwd = repo, stdin = requestJson(payload), timeout_ms = GH_MS }, named("gh api", fail), function(stdout)
   local review = tern.json.decode(stdout)
   done({ kind = "posted", url = review.html_url }, nil)
  end)
@@ -176,11 +186,53 @@ function M.dryRunPath(number: number): string
  return "/tmp/prguide-review-" .. number .. ".json"
 end
 
+function M.guidePath(repo: Repo, number: number): string
+ return repo.guides .. "/" .. number .. ".json"
+end
+
+-- The PRs of `repo` that have a guide file.
+function M.guidedPrs(repo: Repo): { [number]: boolean }
+ if not tern.fs.exists(repo.guides) then return {} end
+ return Picker.guideNumbers(tern.fs.list(repo.guides))
+end
+
+-- Finds the checkout `dir` is in. Calls `done` once, with it or with what failed.
+function M.findRepo(dir: string, done: (repo: Repo?, err: string?) -> ())
+ local job: Job = { repo = dir, fail = function(message: string) done(nil, message) end }
+ if not tern.fs.exists(dir) then return job.fail("No checkout at " .. dir) end
+ git(job, "git rev-parse", { "rev-parse", "--path-format=absolute", "--show-toplevel", "--git-common-dir" }, nil, function(stdout)
+  local root, common = string.match(stdout, "^([^\n]+)\n([^\n]+)")
+  done({ root = root :: string, guides = (common :: string) .. "/prguide" }, nil)
+ end)
+end
+
+-- The open PRs of the checkout at `root` and the number of its current branch's PR, if it has one.
+-- Calls `done` once, with the list or with the first line of what `gh` said went wrong.
+function M.listPrs(root: string, done: (prs: { Picker.Summary }?, current: number?, err: string?) -> ())
+ local prs, current, waiting, failed = nil, nil, 2, false
+ local function finish()
+  waiting -= 1
+  if waiting == 0 and not failed then done(prs, current, nil) end
+ end
+ local list = { "gh", "pr", "list", "--state", "open", "--limit", "50", "--json", Picker.LIST_FIELDS }
+ run(list, { cwd = root, timeout_ms = GH_MS }, function(message)
+  failed = true
+  done(nil, nil, message)
+ end, function(stdout)
+  prs = Picker.parse(stdout)
+  finish()
+ end)
+ -- A branch without a PR is no failure: the list just has no "This branch" row.
+ run({ "gh", "pr", "view", "--json", "number" }, { cwd = root, timeout_ms = GH_MS }, finish, function(stdout)
+  current = tern.json.decode(stdout).number
+  finish()
+ end)
+end
+
 -- Loads `target` from GitHub and its checkout, reporting each stage as it starts. Calls `done`
 -- once, with the PR or with what failed.
 function M.openPr(target: Target, progress: (stage: string) -> (), done: (pr: Pr.PR?, err: string?) -> ())
  local job: Job = { repo = target.repo, fail = function(message: string) done(nil, message) end }
- if not tern.fs.exists(target.repo) then return job.fail("No checkout at " .. target.repo) end
  progress("Reading the PR from GitHub")
  readMeta(job, target.pr, function(meta)
   progress("Fetching its commits into " .. target.repo)
@@ -207,7 +259,7 @@ function M.submitReview(pr: Pr.PR, payload: Review.Payload, to: Destination, don
  end
  if not repo then return deliver() end
  local fail = function(message: string) done(nil, message) end
- run("gh pr view", { "gh", "pr", "view", pr.url, "--json", "headRefOid" }, { cwd = repo, timeout_ms = GH_MS }, fail, function(stdout)
+ run({ "gh", "pr", "view", pr.url, "--json", "headRefOid" }, { cwd = repo, timeout_ms = GH_MS }, named("gh pr view", fail), function(stdout)
   local head = tern.json.decode(stdout).headRefOid
   if head ~= pr.head then
    fail("The PR moved on to " .. string.sub(head, 1, 7) .. " since this page loaded, so nothing was sent. Reopen it to review the new commits.")
