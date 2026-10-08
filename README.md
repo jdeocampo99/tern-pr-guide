@@ -184,5 +184,7 @@ review block** (see [AI guided review](#ai-guided-review)).
 - GitHub only accepts review comments on lines the PR changed, so only those lines get a `+`, and a
   comment range stays within one block of changes.
 - The picker lists up to 50 open PRs. For any other PR, paste its number or link.
+- A link to a PR in a different repo works too, if you have a clone of that repo in the same folder
+  as this one (for example both in `~/Code`). PR Guide finds it and opens the PR there.
 - To keep every keypress fast, the page draws at most about 600 lines of code at once. Steps further
   away show just their file header and open when you reach them or click them.

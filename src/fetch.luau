@@ -276,6 +276,63 @@ function M.findRepo(dir: string, done: (repo: Repo?, err: string?) -> ())
  end)
 end
 
+local function parentOf(path: string): string?
+ return string.match(path, "^(.+)/[^/]+$")
+end
+
+-- The "owner/repo" the `origin` remote of the checkout at `root` points at, or nil.
+local function originOf(root: string, done: (slug: string?) -> ())
+ run({ "git", "-C", root, "remote", "get-url", "origin" }, { timeout_ms = GIT_MS }, function() done(nil) end, function(stdout)
+  done(Picker.remoteRepo(stdout))
+ end)
+end
+
+-- A checkout of the GitHub repo `slug` ("owner/repo"), for a PR link: `near` when its origin is that
+-- repo, else a checkout in the folder holding `near` or holding its main checkout, preferring one
+-- named like the repo. Calls `done` once, with it or with why there is none.
+function M.checkoutFor(near: Repo, slug: string, done: (repo: Repo?, err: string?) -> ())
+ originOf(near.root, function(own)
+  if Picker.sameRepo(own, slug) then return done(near, nil) end
+  local candidates, seen = {}, { [near.root] = true }
+  -- `guides` is <common git dir>/prguide; the main checkout holds the common git dir.
+  local mainCheckout = parentOf(parentOf(near.guides) or "")
+  for _, folder in { parentOf(near.root), if mainCheckout then parentOf(mainCheckout) else nil } do
+   if folder and not seen[folder] and tern.fs.exists(folder) then
+    seen[folder] = true
+    for _, name in tern.fs.list(folder) do
+     local path = folder .. "/" .. name
+     if not seen[path] and tern.fs.exists(path .. "/.git") then
+      seen[path] = true
+      table.insert(candidates, { path = path, name = name })
+     end
+    end
+   end
+  end
+  local repoName = string.lower(string.match(slug, "/(.+)$") :: string)
+  local matches, waiting = {}, #candidates
+  local function finish()
+   if #matches == 0 then
+    return done(nil, "That PR is in " .. slug .. ", but this checkout is " .. (own or "not on GitHub")
+     .. " and no checkout of " .. slug .. " was found next to it. Open a terminal in a checkout of " .. slug .. " and paste the link there.")
+   end
+   table.sort(matches, function(a, b)
+    local aNamed, bNamed = string.lower(a.name) == repoName, string.lower(b.name) == repoName
+    if aNamed ~= bNamed then return aNamed end
+    return a.name < b.name
+   end)
+   M.findRepo(matches[1].path, done)
+  end
+  if waiting == 0 then return finish() end
+  for _, candidate in candidates do
+   originOf(candidate.path, function(origin)
+    if Picker.sameRepo(origin, slug) then table.insert(matches, candidate) end
+    waiting -= 1
+    if waiting == 0 then finish() end
+   end)
+  end
+ end)
+end
+
 -- The open PRs of the checkout at `root` and the number of its current branch's PR, if it has one.
 -- Calls `done` once, with the list or with the first line of what `gh` said went wrong.
 function M.listPrs(root: string, done: (prs: { Picker.Summary }?, current: number?, err: string?) -> ())

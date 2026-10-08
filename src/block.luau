@@ -522,14 +522,31 @@ local function autoGenerate(b: Block, cx: BlockCx)
 end
 
 -- Loads `pr` from the block's checkout, showing each stage, then shows it.
-local function openPr(b: Block, cx: BlockCx, pr: string)
- b.picker, b.name = nil, nameOf(pr)
+local function loadPr(b: Block, cx: BlockCx, pr: string)
  Fetch.openPr({ pr = pr, repo = (b.repo :: Fetch.Repo).root }, function(stage)
   b.notice = Notice.loading(b.name, stage)
   cx:render()
  end, function(loaded, err)
   if loaded then showPr(b, loaded) else b.notice = Notice.failed(b.name, err :: string) end
   autoGenerate(b, cx)
+  cx:render()
+ end)
+end
+
+-- Opens `pr`, a number or a GitHub PR link. A link to another repo's PR first moves the block to a
+-- checkout of that repo, since numbers and commits only mean something there.
+local function openPr(b: Block, cx: BlockCx, pr: string)
+ b.picker, b.name = nil, nameOf(pr)
+ local slug = Picker.linkRepo(pr)
+ if not slug then return loadPr(b, cx, pr) end
+ b.notice = Notice.loading(b.name, "Finding a checkout of " .. slug)
+ Fetch.checkoutFor(b.repo :: Fetch.Repo, slug, function(repo, err)
+  if repo then
+   b.repo = repo
+   loadPr(b, cx, pr)
+  else
+   b.notice = Notice.failed(b.name, err :: string)
+  end
   cx:render()
  end)
 end
@@ -555,8 +572,8 @@ local PICKER_ACTIONS: { [string]: PickerHandler } = {
   if row then frameLater(cx, { { "reveal", PickerView.rowPath(row.pr.number), "nearest" } }) end
  end,
  ["picker-open"] = function(b, p, cx)
-  local number = Picker.choice(p)
-  if number then openPr(b, cx, tostring(number)) end
+  local choice = Picker.choice(p)
+  if choice then openPr(b, cx, choice) end
  end,
  ["picker-clear"] = function(_, p) p.field, p.selected = Fields.create(), 1 end,
  ["pick-pr"] = function(b, _, cx, number) openPr(b, cx, number) end,

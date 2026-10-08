@@ -71,11 +71,34 @@ function M.guideNumbers(names: { string }): { [number]: boolean }
  return numbers
 end
 
+local function trim(text: string): string
+ return string.match(text, "^%s*(.-)%s*$") :: string
+end
+
 -- The PR a typed or pasted "354", "#354" or GitHub PR link names.
 function M.named(text: string): number?
- local trimmed = string.match(text, "^%s*(.-)%s*$") :: string
+ local trimmed = trim(text)
  local n = string.match(trimmed, "^#?(%d+)$") or string.match(trimmed, "^https?://[^/]+/[^/]+/[^/]+/pull/(%d+)")
  return if n then tonumber(n) else nil
+end
+
+-- The "owner/repo" a GitHub PR link is in, as the link spells it.
+function M.linkRepo(text: string): string?
+ return string.match(trim(text), "^https?://[^/]+/([^/]+/[^/]+)/pull/%d+")
+end
+
+-- The "owner/repo" a git remote URL points at: https, ssh:// and scp-like `git@host:owner/repo.git`.
+function M.remoteRepo(url: string): string?
+ local trimmed = trim(url)
+ local path = string.match(trimmed, "^[%w+.-]+://[^/]+/(.+)$") or string.match(trimmed, "^[^/:]+:(.+)$")
+ if not path then return nil end
+ local slug = (string.gsub((string.gsub(path, "/$", "")), "%.git$", ""))
+ return if string.match(slug, "^[^/]+/[^/]+$") then slug else nil
+end
+
+-- Whether two "owner/repo" names are the same GitHub repo, which ignores case.
+function M.sameRepo(a: string?, b: string?): boolean
+ return a ~= nil and b ~= nil and string.lower(a) == string.lower(b)
 end
 
 local function matches(pr: Summary, needle: string): boolean
@@ -103,12 +126,13 @@ function M.move(p: Picker, delta: number)
  p.selected = math.clamp(p.selected + delta, 1, math.max(1, #M.rows(p)))
 end
 
--- The PR ⏎ opens: the one the field names, else the selected row's.
-function M.choice(p: Picker): number?
+-- What ⏎ opens: a pasted PR link as it is, the number the field names, else the selected row's.
+function M.choice(p: Picker): string?
+ if M.linkRepo(p.field.text) then return trim(p.field.text) end
  local named = M.named(p.field.text)
- if named then return named end
+ if named then return tostring(named) end
  local row = M.rows(p)[p.selected]
- return if row then row.pr.number else nil
+ return if row then tostring(row.pr.number) else nil
 end
 
 -- Seconds since the epoch of an ISO time like "2026-10-08T09:12:33Z".
