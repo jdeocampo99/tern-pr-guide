@@ -154,7 +154,7 @@ local function submitArea(s: State.State, included: number): { Node }
  local verdict = verdictLabel(r.verdict)
  local confirming = submit.confirming and not submit.sending
  local label = if submit.sending then "Sending…"
-  elseif confirming then "Post " .. verdict .. " with " .. plural(included, "comment") .. "? Press ⌘⏎ again"
+  elseif confirming then "Post to GitHub?  Press ⌘⏎ again"
   elseif submit.dryRunPath then "Save (dry run)  ·  " .. verdict
   else "Submit review  ·  " .. verdict
  local button = { span("gp-rv-submit-label", label) }
@@ -163,7 +163,7 @@ local function submitArea(s: State.State, included: number): { Node }
   el("span", { class = "gp-rv-submit" .. (if confirming then " gp-rv-submit-confirm" else ""), actions = { click = "submit-review" } }, button),
   span("gp-rv-note", if submit.dryRunPath
    then "Dry run: saves " .. plural(included, "comment") .. " and the summary to " .. submit.dryRunPath .. "; nothing is sent."
-   elseif confirming then "Not posted yet. ⌘⏎ or a click posts to PR #" .. r.pr.number .. "; anything else, or esc, cancels."
+   elseif confirming then "Posts \"" .. verdict .. "\" with " .. plural(included, "comment") .. " and the summary to PR #" .. r.pr.number .. ". Esc or any other key cancels."
    else "Asks you to confirm, then posts " .. plural(included, "comment") .. " and the summary to PR #" .. r.pr.number .. " at once."),
  }
  if submit.error then table.insert(nodes, span("gp-rv-error", "Not sent: " .. submit.error)) end

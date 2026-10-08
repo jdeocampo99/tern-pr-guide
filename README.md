@@ -47,8 +47,8 @@ line.
 
 **Posts one review.** `r` opens your review: tick the comments to include, edit the summary, pick
 Comment, Approve or Request changes, and submit with `⌘⏎`. The first press only asks: the button
-turns orange and reads "Post Approve with 3 comments? Press ⌘⏎ again". Press `⌘⏎` (or click it)
-again to post; any other key, `esc`, or closing the panel cancels. Everything goes to GitHub as a
+turns orange and reads "Post to GitHub? Press ⌘⏎ again". Press `⌘⏎` (or click it) again to post;
+any other key, `esc`, or closing the panel cancels. Everything goes to GitHub as a
 single review. If the PR got new commits while you were reading, nothing is posted and the page
 tells you.
 
