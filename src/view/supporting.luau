@@ -1,8 +1,8 @@
 --!strict
--- The changed files no step visits, grouped, each foldable with its own reviewed tick.
+-- The changed files no step visits as a folder tree, each file foldable with its own reviewed tick.
 local Code = require("./code")
 local Comments = require("./comments")
-local Guide = require("../guide")
+local FileTree = require("../file-tree")
 local Pr = require("../pr")
 local Review = require("../review")
 local State = require("../state")
@@ -11,8 +11,10 @@ local Ui = require("./ui")
 
 local el, span = Ui.el, Ui.span
 
--- Estimated heights (px) for the unroll animation: a group heading, a file header with its margin.
+-- Estimated heights (px) for the unroll animation: a folder row, a file header with its margin.
 local GROUP_H, FILE_HEAD_H = 28, 45
+-- Indents deeper than this line up with it.
+local MAX_DEPTH = 8
 
 local M = {}
 
@@ -39,7 +41,7 @@ local function heading(s: State.State, files: { Pr.File }): Node
  })
 end
 
-local function fileBlock(s: State.State, motion: Ui.Motion, plan: State.Plan, file: Pr.File): (Node, number)
+local function fileBlock(s: State.State, motion: Ui.Motion, plan: State.Plan, file: Pr.File, depth: string): (Node, number)
  local path = file.path
  local blockId = State.supportingBlock(path)
  local open = plan.open[blockId] == true
@@ -59,16 +61,24 @@ local function fileBlock(s: State.State, motion: Ui.Motion, plan: State.Plan, fi
   table.insert(children, Ui.body(motion, "file:" .. path, s.closing["file:" .. path] == true, rowsHeight, rows))
   height += rowsHeight
  end
- return el("div", { class = "gp-sfile", key = M.fileKey(path) }, children), height
+ return el("div", { class = "gp-sfile gp-sup-indent" .. depth, key = M.fileKey(path) }, children), height
 end
 
 local function groups(s: State.State, motion: Ui.Motion, plan: State.Plan, files: { Pr.File }): ({ Node }, number)
  local nodes, height = {}, 0
- for _, group in Guide.supportingGroups(s.review.guide, files) do
-  table.insert(nodes, el("div", { class = "gp-subhead", key = "g-" .. Text.keyOf(group.name), text = group.name }))
-  height += GROUP_H
-  for _, file in group.files do
-   local node, fileHeight = fileBlock(s, motion, plan, file)
+ for _, row in FileTree.rows(files) do
+  local parent = string.match(if row.kind == "folder" then row.path else row.file.path, "^(.*)/[^/]*$")
+  if parent and State.inFoldedFolder(s, parent .. "/") then continue end
+  local depth = " gp-tree-d" .. math.min(row.depth, MAX_DEPTH)
+  if row.kind == "folder" then
+   local folded = s.foldedFolders[row.path] == true
+   table.insert(nodes, el("div", { class = "gp-tree-row gp-tree-folder gp-sup-folder" .. depth, key = "d-" .. Text.keyOf(row.path), actions = { click = "toggle-folder=" .. row.path } }, {
+    span("gp-tree-glyph", if folded then "▸" else "▾"),
+    span("gp-tree-folder-name", row.name),
+   }))
+   height += GROUP_H
+  else
+   local node, fileHeight = fileBlock(s, motion, plan, row.file, depth)
    table.insert(nodes, node)
    height += fileHeight
   end

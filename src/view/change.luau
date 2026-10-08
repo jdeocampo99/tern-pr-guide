@@ -92,7 +92,7 @@ local function fileTree(s: State.State): Node
    }))
   end
  end
- return el("div", { class = "gp-outline gp-sticky gp-ccard gp-tree", key = "outline" }, {
+ return el("div", { class = "gp-outline gp-ccard gp-tree", key = "outline" }, {
   span("gp-band-label", #r.steps .. " " .. (if #r.steps == 1 then "file" else "files") .. " changed"),
   el("div", { class = "gp-tree-rows" }, rows),
  })

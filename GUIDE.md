@@ -26,8 +26,7 @@ as `.git/prguide/<number>.json` in the clone and the plugin picks it up when tha
   "comments": [
     { "id": "c1", "file": "src/playbooks/progress.ts", "line": 48, "kind": "question", "body": "Markdown text." }
   ],
-  "summary": "The opening comment of the review, in Markdown.",
-  "groups": { "src/instructions.ts": "Agent guidance" }
+  "summary": "The opening comment of the review, in Markdown."
 }
 ```
 
@@ -45,10 +44,8 @@ as `.git/prguide/<number>.json` in the clone and the plugin picks it up when tha
 - `comments[]`: suggested inline comments. `line` is a new-file line in the diff. `kind` is one of
   `problem`, `question`, `suggestion`, `nit`. `id` is unique within the guide.
 - `summary`: the drafted opening comment the reader can edit before submitting.
-- `groups` (optional): file path to a group name for files outside every step. Unlisted files are
-  grouped by path: tests, docs, then everything else.
 
-Changed files that no step visits are shown under "Supporting changes".
+Changed files that no step visits are shown under "Supporting changes", as a folder tree.
 
 ## Flow diagram
 

@@ -284,7 +284,7 @@ local ACTIONS: { [string]: Handler } = {
   s.review.focus = nil
   if s.helpOpen then toggleHelp(s, cx) end
  end,
- ["scroll"] = function(_, cx, how) cx:frame({ { "scroll", "main", how } }) end,
+ ["scroll"] = function(s, cx, how) cx:frame({ { "scroll", Page.scrollPath(s), how } }) end,
  ["open-github"] = function(s, cx) cx:open(s.review.pr.url) end,
 
  -- marking

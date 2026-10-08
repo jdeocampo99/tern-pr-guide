@@ -2,6 +2,7 @@
 -- What the page shows on top of the review itself, and the changes to it that need no window.
 local Agent = require("./agent")
 local Diff = require("./diff")
+local FileTree = require("./file-tree")
 local Fields = require("./text-field")
 local Guide = require("./guide")
 local Pr = require("./pr")
@@ -49,7 +50,7 @@ export type State = {
  -- Bodies and panels playing their closing animation.
  closing: { [string]: boolean },
  flowOpen: boolean,
- -- The PR description, folded to its heading until opened.
+ -- The PR description; it starts open when no guide's overview stands in for it.
  descriptionOpen: boolean,
  -- Folders of the file tree the reader folded, by path.
  foldedFolders: { [string]: boolean },
@@ -95,7 +96,7 @@ function M.new(pr: Pr.PR, guide: Guide.Guide, to: { repo: string?, dryRunPath: s
  return {
   review = Review.new(pr, guide), diffs = diffs,
   peek = {}, folded = {}, reveals = {}, whole = {}, closing = {},
-  flowOpen = true, descriptionOpen = false, foldedFolders = {}, supportingOpen = false, fileOpen = {}, pinned = {},
+  flowOpen = true, descriptionOpen = not guide.guided, foldedFolders = {}, supportingOpen = false, fileOpen = {}, pinned = {},
   flash = nil, flashCount = 0,
   composer = nil, search = nil, hit = nil,
   helpOpen = false, reviewOpen = false, reviewCursor = 1, editingSummary = false,
@@ -152,11 +153,26 @@ function M.show(s: State, file: string, blockId: string, lines: Guide.Step?): Di
  return { lines = lines, whole = s.whole[blockId] == true, annotated = annotated, hit = hit, reveals = s.reveals[blockId] or {} }
 end
 
+-- Whether a folded folder of the file tree hides `path`.
+function M.inFoldedFolder(s: State, path: string): boolean
+ for folder in string.gmatch(path, "()/") do
+  if s.foldedFolders[string.sub(path, 1, folder - 1)] then return true end
+ end
+ return false
+end
+
+-- Opens every folder above `path`, so a jump to it lands on a shown file.
+function M.unfoldFoldersOf(s: State, path: string)
+ for folder in string.gmatch(path, "()/") do
+  s.foldedFolders[string.sub(path, 1, folder - 1)] = nil
+ end
+end
+
 -- Whether the reader has block `blockId` open, budget aside: unreviewed steps start open and
 -- reviewed ones folded until reopened; supporting files open one by one or all at once.
 local function wantsOpen(s: State, blockId: string): boolean
  local path = M.supportingPath(blockId)
- if path then return s.supportingOpen and s.fileOpen[path] == true end
+ if path then return s.supportingOpen and s.fileOpen[path] == true and not M.inFoldedFolder(s, path) end
  if s.review.reviewed[blockId] then return s.peek[blockId] == true end
  return not s.folded[blockId]
 end
@@ -221,8 +237,8 @@ function M.plan(s: State): Plan
  fill(s, plan, forced, queue)
  if s.supportingOpen then
   local files: { Candidate } = {}
-  for _, group in Guide.supportingGroups(r.guide, Review.supportingFiles(r)) do
-   for _, file in group.files do table.insert(files, { id = M.supportingBlock(file.path), file = file.path }) end
+  for _, file in FileTree.order(Review.supportingFiles(r)) do
+   table.insert(files, { id = M.supportingBlock(file.path), file = file.path })
   end
   local pinned, opened = split(files, nil)
   plan.supportingFolded = fill(s, plan, pinned, opened)
@@ -236,7 +252,10 @@ function M.setOpen(s: State, blockId: string, open: boolean)
  local path = M.supportingPath(blockId)
  if path then
   s.fileOpen[path] = if open then true else nil
-  if open then s.supportingOpen = true end
+  if open then
+   s.supportingOpen = true
+   M.unfoldFoldersOf(s, path)
+  end
  elseif s.review.reviewed[blockId] then
   s.peek[blockId] = if open then true else nil
  else

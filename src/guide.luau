@@ -46,11 +46,7 @@ export type Guide = {
  comments: { Comment },
  -- The drafted opening comment of the review.
  summary: string,
- -- File path to the group name it is listed under when no step visits it.
- groups: { [string]: string },
 }
-
-export type Group = { name: string, files: { Pr.File } }
 
 type StepSpec = { file: string, from: number, to: number, title: string, note: string }
 type ChangeSpec = { title: string, why: string, steps: { StepSpec } }
@@ -60,10 +56,6 @@ local DEFAULT_AUTHOR = "Guide"
 
 local KINDS: { [string]: boolean } = { problem = true, question = true, suggestion = true, nit = true }
 local TONES: { [string]: boolean } = { added = true, changed = true, removed = true }
-
-local TESTS, DOCS, OTHER = "Tests", "Docs", "Everything else"
-local GROUP_RANK: { [string]: number } = { [TESTS] = 1, [DOCS] = 2, [OTHER] = 4 }
-local CUSTOM_GROUP_RANK = 3
 
 local function text(value: any, fallback: string): string
  return if type(value) == "string" then value else fallback
@@ -206,32 +198,6 @@ local function parseFlow(raw: any, changeCount: number): Flow?
  return { title = text(raw.title, ""), subtitle = text(raw.subtitle, ""), rows = rows }
 end
 
-local function parseGroups(raw: any): { [string]: string }
- local groups = {}
- if type(raw) ~= "table" then return groups end
- for path, name in raw do
-  if type(path) == "string" and type(name) == "string" then groups[path] = name end
- end
- return groups
-end
-
-local function isTestPath(path: string): boolean
- local lower = string.lower(path)
- return string.find(lower, "^tests?/") ~= nil or string.find(lower, "/tests?/") ~= nil
-  or string.find(lower, "__tests__", 1, true) ~= nil
-  or string.find(lower, "%.test%.") ~= nil or string.find(lower, "%.spec%.") ~= nil
-end
-
-local function isDocPath(path: string): boolean
- local lower = string.lower(path)
- return string.find(lower, "^docs?/") ~= nil or string.find(lower, "/docs?/") ~= nil
-  or string.find(lower, "%.mdx?$") ~= nil
-end
-
-local function groupName(guide: Guide, path: string): string
- return guide.groups[path] or (if isTestPath(path) then TESTS elseif isDocPath(path) then DOCS else OTHER)
-end
-
 local M = {}
 
 -- A guide from decoded JSON, or nil when it isn't a guide file. Steps and comments that don't fit
@@ -251,7 +217,6 @@ function M.parse(raw: any, pr: Pr.PR): Guide?
   changes = changes,
   comments = parseComments(raw.comments, files),
   summary = text(raw.summary, ""),
-  groups = parseGroups(raw.groups),
  }
 end
 
@@ -267,7 +232,6 @@ function M.defaultGuide(pr: Pr.PR): Guide
   changes = singleChange(pr),
   comments = {},
   summary = "",
-  groups = {},
  }
 end
 
@@ -286,26 +250,6 @@ end
 -- Whether the PR has moved on since the guide was written.
 function M.isStale(guide: Guide, pr: Pr.PR): boolean
  return guide.head ~= pr.head
-end
-
--- The files no step visits, in display groups: tests, docs, named groups, then everything else.
-function M.supportingGroups(guide: Guide, files: { Pr.File }): { Group }
- local byName: { [string]: Group } = {}
- local groups: { Group } = {}
- for _, file in files do
-  local name = groupName(guide, file.path)
-  if not byName[name] then
-   byName[name] = { name = name, files = {} }
-   table.insert(groups, byName[name])
-  end
-  table.insert(byName[name].files, file)
- end
- table.sort(groups, function(a: Group, b: Group): boolean
-  local rankA, rankB = GROUP_RANK[a.name] or CUSTOM_GROUP_RANK, GROUP_RANK[b.name] or CUSTOM_GROUP_RANK
-  if rankA ~= rankB then return rankA < rankB end
-  return a.name < b.name
- end)
- return groups
 end
 
 return M
