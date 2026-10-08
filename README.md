@@ -94,6 +94,20 @@ Any tool can write one (an AI reviewer, a script, a person). The format is in [G
 Put a PR's guide at `.git/prguide/<number>.json` in your clone (worktrees share it, and nothing is
 committed). Opening that PR uses it, and the picker marks PRs that have one with **Guide**.
 
+## AI guided review
+
+With [OMP](https://omp.sh) installed, a PR without a guide shows a **Generate AI Guided Review**
+button, with the model it will use beside it. Click it and your agent reads the PR and writes the
+guide; the page turns into the guided review when it's done. It takes a few minutes, and you can
+keep reading meanwhile.
+
+- It uses your OMP review model: `modelRoles.review` in `~/.omp/agent/config.yml`, else
+  `modelRoles.default`. Without `omp` on your login shell's PATH or either role set, there is no
+  button.
+- It runs on your model, so it costs about what a normal AI review does.
+- The guide is saved to `.git/prguide/<n>.json`, so reopening the PR is instant. Any tool can write
+  that file instead; the format is in [GUIDE.md](GUIDE.md).
+
 ## Keys
 
 | Reading | | Reacting | | Finishing | |

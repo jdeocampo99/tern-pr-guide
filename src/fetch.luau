@@ -1,9 +1,11 @@
 --!strict
 -- Where the plugin reaches outside itself: `gh` for the PR list, the PR's metadata and posting the
--- review, `git` in the local checkout for the PR's changes and files, and the checkout's guide
--- files. Each step starts the next from its callback; the first failure ends the chain with a
--- message naming the step.
+-- review, `git` in the local checkout for the PR's changes and files, the checkout's guide files,
+-- and the reader's AI agent writing one. Each step starts the next from its callback; the first
+-- failure ends the chain with a message naming the step.
+local Agent = require("./agent")
 local GitOutput = require("./git-output")
+local Guide = require("./guide")
 local Picker = require("./picker")
 local Pr = require("./pr")
 local Review = require("./review")
@@ -26,6 +28,9 @@ type Meta = { number: number, title: string, url: string, author: { login: strin
 local GH_MS = 30_000
 local GIT_MS = 60_000
 local GIT_FETCH_MS = 300_000
+local AGENT_MS = 20 * 60_000
+
+local PROMPT = "prompts/guide.md"
 
 -- What went wrong: stderr's first line, plus GitHub's own explanation, which `gh api` prints to stdout.
 local function reason(result: ProcessResult): string
@@ -78,10 +83,15 @@ local function readMeta(job: Job, pr: string, ok: (meta: Meta) -> ())
  end)
 end
 
+-- Where the PR's head and base are fetched to.
+local function refPrefix(number: number): string
+ return "refs/prguide/" .. number
+end
+
 -- Fetches the PR's head and base into refs/prguide/<n>/*, leaving branches and the working tree
 -- alone; hands on the head commit and where it branched from the base.
 local function fetchRefs(job: Job, meta: Meta, ok: (head: string, mergeBase: string) -> ())
- local prefix = "refs/prguide/" .. meta.number
+ local prefix = refPrefix(meta.number)
  local fetch = {
   "fetch", "--no-tags", "--no-write-fetch-head", "origin",
   "+refs/pull/" .. meta.number .. "/head:" .. prefix .. "/head",
@@ -266,6 +276,50 @@ function M.submitReview(pr: Pr.PR, payload: Review.Payload, to: Destination, don
    return
   end
   deliver()
+ end)
+end
+
+-- The reader's agent: `omp` on the login shell's PATH with the model of its review role, else its
+-- default role. Calls `done` once, with nil when either is missing.
+function M.findAgent(done: (agent: Agent.Agent?) -> ())
+ local home = tern.getenv("HOME")
+ if not home then return done(nil) end
+ local missing = function() done(nil) end
+ run({ "/bin/sh", "-lc", "command -v omp && printf %s \"$PATH\"" }, { timeout_ms = GH_MS }, missing, function(stdout)
+  local command, path = string.match(stdout, "([^\n]+)\n([^\n]*)$")
+  local config = home .. Agent.CONFIG
+  local model = if command and tern.fs.exists(config) then Agent.reviewModel(tern.fs.read(config)) else nil
+  done(if model then Agent.new(command :: string, path :: string, model) else nil)
+ end)
+end
+
+-- Has `agent` write the guide for `pr` into `repo`'s guides: the run's directory gets the numbered
+-- diff and the filled-in prompt, then `omp -p` runs in the checkout. Calls `done` once, with the
+-- guide or the first line of what went wrong. A file that isn't a usable guide moves to the run's
+-- directory, so the checkout never keeps one.
+function M.generateGuide(agent: Agent.Agent, repo: Repo, pr: Pr.PR, done: (Guide.Guide?, string?) -> ())
+ local dir = Agent.workDir(pr)
+ local diffPath, promptPath, guidePath = dir .. "/diff.txt", dir .. "/prompt.md", M.guidePath(repo, pr.number)
+ local fail = function(message: string) done(nil, message) end
+ local prepared, err = pcall(function()
+  tern.fs.mkdir(dir)
+  tern.fs.mkdir(repo.guides)
+  tern.fs.write(diffPath, Agent.numberedDiff(pr.files))
+  tern.fs.write(promptPath, Agent.prompt(tern.fs.read(PROMPT), {
+   repo = pr.repo, number = tostring(pr.number), title = pr.title, head = pr.head,
+   base = refPrefix(pr.number) .. "/base", diffPath = diffPath, guidePath = guidePath, author = agent.name,
+  }))
+ end)
+ if not prepared then return fail(Text.errorLine(err)) end
+ local argv = { agent.command, "-p", "--model", agent.model, Agent.request(promptPath) }
+ run(argv, { cwd = repo.root, env = { PATH = agent.path }, timeout_ms = AGENT_MS }, fail, function()
+  if not tern.fs.exists(guidePath) then return fail(agent.name .. " finished without writing " .. guidePath) end
+  local guide, problem = Guide.read(guidePath, pr)
+  if guide then return done(guide, nil) end
+  local kept = dir .. "/guide.json"
+  tern.fs.write(kept, tern.fs.read(guidePath))
+  tern.fs.remove(guidePath)
+  fail("the guide it wrote isn't usable: " .. (problem :: string) .. " (kept at " .. kept .. ")")
  end)
 end
 

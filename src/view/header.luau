@@ -1,5 +1,6 @@
 --!strict
 -- The pinned header: PR title and review button, progress and actions, and whichever panel is open.
+local Agent = require("../agent")
 local Guide = require("../guide")
 local Help = require("./help")
 local Review = require("../review")
@@ -26,6 +27,21 @@ end
 
 local function headerAction(label: string, keyHint: string, action: string): Node
  return el("span", { class = "gp-hdr-act", actions = { click = action } }, { span("gp-hdr-act-label", label), span("gp-act-key", keyHint) })
+end
+
+-- A row offering the reader's AI agent to write a guide, with why the last run failed, or the run
+-- going.
+local function aiRow(run: Agent.Run): Node
+ if run.running then
+  local clock = string.format("%d:%02d", math.floor(run.seconds / 60), run.seconds % 60)
+  return el("div", { class = "gp-ai" }, { span("gp-ai-running", "Generating AI guided review with " .. run.agent.name .. "… " .. clock) })
+ end
+ local kids = {
+  Ui.button("gp-btn-primary gp-ai-button", "Generate AI Guided Review", "generate-guide"),
+  span("gp-ai-model", run.agent.name),
+ }
+ if run.error then table.insert(kids, span("gp-ai-error", "Couldn't generate it: " .. run.error)) end
+ return el("div", { class = "gp-ai" }, kids)
 end
 
 local function status(s: State.State, counts: Review.Counts): Node
@@ -62,6 +78,7 @@ function M.view(s: State.State): Node
   el("div", { class = "gp-title" }, { span("gp-title-num", "#" .. pr.number), span("gp-title-text", pr.title), Ui.spacer(), reviewButton(s, counts.included) }),
   status(s, counts),
  }
+ if s.ai then table.insert(parts, aiRow(s.ai)) end
  if s.search then table.insert(parts, SearchPanel.view(s.search)) end
  if s.helpOpen then table.insert(parts, Help.view(s.closing.help == true)) end
  if s.reviewOpen then table.insert(parts, ReviewPanel.view(s)) end

@@ -2,6 +2,7 @@
 -- The review page block: lets the reader pick a PR from a checkout, opens the PR its arguments name
 -- (or the bundled sample), draws the page, and turns clicks and keys into state changes plus the
 -- scrolling, focusing and animation timing only a live window can do.
+local Agent = require("./agent")
 local Diff = require("./diff")
 local Fetch = require("./fetch")
 local Fields = require("./text-field")
@@ -31,6 +32,10 @@ type Block = {
  picker: Picker.Picker?,
  notice: Notice.Notice,
  page: State?,
+ -- The page shows a guide file rather than the default walkthrough.
+ guided: boolean,
+ -- The reader's AI agent, once found, and its run writing a guide.
+ ai: Agent.Run?,
 }
 
 local ARGS = "repo=<directory> to pick a PR, or pr=<number or URL> with repo=<checkout path>, optionally guide=<file> and post=true"
@@ -373,8 +378,22 @@ local function nameOf(pr: string?): string
  return if number then "#" .. number else pr
 end
 
+-- Offers the reader's agent while the page shows the default walkthrough.
+local function offerAgent(b: Block)
+ if b.page then b.page.ai = if b.guided then nil else b.ai end
+end
+
+-- Shows `pr` with `guide`, from a guide file when `guided`. Unless real posting was asked for,
+-- submitting is a dry run.
+local function showGuide(b: Block, pr: Pr.PR, guide: Guide.Guide, guided: boolean)
+ local repo = if b.repo then b.repo.root else nil
+ local dryRunPath = if b.opts.post and repo then nil else Fetch.dryRunPath(pr.number)
+ b.page, b.guided = State.new(pr, guide, { repo = repo, dryRunPath = dryRunPath }), guided
+ offerAgent(b)
+end
+
 -- Shows `pr` with the guide the options name, else the checkout's guide for it, else the default
--- walkthrough. Unless real posting was asked for, submitting is a dry run.
+-- walkthrough.
 local function showPr(b: Block, pr: Pr.PR)
  local path = b.opts.guide
  if not path and b.repo and tern.fs.exists(Fetch.guidePath(b.repo, pr.number)) then path = Fetch.guidePath(b.repo, pr.number) end
@@ -384,9 +403,35 @@ local function showPr(b: Block, pr: Pr.PR)
   b.notice = Notice.failed(b.name, "Couldn't use the guide " .. (path :: string) .. ": " .. (problem :: string))
   return
  end
- local repo = if b.repo then b.repo.root else nil
- local dryRunPath = if b.opts.post and repo then nil else Fetch.dryRunPath(pr.number)
- b.page = State.new(pr, guide, { repo = repo, dryRunPath = dryRunPath })
+ showGuide(b, pr, guide, path ~= nil)
+end
+
+-- Has the reader's agent write a guide for the page's PR, counting the seconds it takes, then
+-- shows the PR with it, keeping the reader's own comments. One run at a time.
+local function generate(b: Block, cx: BlockCx)
+ local run, s, repo = b.ai, b.page, b.repo
+ if not run or run.running or not s or not repo then return end
+ local pr, own = s.review.pr, s.review.own
+ local started = tern.now()
+ local ticker: TimerHandle
+ local function tick()
+  run.seconds = math.floor((tern.now() - started) / 1000)
+  cx:render()
+  ticker = tern.timer(1000, tick)
+ end
+ run.running, run.seconds, run.error = true, 0, nil
+ ticker = tern.timer(1000, tick)
+ Fetch.generateGuide(run.agent, repo, pr, function(guide, err)
+  ticker:cancel()
+  run.running, run.error = false, err
+  if guide then
+   showGuide(b, pr, guide, true)
+   local page = b.page :: State
+   page.review.own = own
+   cx:toast("success", "AI guided review ready")
+  end
+  cx:render()
+ end)
 end
 
 -- Loads `pr` from the block's checkout, showing each stage, then shows it.
@@ -449,9 +494,9 @@ end
 local block: BlockDef<Block> = {
  init = function(cx: BlockCx, args: { string }): Block
   local opts, problem = options(args)
-  if not opts then return { opts = { post = false }, name = "", notice = Notice.failed("", problem :: string) } end
+  if not opts then return { opts = { post = false }, name = "", notice = Notice.failed("", problem :: string), guided = false } end
   local pr, dir = opts.pr, opts.repo
-  local b: Block = { opts = opts, name = nameOf(pr), notice = if pr then Notice.loading(nameOf(pr), "") else Notice.findingRepo() }
+  local b: Block = { opts = opts, name = nameOf(pr), notice = if pr then Notice.loading(nameOf(pr), "") else Notice.findingRepo(), guided = false }
   if not dir then
    showPr(b, Pr.sample())
    return b
@@ -462,6 +507,12 @@ local block: BlockDef<Block> = {
   end
   -- Starts after init returns, so each stage renders over a block that exists.
   tern.timer(0, function()
+   Fetch.findAgent(function(agent)
+    if not agent then return end
+    b.ai = { agent = agent, running = false, seconds = 0, error = nil }
+    offerAgent(b)
+    cx:render()
+   end)
    Fetch.findRepo(dir, function(repo, err)
     if not repo then
      b.notice = if pr then Notice.failed(b.name, err :: string) else Notice.noRepo()
@@ -493,7 +544,13 @@ local block: BlockDef<Block> = {
  event = function(b: Block, ev: UiEvent, cx: BlockCx)
   if ev.ev ~= "action" then return end
   local action = { act = ev.act, value = ev.value }
-  if b.page then dispatch(b.page, cx, action) elseif b.picker then pickerDispatch(b, b.picker, cx, action) end
+  if action.act == "generate-guide" then
+   generate(b, cx)
+  elseif b.page then
+   dispatch(b.page, cx, action)
+  elseif b.picker then
+   pickerDispatch(b, b.picker, cx, action)
+  end
  end,
  key = function(b: Block, key: Key, cx: BlockCx): boolean?
   if b.picker then return pickerKey(b, b.picker, key, cx) end
