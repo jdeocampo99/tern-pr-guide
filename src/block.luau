@@ -395,6 +395,10 @@ end
 -- Shows `pr` with the guide the options name, else the checkout's guide for it, else the default
 -- walkthrough.
 local function showPr(b: Block, pr: Pr.PR)
+ if #pr.files == 0 then
+  b.notice = Notice.failed(b.name, "This PR has no file changes to show (lockfiles and generated files are left out).")
+  return
+ end
  local path = b.opts.guide
  if not path and b.repo and tern.fs.exists(Fetch.guidePath(b.repo, pr.number)) then path = Fetch.guidePath(b.repo, pr.number) end
  local guide, problem = Guide.defaultGuide(pr), nil

@@ -23,7 +23,7 @@ export type Destination = { repo: string?, dryRunPath: string? }
 
 type Fail = (message: string) -> ()
 type Job = { repo: string, fail: Fail }
-type Meta = { number: number, title: string, url: string, author: { login: string }?, baseRefName: string, headRefOid: string }
+type Meta = { number: number, title: string, url: string, author: { login: string }?, baseRefName: string, headRefOid: string, mergeCommit: { oid: string }? }
 
 local GH_MS = 30_000
 local GIT_MS = 60_000
@@ -47,18 +47,66 @@ local function reason(result: ProcessResult): string
  return line
 end
 
+-- Tern started from the Dock has a bare PATH, without Homebrew's `gh` or tools like `omp` that a
+-- shell rc file adds. Every command runs with the PATH of the reader's interactive login shell,
+-- read once and shared by the window's blocks; Homebrew's directories are added in case the shell
+-- gives nothing.
+local FALLBACK_DIRS = "/opt/homebrew/bin:/usr/local/bin"
+local shellPath: string? = nil
+local waitingForPath: { (path: string) -> () }? = nil
+
+local function withShellPath(go: (path: string) -> ())
+ if shellPath then return go(shellPath) end
+ if waitingForPath then
+  table.insert(waitingForPath, go)
+  return
+ end
+ waitingForPath = { go }
+ local function settle(path: string?)
+  local base = if path and path ~= "" then path else (tern.getenv("PATH") or "/usr/bin:/bin")
+  shellPath = base .. ":" .. FALLBACK_DIRS
+  local waiting = waitingForPath :: { (path: string) -> () }
+  waitingForPath = nil
+  for _, resume in waiting do resume(shellPath :: string) end
+ end
+ local shell = tern.getenv("SHELL") or "/bin/zsh"
+ local spawned = pcall(tern.process.run, { shell, "-lic", "printf '\\n%s%s' PRGUIDE_PATH= \"$PATH\"" }, { timeout_ms = 15_000 }, function(result: ProcessResult)
+  settle(string.match(result.stdout, "PRGUIDE_PATH=([^\n]*)%s*$"))
+ end)
+ if not spawned then settle(nil) end
+end
+
+-- The first file named `program` in the directories of `path`; `program` itself when it already
+-- names a path or nothing matches.
+local function located(program: string, path: string): string
+ if string.find(program, "/", 1, true) then return program end
+ for dir in string.gmatch(path, "[^:]+") do
+  local candidate = dir .. "/" .. program
+  if tern.fs.exists(candidate) then return candidate end
+ end
+ return program
+end
+
 -- Runs `argv` and hands its stdout to `ok`; a failed run, or an error from `ok` reading unexpected
 -- output, goes to `fail`.
 local function run(argv: { string }, opts: ProcessOptions, fail: Fail, ok: (stdout: string) -> ())
- local spawned, err = pcall(tern.process.run, argv, opts, function(result: ProcessResult)
-  if result.status ~= 0 then
-   fail(reason(result))
-   return
-  end
-  local handled, problem = pcall(ok, result.stdout)
-  if not handled then fail(Text.errorLine(problem)) end
+ withShellPath(function(path)
+  local resolved = table.clone(argv)
+  resolved[1] = located(argv[1], path)
+  local withPath = table.clone(opts)
+  local env = if opts.env then table.clone(opts.env) else {}
+  env.PATH = env.PATH or path
+  withPath.env = env
+  local spawned, err = pcall(tern.process.run, resolved, withPath, function(result: ProcessResult)
+   if result.status ~= 0 then
+    fail(reason(result))
+    return
+   end
+   local handled, problem = pcall(ok, result.stdout)
+   if not handled then fail(Text.errorLine(problem)) end
+  end)
+  if not spawned then fail(Text.errorLine(err)) end
  end)
- if not spawned then fail(Text.errorLine(err)) end
 end
 
 -- `fail` with each message prefixed by the step that failed.
@@ -77,7 +125,7 @@ local function trimmed(text: string): string
 end
 
 local function readMeta(job: Job, pr: string, ok: (meta: Meta) -> ())
- local argv = { "gh", "pr", "view", pr, "--json", "number,title,url,author,baseRefName,headRefOid" }
+ local argv = { "gh", "pr", "view", pr, "--json", "number,title,url,author,baseRefName,headRefOid,mergeCommit" }
  run(argv, { cwd = job.repo, timeout_ms = GH_MS }, named("gh pr view", job.fail), function(stdout)
   ok(tern.json.decode(stdout))
  end)
@@ -89,7 +137,9 @@ local function refPrefix(number: number): string
 end
 
 -- Fetches the PR's head and base into refs/prguide/<n>/*, leaving branches and the working tree
--- alone; hands on the head commit and where it branched from the base.
+-- alone; hands on the head commit and where it branched from the base. Once a PR is merged with a
+-- merge commit, its head is part of the base and the two meet at the head itself, which would show
+-- no changes; it branched from where the merge commit's first parent meets the head instead.
 local function fetchRefs(job: Job, meta: Meta, ok: (head: string, mergeBase: string) -> ())
  local prefix = refPrefix(meta.number)
  local fetch = {
@@ -100,7 +150,12 @@ local function fetchRefs(job: Job, meta: Meta, ok: (head: string, mergeBase: str
  git(job, "git fetch", fetch, nil, function()
   git(job, "git rev-parse", { "rev-parse", prefix .. "/head" }, nil, function(head)
    git(job, "git merge-base", { "merge-base", prefix .. "/head", prefix .. "/base" }, nil, function(mergeBase)
-    ok(trimmed(head), trimmed(mergeBase))
+    head, mergeBase = trimmed(head), trimmed(mergeBase)
+    local merge = if type(meta.mergeCommit) == "table" then meta.mergeCommit.oid else nil
+    if mergeBase ~= head or not merge or merge == head then return ok(head, mergeBase) end
+    git(job, "git merge-base", { "merge-base", head, merge .. "^1" }, nil, function(before)
+     ok(head, trimmed(before))
+    end)
    end)
   end)
  end)
@@ -279,22 +334,17 @@ function M.submitReview(pr: Pr.PR, payload: Review.Payload, to: Destination, don
  end)
 end
 
--- The reader's agent: `omp` on their interactive shell's PATH with the model of its review role,
--- else its default role. Calls `done` once, with nil when either is missing. Tern started from the
--- Dock has a bare PATH, and tools like `omp` (often in ~/.bun/bin) are usually added by the shell's
--- rc file, so the PATH comes from an interactive login shell and `omp` is looked up on it here
--- (`command -v` would report an alias instead of the file).
+-- The reader's agent: `omp` on their shell's PATH with the model of its review role, else its
+-- default role. Calls `done` once, with nil when either is missing. `omp` is looked up as a file
+-- because an interactive shell may define it as an alias.
 function M.findAgent(done: (agent: Agent.Agent?) -> ())
  local home = tern.getenv("HOME")
  if not home then return done(nil) end
- local shell = tern.getenv("SHELL") or "/bin/zsh"
- local missing = function() done(nil) end
- run({ shell, "-lic", "printf '\\n%s%s' PRGUIDE_PATH= \"$PATH\"" }, { timeout_ms = GH_MS }, missing, function(stdout)
-  local path = string.match(stdout, "PRGUIDE_PATH=([^\n]*)%s*$")
-  local command = if path then Agent.findOnPath(path, tern.fs.exists) else nil
+ withShellPath(function(path)
+  local command = Agent.findOnPath(path, tern.fs.exists)
   local config = home .. Agent.CONFIG
   local model = if command and tern.fs.exists(config) then Agent.reviewModel(tern.fs.read(config)) else nil
-  done(if model then Agent.new(command :: string, path :: string, model) else nil)
+  done(if model then Agent.new(command :: string, path, model) else nil)
  end)
 end
 
