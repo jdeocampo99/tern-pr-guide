@@ -16,7 +16,7 @@ diagram of what the PR changes. The author's own description is one click (or `i
 
 **Walks you through the code.** Each change has a sticky card on the left with its steps; the code
 for the step you're on sits on the right. `j`/`k` move between steps, `⏎` marks a step reviewed and
-moves on. **Mark all reviewed** in the header ticks every file at once, and clicking it again clears them.
+moves on. **Mark all reviewed** in the header (`m`) ticks every file at once, and pressing it again clears them.
 
 ![A step with its code and a suggested comment](docs/screenshots/step.png)
 
@@ -118,7 +118,7 @@ keep reading meanwhile.
 | `s` | supporting changes | `a` `d` | add / dismiss suggestion | `1` `2` `3` | comment, approve, request changes |
 | `o` | open every supporting file | `c` | comment on this step | `⌘⏎` | submit |
 | `g` | open on GitHub | | | `?` | all shortcuts |
-| `i` | PR description | | | | |
+| `i` | PR description | `m` | mark / unmark all reviewed | | |
 
 ## Good to know
 

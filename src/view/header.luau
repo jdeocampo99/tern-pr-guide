@@ -68,7 +68,7 @@ local function status(s: State.State, counts: Review.Counts): Node
   table.insert(kids, span("gp-status-text", "Guide written for an older version of this PR"))
  end
  table.insert(kids, Ui.spacer())
- table.insert(kids, headerAction(if counts.filesReviewed == total then "Unmark all reviewed" else "Mark all reviewed", nil, "mark-all"))
+ table.insert(kids, headerAction(if counts.filesReviewed == total then "Unmark all reviewed" else "Mark all reviewed", "m", "mark-all"))
  table.insert(kids, headerAction("Search", "/", "open-search"))
  table.insert(kids, headerAction("Open on GitHub ↗", "g", "open-github"))
  return el("div", { class = "gp-status" }, kids)

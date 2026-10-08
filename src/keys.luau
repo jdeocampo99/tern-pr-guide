@@ -60,6 +60,7 @@ local function readingKey(s: State.State, key: Key): Action?
  if name == "/" or key.text == "/" then return act("open-search") end
  if name == "g" then return act("open-github") end
  if name == "i" then return act("toggle-description") end
+ if name == "m" then return act("mark-all") end
  if (name == "s" and key.shift) or name == "S" then return act("mark-supporting") end
  if name == "s" then return act("toggle-group") end
  if name == "o" then return act("open-all-supporting") end
