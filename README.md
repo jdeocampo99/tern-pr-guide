@@ -16,7 +16,7 @@ diagram of what the PR changes. The author's own description is one click (or `i
 
 **Walks you through the code.** Each change has a sticky card on the left with its steps; the code
 for the step you're on sits on the right. `j`/`k` move between steps, `⏎` marks a step reviewed and
-moves on.
+moves on. **Mark all reviewed** in the header ticks every file at once, and clicking it again clears them.
 
 ![A step with its code and a suggested comment](docs/screenshots/step.png)
 

@@ -120,6 +120,24 @@ local function markSupporting(s: State)
  end
 end
 
+-- Marks every changed file reviewed, folding its code, or unmarks them all when all already are.
+local function markAll(s: State)
+ local r = s.review
+ local all = Review.counts(r).filesReviewed == #r.pr.files
+ local keys = {}
+ for _, step in r.steps do table.insert(keys, step.key) end
+ if all then
+  Review.unmark(r, keys)
+  for _, key in keys do s.peek[key] = nil end
+ else
+  for _, key in Review.mark(r, keys) do State.setOpen(s, key, false) end
+ end
+ for _, file in Review.supportingFiles(r) do
+  r.filesViewed[file.path] = if all then nil else true
+  if not all then State.setOpen(s, State.supportingBlock(file.path), false) end
+ end
+end
+
 local function toggleHelp(s: State, cx: BlockCx)
  if s.helpOpen then closeAfter(s, cx, { "help" }, function() s.helpOpen = false end) else s.helpOpen = true end
 end
@@ -263,6 +281,7 @@ local ACTIONS: { [string]: Handler } = {
  ["mark-change"] = function(s, _, n) markSteps(s, Review.keysOfChange(s.review, tonumber(n) :: number)) end,
  ["mark-file"] = markFile,
  ["mark-supporting"] = markSupporting,
+ ["mark-all"] = markAll,
 
  -- suggestions and comments
  ["decide"] = function(s, _, value)

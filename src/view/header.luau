@@ -25,8 +25,10 @@ local function reviewButton(s: State.State, included: number): Node
  })
 end
 
-local function headerAction(label: string, keyHint: string, action: string): Node
- return el("span", { class = "gp-hdr-act", actions = { click = action } }, { span("gp-hdr-act-label", label), span("gp-act-key", keyHint) })
+local function headerAction(label: string, keyHint: string?, action: string): Node
+ local kids = { span("gp-hdr-act-label", label) }
+ if keyHint then table.insert(kids, span("gp-act-key", keyHint)) end
+ return el("span", { class = "gp-hdr-act", actions = { click = action } }, kids)
 end
 
 -- A row offering the reader's AI agent to write a guide, with why the last run failed, or the run
@@ -66,6 +68,7 @@ local function status(s: State.State, counts: Review.Counts): Node
   table.insert(kids, span("gp-status-text", "Guide written for an older version of this PR"))
  end
  table.insert(kids, Ui.spacer())
+ table.insert(kids, headerAction(if counts.filesReviewed == total then "Unmark all reviewed" else "Mark all reviewed", nil, "mark-all"))
  table.insert(kids, headerAction("Search", "/", "open-search"))
  table.insert(kids, headerAction("Open on GitHub ↗", "g", "open-github"))
  return el("div", { class = "gp-status" }, kids)
