@@ -159,7 +159,7 @@ Rejected looks: SaaS marketing gloss (gradients, decorative glass, glowing cards
 - Neutrals are borrowed, never invented: text, lines and surfaces are Tern variables.
 - Prose in Tern's sans, code in Tern's terminal font, never swapped.
 - Flat by default. Depth comes from Tern glass on pinned surfaces and Tern's own overlay.
-- Every action shows its key, drawn with Tern's keycaps.
+- Every action has a key, drawn with Tern's keycaps where the action applies.
 
 ## Colors
 
@@ -200,6 +200,18 @@ Default values for every Tern variable below are in `docs/tern-tokens.css`.
 **The Borrowed Neutrals Rule.** No hex gray in `guide.css`. A text, line or surface color is a Tern variable, or it is a pinned review color from the list above.
 
 **The Spent Color Rule.** Color marks state: current, added, removed, needs action. Everything at rest is neutral.
+
+**The Color Meaning Rule.** On boards and lists, a colored element means exactly one of these; anything else is neutral:
+
+| Color | Means |
+|---|---|
+| Review Blue | your turn on someone else's PR, or "you are here" |
+| Removed Red | your PR needs fixing |
+| Added Green | done: approved, ready, passed |
+| Suggestion Purple (`gp-suggestion`) | an agent or Tandem is working |
+| Changed Amber | checks are running |
+
+A wash of a meaning color on a control that doesn't carry that meaning (for example a blue "Next up" button) breaks the rule.
 
 ## Typography
 
@@ -255,7 +267,7 @@ Quiet and tactile, like Tern's own controls.
 - **Press:** every pressable shares `scale(0.97)` over 120ms with `--gp-ease-out`.
 
 ### Keycaps
-Tern's native `kbd` node, beside every action that has a key. Single letters show upper-case, modifiers show glyphs (⇧ ⌘ ⏎ ⌃). Keycaps on the green submit button invert to white at 35% opacity.
+Tern's native `kbd` node. A key shows beside its action when the action belongs to what's selected (a card's split button, an open menu, a confirm). Board-wide keys show in the `?` panel and the control's tooltip instead, and the hint bar lists at most 5 keys. Single letters show upper-case, modifiers show glyphs (⇧ ⌘ ⏎ ⌃). Keycaps on a filled button invert to white at 35% opacity.
 
 ### View switch (Guided | Files)
 Tern's native `tabs` node, with the `t` keycap beside it. Its underline is Tern's accent, the one place the theme accent appears.
@@ -283,6 +295,30 @@ One-line rows at `--r-ctl`, hover `--l1`, selected Review Blue wash. Search rows
 
 ### Model and lens menu
 Tern's native `overlay`, anchored under the model button. It holds a search field, grouped model rows, and a footer with effort and lens segments. Segments are chip fills, and the chosen one is a card fill with a 1px lift.
+
+### Board card
+One box per item, in this order: a chip line (the job, in its meaning color, with a short reason), the title, an optional note (what an agent found, or why a fix failed), and the meta line (repo #number, checks, age). Your-turn cards take their meaning color as a wash; waiting cards are neutral (`--sf-shade`); done cards take a green hairline and a ✓. The selected card takes a Review Blue outline. Selecting a card never changes its height.
+
+### Card actions (split button)
+A card's actions are one split button: the main action, with its alternatives behind an attached ▾. It's hidden at rest, appears quiet on hover, and fills (with its key) on the selected card. It takes the place of checks and age at the end of the meta line, so it never pushes other text. There is one split button per card, always in that slot.
+
+### Selection bar
+When several items are selected, a bar sits at the top of their group: "N selected", the one action, and Clear (Esc). Its confirm lists at most 5 titles plus "and N more".
+
+### Inline confirm
+An action that can't be undone asks in place: one bold question line, a filled confirm button with ⌘⏎ (Confirm Orange, or Removed Red for deletion), and Cancel (Esc). No modal.
+
+### Banner
+One quiet line above a board for an item that spans the board (for example Next up): shade fill, `--l2` hairline, sized to its content and left-aligned, read left to right, ending in its action. Never a meaning-color wash.
+
+New UI reuses one of these components or an earlier one in this section. A change that needs a new component adds it here first.
+
+## Interaction and density
+
+- **A click selects; ⏎ or double-click opens.** The cursor moves only when the reader moves it: nothing auto-selects or jumps on open.
+- **Keys never animate.** Mouse-driven entrances may.
+- **Every visible string changes a decision.** If a chip, header, column or card already says it, cut it. No explanatory notes for what the layout already shows.
+- **Controls appear only where they act:** on the selected or hovered card, never on every card at rest.
 
 ## Do's and Don'ts
 

@@ -38,5 +38,17 @@ These rules are condensed from the `emil-design-eng` skill. The motion tokens ar
 - Layout is flex only. Pinned elements use `position: sticky` with Tern glass (`background: var(--panel)` plus `backdrop-filter`); plugins get no scroll events.
 - Colors are Tern's theme variables, or a pinned `--gp-*` review color from the top of `guide.css` (see `DESIGN.md`). A new pinned color is a `light-dark()` pair.
 - Tern draws the parts it has: keycaps are the native `kbd` node, icons the native `icon` node (Tern's named set), the view switch is `tabs`, and popovers are an `overlay` in the view's `layer`. No SVG of the plugin's own. Mockups follow the same limits, and take Tern's variable values from `docs/tern-tokens.css`.
-- An action that has a key shows its `kbd` beside its label.
+- An action shows its `kbd` where it applies (see Keycaps in `DESIGN.md`).
 - Check `tern.d.luau`, written by `tern plugin types .`, before assuming the host offers something.
+
+## Before showing UI
+
+Run these in order, every time, before showing a UI change to the user:
+
+1. **New placement?** A control or surface with no existing component in `DESIGN.md` gets 2–3 variants mocked side by side first; the user picks one.
+2. **Screenshot every combination:** wide and split, light and dark, with real long titles.
+3. **Measure overflow** in each state with the browser console or the browser tool. An empty list means nothing overflows:
+   ```js
+   [...document.querySelectorAll('*')].filter(e => e.scrollWidth > e.clientWidth + 1 && getComputedStyle(e).overflow !== 'visible' && getComputedStyle(e).textOverflow !== 'ellipsis')
+   ```
+4. **Fresh-eyes critique:** give the screenshots and `DESIGN.md` to a separate subagent. It checks crowding (Interaction and density), component reuse, the Color Meaning Rule, and whether the main action is obvious. Fix everything it finds.

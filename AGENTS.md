@@ -15,11 +15,11 @@ Each module's header comment names its one job. Put new code in the module that 
 
 ## UI
 
-Read `DESIGN.md` and `docs/ui.md` before any change to `src/view/` or `guide.css`, and before making a mockup. `DESIGN.md` is the visual system: tokens, components, and which colors come from Tern versus GitHub. `docs/ui.md` covers how to lay out new components, motion, and what Tern can't render.
+Read `DESIGN.md` and `docs/ui.md` before any change to `src/view/` or `guide.css`, and before making a mockup. `DESIGN.md` is the visual system: tokens, components, color meanings, and the interaction and density rules. `docs/ui.md` covers how to lay out new components, motion, and what Tern can't render. Before showing any UI to the user, run `docs/ui.md`'s "Before showing UI" checklist.
 
 **Keyboard first.** A new control (button, field, tab, menu, toggle) ships with its keyboard path in the same change, mockups included:
 
-- It has a key, shown as its `kbd` beside the label and listed in `view/help.luau`, the hint bar and the README Keys table.
+- It has a key, listed in `view/help.luau` (the `?` panel) and the README Keys table, and shown as a `kbd` where `DESIGN.md`'s Keycaps section says.
 - A menu or list opened by key works without the mouse: arrows (or `j`/`k`) move, ⏎ chooses, Esc closes, and a keyboard-opened menu appears without animation.
 - The key and the click send the same `ACTIONS` entry.
 - In the picker, letter keys act only while the filter field is empty, as `j` and `k` do.
