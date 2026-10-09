@@ -99,4 +99,23 @@ return function()
 	seen = Links.statusOf({ refreshedAt = "t1", counts = { toReview = 0, needFixes = 0 } }, 1004)
 	assert(seen and not seen.flashing and seen.flashAt == nil)
 	assert(Links.statusOf(nil, 0) == nil and Links.statusOf({ refreshedAt = "t", counts = {} }, 0) == nil and Links.statusOf({ counts = { toReview = 1, needFixes = 1 } }, 0) == nil)
+	-- liveness: the first hub that answers the probe wins; dead ones are skipped; none answering opens a new hub
+	local dead: { [number]: boolean } = { [7] = true }
+	local probed: { number } = {}
+	local function probe(pane: number): boolean
+		table.insert(probed, pane)
+		return not dead[pane]
+	end
+	local two: { Links.PaneLike } = { { pane = 7, block = hub }, { pane = 9, block = hub, parked = true } }
+	entry = Links.hubEntry(two, 7, probe)
+	assert(entry.kind == "unpark" and entry.pane == 9 and table.concat(probed, ",") == "7,9")
+	dead = { [7] = true, [9] = true }
+	probed = {}
+	assert(Links.hubEntry(two, 7, probe).kind == "new" and table.concat(probed, ",") == "7,9")
+	dead = {}
+	probed = {}
+	entry = Links.hubEntry(two, 9, probe)
+	assert(entry.pane == 9 and table.concat(probed, ",") == "9")
+	local ordered = Links.hubCandidates({ { pane = 3, block = hub, parked = true }, { pane = 2, block = hub }, { pane = 1, block = hub } }, 1)
+	assert(#ordered == 3 and ordered[1].pane == 1 and ordered[2].pane == 2 and ordered[3].pane == 3)
 end

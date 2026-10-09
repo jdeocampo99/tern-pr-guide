@@ -11,10 +11,16 @@ local function isHub(block: string?): boolean
  return block ~= nil and (block == "prguide.hub" or string.match(block, "%.prguide%.hub$") ~= nil)
 end
 
--- Opens the PR hub, or focuses the one this window has (one hub per window). With `generate`, a hub
--- already open is told to open PRs with the AI guide started; without it, to stop.
+-- Opens the PR hub, or focuses the one this window has (one hub per window). Every call tells the hub whether
+-- to open PRs with the AI guide started; that send doubles as the liveness probe, since a dead block (one left
+-- by a plugin reload) is invisible in PaneInfo but raises when sent an event. Only a hub that answered is
+-- unparked and focused; with none, a new one opens.
 local function openHub(cx: WindowCx, generate: boolean)
- local entry = Links.hubEntry(cx.session:panes(), cx.session:focused())
+ local entry = Links.hubEntry(cx.session:panes(), cx.session:focused(), function(pane: number): boolean
+  return (pcall(function()
+   cx.session:event(pane, { ev = "action", id = HUB_NODE, act = "set-generate", value = if generate then "true" else "false" })
+  end))
+ end)
  local pane = entry.pane
  if entry.kind == "new" or not pane then
   cx:new_block("prguide.hub", if generate then { "generate=true" } else {}, "tab")
@@ -28,8 +34,6 @@ local function openHub(cx: WindowCx, generate: boolean)
   end
  end
  cx.layout:focus(pane)
- -- A hub restored from an earlier session may have no program to receive this; it is focused all the same.
- pcall(function() cx.session:event(pane, { ev = "action", id = HUB_NODE, act = "set-generate", value = if generate then "true" else "false" }) end)
 end
 
 tern.command({ id = "review", title = "PR hub", keys = { "cmd+alt+r" }, run = function(cx: WindowCx) openHub(cx, false) end })

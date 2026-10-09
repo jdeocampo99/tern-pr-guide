@@ -109,20 +109,33 @@ local function isHub(pane: PaneLike): boolean
  return block ~= nil and (block == "prguide.hub" or string.match(block, "%.prguide%.hub$") ~= nil)
 end
 
--- What opening the hub does: nothing is open (a new tab block), a hub is parked (deal it into the
--- tab, then focus it), or a hub is open (focus it). One hub per window: the focused one wins, then a
--- tiled one, then a parked one.
-function M.hubEntry(panes: { PaneLike }, focused: number?): Entry
- local best: PaneLike? = nil
- local bestRank = 0
+-- The hubs worth trying, best first: the focused one, then tiled ones, then parked ones (by pane id within a
+-- rank). One hub per window, so there is normally one; more are leftovers.
+function M.hubCandidates(panes: { PaneLike }, focused: number?): { Entry }
+ local ranked: { { entry: Entry, rank: number } } = {}
  for _, pane in panes do
   if isHub(pane) then
    local rank = if pane.pane == focused then 3 elseif not pane.parked then 2 else 1
-   if rank > bestRank then best, bestRank = pane, rank end
+   table.insert(ranked, { entry = { kind = if pane.parked then "unpark" else "focus", pane = pane.pane }, rank = rank })
   end
  end
- if not best then return { kind = "new", pane = nil } end
- return { kind = if best.parked then "unpark" else "focus", pane = best.pane }
+ table.sort(ranked, function(a, b)
+  if a.rank ~= b.rank then return a.rank > b.rank end
+  return (a.entry.pane :: number) < (b.entry.pane :: number)
+ end)
+ local out: { Entry } = {}
+ for _, item in ranked do table.insert(out, item.entry) end
+ return out
+end
+
+-- What opening the hub does: the first candidate `answers` (a dead block raises when sent an event, and the
+-- window cannot see that in PaneInfo), else a new tab block. `answers` is called once per candidate, in order,
+-- and stops at the first yes.
+function M.hubEntry(panes: { PaneLike }, focused: number?, answers: ((pane: number) -> boolean)?): Entry
+ for _, entry in M.hubCandidates(panes, focused) do
+  if answers == nil or answers(entry.pane :: number) then return entry end
+ end
+ return { kind = "new", pane = nil }
 end
 
 -- The status segment ----------------------------------------------------------------------------------

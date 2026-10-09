@@ -259,7 +259,9 @@ function M.routeArgs(route: OpenRoute): { string }
 -- ⌥⌘R and the status segment.
 export type PaneLike = { pane: number, block: string?, parked: boolean? }
 export type Entry = { kind: "new" | "focus" | "unpark", pane: number? }
-function M.hubEntry(panes: { PaneLike }, focused: number?): Entry   -- the focused hub, else a tiled one, else a parked one
+function M.hubCandidates(panes: { PaneLike }, focused: number?): { Entry }   -- focused hub, then tiled, then parked
+function M.hubEntry(panes: { PaneLike }, focused: number?, answers: ((pane: number) -> boolean)?): Entry
+	-- the first candidate that `answers` (window.luau probes with the set-generate event: a dead block raises), else "new"
 function M.statusText(toReview: number, needFixes: number): string  -- "PRs · 2 to review · 10 need fixes"; zero parts are left out, both zero is "PRs"
 function M.flashing(flashAt: number?, now: number): boolean          -- FLASH_SECONDS (10)
 function M.watchDelay(flashAt: number?, now: number): number         -- WATCH_SECONDS (15), sooner when a flash ends first
