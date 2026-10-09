@@ -761,16 +761,6 @@
 .gp-notice-title { font-family: var(--sans); font-size: 20px; font-weight: 650; }
 .gp-notice-text { font-family: var(--sans); font-size: 14px; line-height: 1.5; color: var(--t3); }
 .gp-notice-error { color: var(--gp-danger-text); }
-/* PR picker */
-.gp-picker { margin-top: 4px; }
-.gp-pk-section { padding: 10px 10px 2px; }
-.gp-pk-row { align-items: center; padding: 8px 10px; }
-.gp-pk-num { width: 52px; flex-shrink: 0; font-size: 13px; color: var(--t3); }
-.gp-pk-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.gp-pk-title { display: flex; gap: 10px; align-items: baseline; }
-.gp-pk-tag { font-family: var(--sans); font-size: 12px; font-weight: 600; color: var(--t3); }
-.gp-pk-stat { flex-shrink: 0; font-size: 12.5px; color: var(--t3); }
-.gp-pk-when { width: 64px; text-align: right; }
 /* the unguided page's folder tree in the left column */
 .gp-tree .gp-tree-rows { display: flex; flex-direction: column; margin: 10px 0 0 -8px; }
 .gp-tree-rows > * { flex-shrink: 0; }
@@ -986,19 +976,6 @@
 .gp-st-tick { width: 18px; flex-shrink: 0; display: flex; justify-content: center; color: var(--gp-added); animation: gp-tick-in var(--gp-dur-in) var(--gp-ease-out); }
 .gp-st-bar { position: relative; height: 3px; margin-top: 8px; border-radius: 2px; overflow: clip; background: var(--chip-bg); }
 .gp-st-sweep { position: absolute; top: 0; left: 0; width: 33%; height: 100%; border-radius: 2px; background: var(--gp-blue); animation: gp-sweep 1400ms var(--gp-ease-in-out) infinite; }
-/* the PR picker: placeholder rows while the list loads, then the list fading in once */
-.gp-pk-body { display: flex; flex-direction: column; gap: 6px; }
-.gp-pk-body > * { flex-shrink: 0; }
-.gp-pk-arrive { animation: gp-fade-in var(--gp-dur-in) var(--gp-ease-out); }
-.gp-sk-list { display: flex; flex-direction: column; animation: gp-pulse 1600ms var(--gp-ease-in-out) infinite; }
-.gp-sk-list > * { flex-shrink: 0; }
-.gp-sk-row { display: flex; gap: 12px; align-items: center; padding: 10px 10px; }
-.gp-sk-main { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-.gp-sk { border-radius: 4px; background: var(--chip-bg); }
-.gp-sk-title { height: 12px; }
-.gp-sk-a { width: 300px; } .gp-sk-b { width: 230px; } .gp-sk-c { width: 340px; }
-.gp-sk-sub { width: 190px; height: 9px; }
-.gp-sk-when { width: 44px; height: 9px; }
 /* the page arriving: a PR that just opened fades in; an AI guide that just finished rises in block by block */
 @keyframes gp-arrive { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 .gp-arrive-load { animation: gp-fade-in var(--gp-dur-in) var(--gp-ease-out); }
@@ -1029,7 +1006,6 @@
   .gp-enter-done .gp-rv-done-tick, .gp-st-tick { animation: none; }
   .gp-st-spin { border-top-color: var(--l3); background: var(--gp-blue); animation: gp-pulse 1600ms ease-in-out infinite; }
   .gp-st-sweep { width: 100%; animation: gp-pulse 1600ms ease-in-out infinite; }
-  .gp-sk-list { animation: none; opacity: 0.7; }
   .gp-btn:active, .gp-rv-button:active, .gp-rv-submit:active { transform: none; }
   .gp-hc-ring-bad, .gp-hc-ring-good { animation: gp-fade-in var(--gp-dur-in) ease; }
   .gp-hc-spin { animation: none; border-color: var(--gp-changed); }
@@ -1164,6 +1140,13 @@
 .gp-hub-foldnote { font-family: var(--sans); font-size: 12.5px; color: var(--t3); }
 .gp-hub-foldrows { display: flex; flex-direction: column; gap: 8px; max-width: 760px; padding-top: 8px; }
 .gp-hub-foldrows > * { flex-shrink: 0; }
+.gp-hub-rcrows { display: flex; flex-direction: column; max-width: 760px; padding-top: 4px; }
+.gp-hub-rcrows > * { flex-shrink: 0; }
+.gp-hub-rc { align-items: center; }
+.gp-hub-rc-ref { width: 150px; flex-shrink: 0; font-size: 12.5px; color: var(--t3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gp-hub-rc-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.gp-hub-rc-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gp-hub-rc-when { width: 64px; flex-shrink: 0; text-align: right; font-size: 12.5px; color: var(--t3); font-variant-numeric: tabular-nums; }
 
 /* the menus and the key panel: Tern overlays holding rows like the model menu's */
 [data-role='gp.hubmenu'] .sf-ov-body, [data-role='gp.hubhelp'] .sf-ov-body, [data-role='gp.hubhelpn'] .sf-ov-body { padding: 0; gap: 0; }

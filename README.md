@@ -80,24 +80,23 @@ To work on the plugin itself, clone it and use `tern plugin link /path/to/tern-p
 
 ## Review a PR
 
-Open the command palette, choose **New PR review block**, and pick a PR. It works from any
-terminal, inside a clone or not, and any GitHub PR link opens: paste it and press `⏎`.
+Press `⌥⌘R` (or choose **PR hub** in the command palette) to open the PR hub. It is the one way
+in: your pull requests and the ones waiting for your review sit on a board, and `⏎` on a card opens
+it in the guide. Pressing `⌥⌘R` again focuses the hub you already have, so each window has one.
 
-PRs you opened lately, from any repo, sit at the top under **Recently opened**, so a PR you closed
-is one `⏎` away.
+`⌥⇧⌘R` (**PR hub, AI guides**) opens the same hub, but `⏎` opens the PR with the AI review started
+(see [AI guided review](#ai-guided-review)). On any card, `⇧⏎` does the same. To use other keys, bind
+the actions `plugin.prguide.review` and `plugin.prguide.generate` in Tern's keybind settings.
 
-In a terminal inside a clone, the picker lists that repo's open PRs, the one for your branch first.
-Type to filter by number, title, author or branch, or paste a PR number or link. Anywhere else, it
-lists your open PRs across GitHub: the ones waiting for your review first, then your own. Type to
-filter (the repo name counts too). A bare number doesn't say which repo, so paste the link there.
+The status line shows a **PRs** segment ("PRs · 2 to review · 10 need fixes") once the hub has
+loaded. It turns red for a few seconds when a pull request starts needing fixes, and clicking it
+opens or focuses the hub. The hub refreshes when you switch back to it, at most every 30 seconds.
 
-![Picking a pull request](docs/screenshots/picker.png)
-
-Two shortcuts work anywhere in Tern: `⌥⌘R` opens **New PR review block**, and `⌥⇧⌘R` opens **New AI
-generated PR review block**, which starts the AI review as soon as you pick a PR (see
-[AI guided review](#ai-guided-review)). To use other keys, bind the actions `plugin.prguide.review`
-and `plugin.prguide.generate` in Tern's keybind settings. **New PR Guide sample block** in the
-palette opens a built-in sample, so you can try it without a PR.
+PRs you opened lately, from any repo, sit under **Recently opened**, a fold under Review requests
+(`R` shows or hides it), so a PR you closed is one `⏎` away. A PR link opens from any directory:
+the guide finds your clone of that repo, or makes its own copy (see
+[Good to know](#good-to-know)). **New PR Guide sample block** in the palette opens a built-in
+sample, so you can try it without a PR.
 
 Submitting posts to GitHub after that confirm step. To rehearse without posting, open the page
 from Lua with `post=false`: the button reads "Save (dry run)" and the review is saved to
@@ -111,7 +110,7 @@ cx:new_block("prguide.guide", {"pr=123", "repo=/path/to/your/clone"}, "tab")
 
 | Argument | Meaning |
 |---|---|
-| `repo=` | path inside your local clone; on its own, it opens the picker |
+| `repo=` | path inside your local clone (or, with a PR link, any folder to look in); it needs `pr=`, and on its own the block points to the PR hub |
 | `pr=` | PR number or URL, opened straight away |
 | `guide=` | a saved review (JSON) to open instead of the clone's; see [GUIDE.md](GUIDE.md) |
 | `post=false` | dry run: save the review to `/tmp/prguide-review-<n>.json` instead of posting |
@@ -129,8 +128,8 @@ Review** button, with the lens, model and effort it will use beside it. Click it
 your agent reads the PR and writes the review; the page turns into the walkthrough when it's done.
 It takes a few minutes, and you can keep reading meanwhile.
 
-To skip the button, choose **New AI generated PR review block** (`⌥⇧⌘R`) in the palette and pick a
-PR: the review starts as soon as it opens, with the model and lens you last picked. A PR that
+To skip the button, press `⌥⇧⌘R` (**PR hub, AI guides**) and open a PR from the hub: the review
+starts as soon as it opens, with the model and lens you last picked. A PR that
 already has a review just opens, and if OMP or a model isn't available the PR opens as usual with a
 note saying why.
 
@@ -179,8 +178,8 @@ AI, a person) can write one, and the page uses it when that PR opens. The format
 
 ## Keys
 
-Anywhere in Tern: `⌥⌘R` opens **New PR review block** and `⌥⇧⌘R` opens **New AI generated PR
-review block** (see [AI guided review](#ai-guided-review)).
+Anywhere in Tern: `⌥⌘R` opens the PR hub and `⌥⇧⌘R` opens it with AI guides (see
+[AI guided review](#ai-guided-review)).
 
 | Reading | | Reacting | | Finishing | |
 |---|---|---|---|---|---|
@@ -201,7 +200,8 @@ review block** (see [AI guided review](#ai-guided-review)).
 |---|---|---|---|---|---|
 | `h` `j` `k` `l` / arrows | move between cards | `⏎` / double-click | open | `/` | search |
 | `T` | switch tab | `A` | fix with agent, or summarize | `F` | filter by repository |
-| `I` | show or hide Inactive | `⇧A` | summarize feedback | `S` | sort |
+| `I` | show or hide Inactive | `⇧⏎` | open with the AI guide started |
+| `R` | show or hide Recently opened (Review requests) | `⇧A` | summarize feedback | `S` | sort |
 | | | `C` | copy link | `⇧M` | agent model |
 | | | `M` | merge | `Esc` | clear or close |
 | | | `U` | update branch | `?` | all shortcuts |
@@ -214,7 +214,6 @@ In a menu, `j` `k` move, `Space` chooses (a repository toggles), `⏎` chooses o
 
 - GitHub only accepts review comments on lines the PR changed, so only those lines get a `+`, and a
   comment range stays within one block of changes.
-- The picker lists up to 50 open PRs. For any other PR, paste its link (or, in a clone, its number).
 - A link to a PR in another repo opens from your clone of that repo when there is one in the same
   folder as this clone (for example both in `~/Code`). Without one, PR Guide downloads a light copy
   of the repo (history only, no files; even a huge repo takes about half a minute) into its own

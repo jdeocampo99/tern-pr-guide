@@ -27,6 +27,16 @@ function M.card(card: State.Card): string
 	return M.ROOT .. ".body.board." .. M.columnKey(card.column) .. "." .. M.cardKey(card.pr.key)
 end
 
+-- The key of a Recently opened row's node (`key` is State.recentKey).
+function M.recentKey(key: string): string
+	return "rc_" .. Text.keyOf(key)
+end
+
+-- A Recently opened row's node.
+function M.recentRow(key: string): string
+	return M.ROOT .. ".body.recent.rows." .. M.recentKey(key)
+end
+
 -- The ▾ beside a selected card's split button, which the card's menu anchors to.
 function M.moreButton(card: State.Card): string
 	return M.card(card) .. ".body.meta.acts.sb.more"

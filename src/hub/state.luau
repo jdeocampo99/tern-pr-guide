@@ -85,6 +85,7 @@ export type State = {
 	menuCursor: number,
 	confirm: { kind: string, keys: { string } }?,
 	folded: { [string]: boolean }, -- true: the fold is closed. Inactive and Recently opened start closed
+	recent: { Opened }, -- hub.recent, newest first; the block sets it, `project` builds the Review requests fold from it
 	walking: boolean, -- Next up is being walked: the banner shows "2 of 11"
 	ringed: { [string]: "bad" | "good" },
 	agents: { [string]: AgentFixState },
@@ -167,7 +168,7 @@ function M.new(prs: { HubPR }, now: number, saved: any): State
 	local s: State = {
 		prs = prs, now = now, board = emptyBoard(tab), tab = tab, selected = nil, marked = {},
 		repositories = repositories, sort = sort, search = Fields.create(""), link = Fields.create(""),
-		mode = "board", menu = nil, menuCursor = 1, confirm = nil, folded = folded, walking = false,
+		mode = "board", menu = nil, menuCursor = 1, confirm = nil, folded = folded, recent = {}, walking = false,
 		ringed = {}, agents = {}, details = {}, summaries = {}, merges = {},
 		refreshedAt = nil, loading = false, error = nil, agent = nil, narrow = false,
 		keyed = false, born = {}, booted = false,
@@ -180,6 +181,12 @@ end
 function M.replace(s: State, prs: { HubPR }, now: number, refreshedAt: string?)
 	s.prs, s.now, s.refreshedAt = prs, now, refreshedAt
 	s.loading, s.error = false, nil
+	M.project(s)
+end
+
+-- Sets the Recently opened list (hub.recent) and rebuilds the board.
+function M.setRecent(s: State, recent: { Opened })
+	s.recent = recent
 	M.project(s)
 end
 
@@ -311,6 +318,18 @@ local function shortRepo(repo: string): string
 	return string.match(repo, "[^/]+$") or repo
 end
 
+-- The key a Recently opened row is selected and clicked by. A card's key is a node id, so the two never clash.
+function M.recentKey(opened: Opened): string
+	return "rc:" .. string.lower(opened.repo) .. "#" .. opened.number
+end
+
+local function recentMatches(opened: Opened, needle: string): boolean
+	for _, text in { "#" .. opened.number, opened.title, opened.author, opened.repo } do
+		if string.find(string.lower(text), needle, 1, true) then return true end
+	end
+	return false
+end
+
 -- Recomputes `s.board` from `s.prs` and the inputs. Keeps the selection only while its card is on the board.
 function M.project(s: State)
 	local filter: Model.Filter = { repositories = s.repositories, search = s.search.text }
@@ -356,6 +375,19 @@ function M.project(s: State)
 		for _, card in inactive do present[card.pr.key] = true end
 	end
 
+	-- Recently opened: under Review requests only, narrowed by the search, open on its own while a search finds some.
+	local recent: { Opened } = {}
+	if s.tab == "review" then
+		local needle = string.lower(s.search.text)
+		for _, opened in s.recent do
+			if needle == "" or recentMatches(opened, needle) then table.insert(recent, opened) end
+		end
+	end
+	local recentOpen = #recent > 0 and (not s.folded.recent or searching)
+	if recentOpen then
+		for _, opened in recent do present[M.recentKey(opened)] = true end
+	end
+
 	-- Every repository in this tab that the search matches, most pull requests first. A chosen repository
 	-- with nothing left to show stays listed, so it can be unchosen.
 	local counted: { [string]: number } = {}
@@ -377,10 +409,10 @@ function M.project(s: State)
 	end)
 
 	s.board = {
-		tab = s.tab, columns = columns, inactive = inactive, recent = {},
-		open = { inactive = foldOpen, recent = false },
+		tab = s.tab, columns = columns, inactive = inactive, recent = recent,
+		open = { inactive = foldOpen, recent = recentOpen },
 		grid = grid, counts = counts, repositories = repositories, nextUp = nil,
-		empty = total == 0 and #inactive == 0,
+		empty = total == 0 and #inactive == 0 and #recent == 0,
 	}
 	if s.selected and not present[s.selected] then s.selected = nil end
 end
@@ -399,6 +431,22 @@ function M.card(s: State, key: string): Card?
 	for _, card in s.board.inactive do
 		if card.pr.key == key then return card end
 	end
+	return nil
+end
+
+-- The Recently opened row with `key`, while that fold shows its rows.
+function M.recentRow(s: State, key: string): Opened?
+	if s.board.open.recent then
+		for _, opened in s.board.recent do
+			if M.recentKey(opened) == key then return opened end
+		end
+	end
+	return nil
+end
+
+-- The selected Recently opened row, if one is selected.
+function M.selectedRecent(s: State): Opened?
+	if s.selected then return M.recentRow(s, s.selected) end
 	return nil
 end
 
@@ -427,6 +475,9 @@ function M.move(s: State, direction: "up" | "down" | "left" | "right"): boolean
 	local fold: { string } = {}
 	if s.board.open.inactive then
 		for _, card in s.board.inactive do table.insert(fold, card.pr.key) end
+	end
+	if s.board.open.recent then
+		for _, opened in s.board.recent do table.insert(fold, M.recentKey(opened)) end
 	end
 	local selected = s.selected
 	local function go(key: string): boolean

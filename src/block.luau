@@ -1,6 +1,5 @@
 --!strict
--- The review page block: lets the reader pick a PR from a checkout, opens the PR its arguments name
--- (or the bundled sample), draws the page, and turns clicks and keys into state changes plus the
+-- The review page block: opens the PR its arguments name (or the bundled sample), draws the page, and turns clicks and keys into state changes plus the
 -- scrolling, focusing and animation timing only a live window can do.
 local Agent = require("./agent")
 local Diff = require("./diff")
@@ -8,10 +7,9 @@ local Fetch = require("./fetch")
 local Fields = require("./text-field")
 local Guide = require("./guide")
 local Keys = require("./keys")
+local Links = require("./links")
 local Notice = require("./view/notice")
 local Page = require("./view/page")
-local Picker = require("./picker")
-local PickerView = require("./view/picker")
 local Pr = require("./pr")
 local Review = require("./review")
 local State = require("./state")
@@ -19,11 +17,11 @@ local State = require("./state")
 type State = State.State
 type Handler = (s: State, cx: BlockCx, value: string) -> ()
 
--- How the block was opened: a PR and its checkout, a directory to pick a PR from (a GitHub checkout's
--- own PRs; anywhere else, the reader's PRs across GitHub), or neither for the bundled sample.
+-- How the block was opened: a PR and its checkout, a directory with no PR (the PR hub picks one), or
+-- neither for the bundled sample.
 type Options = { pr: string?, repo: string?, guide: string?, post: boolean, generate: boolean? }
 
--- The review page once its PR has loaded; before that, the PR picker or what loading is doing.
+-- The review page once its PR has loaded; before that, what loading is doing.
 type Block = {
  opts: Options,
  -- The directory the block was opened in; a PR link may name a checkout beside or below it.
@@ -31,7 +29,6 @@ type Block = {
  -- The PR as the reader named it ("#350"), for the title and the loading page.
  name: string,
  repo: Fetch.Repo?,
- picker: Picker.Picker?,
  notice: Notice.Notice,
  page: State?,
  -- The page shows a guide file rather than the default walkthrough.
@@ -46,7 +43,7 @@ type Block = {
  autoDone: boolean?,
 }
 
-local ARGS = "repo=<directory> to pick a PR (any directory works), or pr=<number or URL> with repo=<checkout path>, optionally guide=<file>, post=false for a dry run and generate=true to start an AI guided review once the PR opens"
+local ARGS = "pr=<number or URL> with repo=<checkout path or a directory to look in>, optionally guide=<file>, post=false for a dry run and generate=true to start an AI guided review once the PR opens"
 local SAMPLE_GUIDE = "fixtures/guide-350.json"
 
 -- The closing animations in guide.css last 150-200 ms.
@@ -585,9 +582,9 @@ end
 -- checkout of that repo, since numbers and commits only mean something there: one next to this
 -- block's, else PR Guide's own saved copy, which the first open of that repo downloads.
 local function openPr(b: Block, cx: BlockCx, pr: string)
- b.picker, b.name = nil, nameOf(pr)
+ b.name = nameOf(pr)
  b.notice = Notice.loading(b.name, "", nil)
- local slug = Picker.linkRepo(pr)
+ local slug = Links.linkRepo(pr)
  if not slug then
   if b.repo then return loadPr(b, cx, pr) end
   b.notice = Notice.failed(b.name, "A PR number needs a checkout to read it from. Paste the PR's link instead.")
@@ -599,7 +596,7 @@ local function openPr(b: Block, cx: BlockCx, pr: string)
    b.repo = found
    loadPr(b, cx, pr)
   else
-   local saved, why = Fetch.savedCopy(Picker.linkHost(pr), slug)
+   local saved, why = Fetch.savedCopy(Links.linkHost(pr), slug)
    if saved then
     b.repo = saved
     loadPr(b, cx, pr)
@@ -609,70 +606,6 @@ local function openPr(b: Block, cx: BlockCx, pr: string)
   end
   cx:render()
  end)
-end
-
--- Shows `p`, the page's PR list to pick from, with the filter field focused.
-local function showPicker(b: Block, cx: BlockCx, p: Picker.Picker)
- b.picker = p
- cx:render()
- frameLater(cx, { { "focus", PickerView.fieldPath } })
-end
-
--- Shows the open PRs of the block's directory: its checkout's when it is a clone of a GitHub repo,
--- else the reader's across GitHub.
-local function openPicker(b: Block, cx: BlockCx)
- local repo = b.repo
- local function anywhere()
-  local p = Picker.new({}, true, Fetch.recentPrs(), nil)
-  showPicker(b, cx, p)
-  Fetch.listAnywhere(function(prs, err)
-   p.prs, p.error, p.loadedAt = prs, err, os.time()
-   cx:render()
-  end)
- end
- if not repo then return anywhere() end
- Fetch.originOf(repo, function(slug)
-  if not slug then return anywhere() end
-  local p = Picker.new(Fetch.guidedPrs(repo), false, Fetch.recentPrs(), slug)
-  showPicker(b, cx, p)
-  Fetch.listPrs(repo.root, function(prs, current, err)
-   p.prs, p.current, p.error, p.loadedAt = prs, current, err, os.time()
-   cx:render()
-  end)
- end)
-end
-
-type PickerHandler = (b: Block, p: Picker.Picker, cx: BlockCx, value: string) -> ()
-
-local PICKER_ACTIONS: { [string]: PickerHandler } = {
- ["picker-move"] = function(_, p, cx, delta)
-  Picker.move(p, tonumber(delta) :: number)
-  local row = Picker.rows(p)[p.selected]
-  if row then frameLater(cx, { { "reveal", PickerView.rowPath(row.pr), "nearest" } }) end
- end,
- ["picker-open"] = function(b, p, cx)
-  local choice = Picker.choice(p)
-  if choice then openPr(b, cx, choice) end
- end,
- ["picker-clear"] = function(_, p) p.field, p.selected = Fields.create(), 1 end,
- ["pick-pr"] = function(b, _, cx, number) openPr(b, cx, number) end,
-}
-
-local function pickerDispatch(b: Block, p: Picker.Picker, cx: BlockCx, action: Keys.Action)
- local handler = PICKER_ACTIONS[action.act]
- if handler then handler(b, p, cx, action.value or "") end
-end
-
-local function pickerKey(b: Block, p: Picker.Picker, key: Key, cx: BlockCx): boolean
- local action = Keys.pickerAction(p, key)
- if action then
-  pickerDispatch(b, p, cx, action)
-  return true
- end
- local before = p.field.text
- if Fields.key(p.field, key) == "ignored" then return false end
- if p.field.text ~= before then p.selected = 1 end
- return true
 end
 
 -- The action a click or a pick in the view stands for: a control's own action, or the view tabs'
@@ -693,6 +626,11 @@ local block: BlockDef<Block> = {
    showPr(b, Pr.sample())
    return b
   end
+  if not pr then
+   -- The PR hub is the way to a PR.
+   b.notice = Notice.message("Review a pull request", "Open a pull request from the PR hub (⌥⌘R)")
+   return b
+  end
   -- Starts after init returns, so each stage renders over a block that exists.
   tern.timer(0, function()
    Fetch.findAgent(function(agent, why)
@@ -710,12 +648,10 @@ local block: BlockDef<Block> = {
      cx:render()
     end)
    end)
-   -- A directory that is no checkout still opens a PR link and lists the reader's PRs.
+   -- A directory that is no checkout still opens a PR link.
    local function found(repo: Fetch.Repo?, err: string?)
     b.repo = repo
-    if not pr then
-     openPicker(b, cx)
-    elseif repo or Picker.linkRepo(pr) then
+    if repo or Links.linkRepo(pr) then
      openPr(b, cx, pr)
     else
      b.notice = Notice.failed(b.name, err or "A PR number needs a checkout to read it from.")
@@ -728,13 +664,11 @@ local block: BlockDef<Block> = {
  end,
  title = function(b: Block): string?
   if b.page then return "Review · #" .. b.page.review.pr.number end
-  if b.picker then return "Pull requests" end
   return if b.name ~= "" then "PR " .. b.name else "PR Guide"
  end,
  view = function(b: Block): BlockView
   local s = b.page
   if not s then
-   if b.picker then return { main = PickerView.view(b.picker, if b.repo then b.repo.root else nil) } end
    return { main = Notice.view(b.notice) }
   end
   local motion = { born = s.born, next = {}, booted = s.booted, animate = not s.keyed }
@@ -751,12 +685,9 @@ local block: BlockDef<Block> = {
   elseif b.page then
    dispatch(b.page, cx, action)
    remember(b, b.page)
-  elseif b.picker then
-   pickerDispatch(b, b.picker, cx, action)
   end
  end,
  key = function(b: Block, key: Key, cx: BlockCx): boolean?
-  if b.picker then return pickerKey(b, b.picker, key, cx) end
   local s = b.page
   if not s then return false end
   local action = Keys.action(s, key)

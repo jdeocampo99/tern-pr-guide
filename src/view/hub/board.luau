@@ -166,6 +166,47 @@ local function fold(s: State.State, motion: Ui.Motion): Node?
 	return el("div", { class = "gp-hub-fold", key = "fold" }, kids)
 end
 
+-- One Recently opened row: repository and number, the title with its author under it, and when it was opened.
+local function recentRow(s: State.State, opened: State.Opened): Node
+	local key = State.recentKey(opened)
+	local name = (string.match(opened.repo, "[^/]+$") :: string) .. " #" .. opened.number
+	local main: { Node } = { span("gp-sr-text gp-hub-rc-title", if opened.title ~= "" then opened.title else name) }
+	if opened.author ~= "" then table.insert(main, span("gp-sr-sub", "@" .. opened.author)) end
+	return el("div", {
+		class = "gp-sr-row gp-hub-rc" .. (if s.selected == key then " gp-sr-row-on" else ""), key = Paths.recentKey(key),
+		actions = { click = "hub-select=" .. key, dblclick = "hub-open=" .. key },
+	}, {
+		span("gp-hub-rc-ref", name),
+		el("span", { class = "gp-hub-rc-main" }, main),
+		Ui.spacer(),
+		span("gp-hub-rc-when", Model.ago(opened.at, s.now)),
+	})
+end
+
+-- The fold under Review requests: pull requests opened from any repo, newest first.
+local function recentFold(s: State.State, motion: Ui.Motion): Node?
+	local list = s.board.recent
+	if #list == 0 then return nil end
+	local open = s.board.open.recent
+	local kids: { Node } = {
+		el("div", { class = "gp-hub-foldhead", key = "head", actions = { click = "hub-fold=recent" } }, {
+			Ui.caret(open),
+			span("gp-panel-h", "Recently opened"),
+			span("gp-hub-colcount", tostring(#list)),
+			span("gp-hub-foldnote", "Pull requests you opened, from any repository"),
+			Ui.spacer(),
+			Ui.keys("R"),
+		}),
+	}
+	if open then
+		local rows: { Node } = {}
+		for _, opened in list do table.insert(rows, recentRow(s, opened)) end
+		local enter = Ui.entering(motion, "fold:recent", "gp-enter-panel")
+		table.insert(kids, el("div", { class = "gp-hub-rcrows " .. enter, key = "rows" }, rows))
+	end
+	return el("div", { class = "gp-hub-fold", key = "recent" }, kids)
+end
+
 local function body(s: State.State, motion: Ui.Motion): Node
 	local kids: { Node } = {}
 	if s.error then
@@ -180,6 +221,8 @@ local function body(s: State.State, motion: Ui.Motion): Node
 			table.insert(kids, columns(s))
 			local inactive = fold(s, motion)
 			if inactive then table.insert(kids, inactive) end
+			local recent = recentFold(s, motion)
+			if recent then table.insert(kids, recent) end
 		end
 	end
 	return el("div", { class = "gp-hub-body", key = "body" }, kids)
