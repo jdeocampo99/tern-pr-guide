@@ -1166,7 +1166,7 @@
 .gp-hub-foldrows > * { flex-shrink: 0; }
 
 /* the menus and the key panel: Tern overlays holding rows like the model menu's */
-[data-role='gp.hubmenu'] .sf-ov-body, [data-role='gp.hubhelp'] .sf-ov-body { padding: 0; gap: 0; }
+[data-role='gp.hubmenu'] .sf-ov-body, [data-role='gp.hubhelp'] .sf-ov-body, [data-role='gp.hubhelpn'] .sf-ov-body { padding: 0; gap: 0; }
 .gp-hm-head { padding: 10px 14px 0; font-family: var(--sans); font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--t3); }
 .gp-hm-list { max-height: 360px; }
 .gp-hm-row { font-size: 13px; white-space: nowrap; }
@@ -1179,13 +1179,17 @@
 .gp-hm-count { font-size: 11.5px; color: var(--t3); font-variant-numeric: tabular-nums; }
 .gp-hm-sub { padding-left: 16px; font-size: 12px; color: var(--t3); }
 .gp-hm-clear .gp-hm-label { color: var(--t2); }
-.gp-hh { display: flex; gap: 24px; padding: 18px 22px 16px; background: var(--card); }
-.gp-hh .gp-keycol { flex: 0 0 240px; width: 240px; min-width: 0; }
+.gp-hh { display: flex; gap: 28px; padding: 18px 22px 16px; background: var(--card); }
+.gp-hh .gp-keycol { flex: 0 0 280px; width: 280px; min-width: 0; }
+/* in a split block the columns stack, one per row, in a panel that fits the block */
+.gp-hh-narrow { flex-direction: column; gap: 18px; }
+.gp-hh-narrow .gp-keycol { flex: 0 0 auto; width: auto; }
 .gp-hh .gp-keyrow { gap: 10px; align-items: flex-start; }
 .gp-hh .gp-keylabel { white-space: nowrap; }
 .gp-hh-keys { display: flex; flex-direction: column; gap: 3px; flex-shrink: 0; width: 76px; }
 /* menus and the key panel are opaque cards, so the board never shows through; the menus are narrow */
-.sf-overlay[data-role='gp.hubmenu'] .sf-ov-card, .sf-overlay[data-role='gp.hubhelp'] .sf-ov-card { background: var(--card); }
+.sf-overlay[data-role='gp.hubmenu'] .sf-ov-card, .sf-overlay[data-role='gp.hubhelp'] .sf-ov-card, .sf-overlay[data-role='gp.hubhelpn'] .sf-ov-card { background: var(--card); }
 .sf-overlay[data-role='gp.hubmenu'], .sf-overlay[data-role='gp.hubmenu'] .sf-ov-card { width: 260px; }
-/* the key panel is wider than Tern's lg overlay: three 240px columns */
-.sf-overlay[data-role='gp.hubhelp'], .sf-overlay[data-role='gp.hubhelp'] .sf-ov-card { width: 840px; max-width: calc(100vw - 32px); }
+/* the key panel is wider than Tern's lg overlay: three 280px columns, or one column in a split block */
+.sf-overlay[data-role='gp.hubhelp'], .sf-overlay[data-role='gp.hubhelp'] .sf-ov-card { width: 940px; }
+.sf-overlay[data-role='gp.hubhelpn'], .sf-overlay[data-role='gp.hubhelpn'] .sf-ov-card { width: 400px; }

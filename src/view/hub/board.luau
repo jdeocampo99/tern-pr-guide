@@ -194,7 +194,7 @@ function M.layer(s: State.State): Node?
 	if s.mode == "menu" and s.menu then
 		return el("div", {}, { el("div", { class = "gp-md-scrim", key = "scrim", actions = { click = "hub-menu-close" } }), Menus.view(s) })
 	elseif s.mode == "help" then
-		return el("div", {}, { el("div", { class = "gp-md-scrim", key = "scrim", actions = { click = "hub-help-close" } }), Help.view() })
+		return el("div", {}, { el("div", { class = "gp-md-scrim", key = "scrim", actions = { click = "hub-help-close" } }), Help.view(s.narrow) })
 	end
 	return nil
 end
