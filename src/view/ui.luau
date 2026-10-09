@@ -44,11 +44,14 @@ function M.button(class: string, text: string, action: string): Node
  return el("button", { class = "gp-btn " .. class, text = text, actions = { click = action } })
 end
 
-function M.check(on: boolean, label: string, action: string): Node
- return el("span", { class = "gp-check" .. (if on then " gp-check-on" else ""), actions = { click = action } }, {
+-- A tick box with its label, and the key that ticks it when there is one.
+function M.check(on: boolean, label: string, action: string, key: string?): Node
+ local kids = {
   span("gp-check-box", if on then "✓" else ""),
   span("gp-check-label", label),
- })
+ }
+ if key then table.insert(kids, span("gp-act-key", key)) end
+ return el("span", { class = "gp-check" .. (if on then " gp-check-on" else ""), actions = { click = action } }, kids)
 end
 
 -- A text action with its shortcut beside it, so every bulk action teaches its key.

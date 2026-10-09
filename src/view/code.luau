@@ -148,17 +148,19 @@ function M.step(s: State.State, motion: Ui.Motion, plan: State.Plan, step: Guide
  local fd = s.diffs[step.file]
  local reviewed = s.review.reviewed[key] == true
  local open = plan.open[key] == true
+ local current = State.currentStep(s).key == key
  local head = M.head(s, fd.file, {
   label = if s.review.guide.guided then "lines " .. step.from .. "–" .. step.to else nil,
   toggle = "peek=" .. key,
   expanded = open,
   blockId = key,
   done = reviewed,
-  check = Ui.check(reviewed, "Reviewed", "review-step=" .. key),
+  -- ⏎ ticks the block you are on, so only that one shows it.
+  check = Ui.check(reviewed, "Reviewed", "review-step=" .. key, if current then "⏎" else nil),
  })
  -- The landing flash alternates two identical animations so landing on the same block replays it.
  local flash = if s.flash == key then " gp-flash" .. (s.flashCount % 2) else ""
- local class = "gp-excerpt" .. flash .. (if State.currentStep(s).key == key then " gp-current" else "")
+ local class = "gp-excerpt" .. flash .. (if current then " gp-current" else "")
  if not open then
   return el("div", { class = class .. " gp-excerpt-done", key = key }, { head })
  end

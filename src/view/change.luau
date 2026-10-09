@@ -22,8 +22,8 @@ local function fileList(r: Review.Review, change: number): { Node }
    span("gp-cfile-name", Text.baseName(file.path)),
    span("gp-cfile-dir", Text.dirName(file.path)),
    Ui.spacer(),
-   span("gp-adds", if file.adds > 0 then "+" .. file.adds else ""),
-   span("gp-dels", if file.dels > 0 then "−" .. file.dels else ""),
+   span("gp-adds gp-num-adds", if file.adds > 0 then "+" .. file.adds else ""),
+   span("gp-dels gp-num-dels", if file.dels > 0 then "−" .. file.dels else ""),
   }))
  end
  return list
@@ -86,8 +86,8 @@ local function fileTree(s: State.State): Node
      Ui.fileIcon(file.path),
      span("gp-cfile-name", Text.baseName(file.path)),
      Ui.spacer(),
-     span("gp-adds", if file.adds > 0 then "+" .. file.adds else ""),
-     span("gp-dels", if file.dels > 0 then "−" .. file.dels else ""),
+     span("gp-adds gp-num-adds", if file.adds > 0 then "+" .. file.adds else ""),
+     span("gp-dels gp-num-dels", if file.dels > 0 then "−" .. file.dels else ""),
     }),
    }))
   end

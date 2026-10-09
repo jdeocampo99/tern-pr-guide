@@ -63,6 +63,10 @@
 .gp-frange { font-size: 12px; color: light-dark(#8a8f98, #7d838d); }
 .gp-adds { font-size: 12.5px; color: light-dark(#1a7f37, #6fdd8b); }
 .gp-dels { font-size: 12.5px; color: light-dark(#c4302b, #f08a85); }
+/* in file lists the counts sit in fixed right-aligned columns so digits line up row to row */
+.gp-num-adds, .gp-num-dels { flex-shrink: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.gp-num-adds { min-width: 46px; }
+.gp-num-dels { min-width: 40px; }
 .gp-wholefile { font-size: 12px; color: light-dark(#3a3f47, #c9ccd1); cursor: pointer; padding: 3px 9px; border-radius: 6px; border: 1px solid light-dark(#d0d4da, #3d4149); background: light-dark(#f6f7f9, #2a2c31); }
 .gp-wholefile:hover { color: light-dark(#111, #fff); background: light-dark(#eceef1, #34373d); }
 .gp-check { display: flex; gap: 7px; align-items: center; cursor: pointer; padding: 2px 4px; border-radius: 6px; }
