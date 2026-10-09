@@ -110,9 +110,9 @@ local specs: { Spec } = {
 		reviews = { decision = "approved", mine = review(VIEWER, "approved", "head306") } },
 	-- Requested again after the viewer commented.
 	{ repo = "acme/api", n = 307, role = "review", created = at("09-30"), active = at("10-09", 1), add = 60, del = 0,
-		reviews = { decision = "review_required", requestedMe = true, mine = review(VIEWER, "commented", "head307") } },
+		reviews = { decision = "review_required", requestedMe = true, requested = { VIEWER }, mine = review(VIEWER, "commented", "head307") } },
 	{ repo = "acme/api", n = 308, role = "review", created = at("10-08"), active = at("10-09", 11), add = 25, del = 0,
-		reviews = { decision = "review_required", requestedMe = true } },
+		reviews = { decision = "review_required", requestedMe = true, requested = { VIEWER } } },
 }
 
 -- `patch` changes a case: a field set to false is removed, and `reviews` merges into the case's own.
@@ -139,7 +139,7 @@ local function build(spec: Spec, patch: Spec?): any
 		unresolved = 0, threads = {}, threadsKnown = true, comments = 0,
 	}
 	for k, v in (merged.reviews or {}) do
-		reviews[k] = if v == false then nil else v
+		reviews[k] = if v == false and k ~= "threadsKnown" then nil else v
 	end
 	local role = merged.role or "mine"
 	local key = merged.repo .. "#" .. merged.n

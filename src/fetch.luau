@@ -5,6 +5,7 @@
 -- agent writing a guide. Each step starts the next from its callback; the first failure ends the
 -- chain with a message naming the step.
 local Agent = require("./agent")
+local Github = require("./github")
 local GitOutput = require("./git-output")
 local Guide = require("./guide")
 local Lens = require("./lens")
@@ -724,6 +725,19 @@ function M.generateGuide(agent: Agent.Agent, repo: Repo, pr: Pr.PR, done: (Guide
   tern.fs.write(kept, tern.fs.read(guidePath))
   tern.fs.remove(guidePath)
   fail("the guide it wrote isn't usable: " .. (problem :: string) .. " (kept at " .. kept .. ")")
+ end)
+end
+
+-- `Github.Runner` over `tern.process.run`: `argv[1]` is found on the shell's PATH like `run` does,
+-- and the result is always handed back, a failed spawn as status -1.
+function M.runner(argv: { string }, opts: { cwd: string?, stdin: string?, timeout_ms: number? }, done: (out: Github.Out) -> ())
+ withShellPath(function(path)
+  local resolved = table.clone(argv)
+  resolved[1] = located(argv[1], path)
+  local spawned, err = pcall(tern.process.run, resolved, { cwd = opts.cwd, stdin = opts.stdin, timeout_ms = opts.timeout_ms, env = { PATH = path } }, function(result: ProcessResult)
+   done({ status = result.status, stdout = result.stdout, stderr = result.stderr, timed_out = result.timed_out })
+  end)
+  if not spawned then done({ status = -1, stdout = "", stderr = Text.errorLine(err), timed_out = false }) end
  end)
 end
 

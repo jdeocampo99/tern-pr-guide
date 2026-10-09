@@ -188,15 +188,16 @@ To review has its own field: "Paste a pull request link to review" (`N`, from ei
 
 | Call | Cost | Time | When |
 |---|---|---|---|
-| `docs/hub/queries/hub-f.graphql`: 3 searches (author, review-requested, reviewed-by), check counts, author types | 9 pts, before the extensions in Verification are re-measured | 6–8 s | On a change, on focus (debounced to 30 s), and every 5 min while the hub block exists (a block can't observe visibility) |
-| `threads.graphql`: thread authors via `nodes(ids:)`, only for PRs with an unresolved thread whose `updatedAt` changed | 9 pts for 17 PRs | 0.7 s | After hub-f |
-| `checks.graphql`: CI state for PRs with running checks | 1 pt for 5 or 40 PRs | 1–1.5 s | Every 30 s while any check is running |
+| `docs/hub/queries/hub-f.graphql`: 3 searches (author, review-requested, reviewed-by), check counts, author types, and the fields `HubPR` needs (size, dates, base branch, auto-merge, last queue removal) | 11 pts (9 before the extensions; the queue-removal timeline adds 2) | 6–9 s | On a change, on focus (debounced to 30 s), and every 5 min while the hub block exists (a block can't observe visibility) |
+| `threads.graphql`: thread authors via `nodes(ids:)`, only for PRs with an unresolved thread whose `updatedAt` changed | 5 pts for 17 PRs (the first 30 threads of each; 9 pts at 50) | 0.7–0.8 s | After hub-f |
+| `checks.graphql`: CI state for PRs with running checks | 1 pt for 5 or 42 PRs | 1–1.6 s | Every 30 s while any check is running |
 | REST `/notifications` with `If-Modified-Since` | free (304) | | Every 60 s, as the change probe |
 | Fixes-page details: threads with path/line/body, changes-requested reviews, failing check runs with annotations | 1 pt | | When a Needs fixes PR is opened |
 | Learning a repo's merge habit: last 8 merged PRs with `mergedBy` and comments | 1 pt | | Once per repo |
 
 - **Don't** put thread authors inside the search query. Measured at **159 points** per call.
-- **Budget:** about 220 pts/hr while the hub block exists. Even the 30 s debounce ceiling (about 2,200/hr) fits the 5,000/hr GraphQL budget, which Tandem's pr-watch shares.
+- **Per refresh:** hub-f 11 + threads 5 + checks 1 = 17 on real data (42 PRs, 17 with unresolved threads, no cache), under the 18-point limit the tests hold. A cost depends on the connections a query selects times the PRs it can return (`first:` on a connection under a search doesn't change it), so an added connection is paid 150 times per hub-f call. Alias-added PRs didn't change the 11.
+- **Budget:** about 220 pts/hr while the hub block exists (12 refreshes at the 18-point limit; measured 12 × 17 = 204). Even the 30 s debounce ceiling (about 2,200/hr) fits the 5,000/hr GraphQL budget, which Tandem's pr-watch shares.
 - **Latency is the real cost.** Always render from the kv cache first, then refresh in the background.
 - **Check annotations include noise.** Drop paths under `.github/` and messages like "Process completed with exit code". Measured on Tagalingo-App #1013, the useful one was `src/lib/query-persister.ts:39 Type …`.
 - **Conflicted files** come from local `git merge-tree --write-tree --name-only`, not GitHub.
@@ -416,7 +417,11 @@ export type Client = {
 	detect: (repo: string, done: (value: Detected?, err: Error?) -> ()) -> (),
 	run: (command: Command, done: (stdout: string?, err: Error?) -> ()) -> (),   -- executes a command from `commands`
 }
-function M.client(run: Runner): Client
+export type Decode = (text: string) -> any      -- `tern.json.decode`, passed in so `github` never touches `tern`
+function M.client(run: Runner, decode: Decode): Client
+	-- Calls never throw: a failed run, a body that isn't JSON data and a rate limit are `Error` values ("Couldn't …: reason").
+	-- Argv: `gh api graphql -f query=<text> [-f ids[]=<id> …]`; probe is `gh api -i notifications?per_page=1 [-H If-Modified-Since: <since>]`.
+	-- `refresh` reads threads (threads.graphql) only for PRs with an unresolved thread whose `lastActivityAt` differs from `previous`'s.
 
 -- Pure parsers: decoded JSON in, normalized records out. They never throw on a missing field.
 function M.parseHub(raw: any): { prs: { HubPR }, viewer: string, rateLimit: RateLimit, truncated: boolean }?
@@ -764,7 +769,7 @@ tern plugin reload
 - **Frozen clock.** Every rules test passes a fixed `now`, and `cases.luau` records it as `asOf`. No test reads the clock.
 - **Specific assertions the early issues must hold:**
   - `model`: every fixture key lands in its expected column and order, including 16 conflict cases (stale, active, draft), and the negatives: a bot's comment, "LGTM", and an approved PR with a leftover thread never make Needs fixes.
-  - `github`: `parseHub`, `parseThreads` and `parseChecks` consume the recorded responses. A fake runner asserts that `hub-f` sends no thread authors, and that the summed `rateLimit.cost` over a refresh is at most 18 (hub-f 9 plus threads 9). Each call keeps its own envelope; the figure is re-measured after the query changes and updated here.
+  - `github`: `parseHub`, `parseThreads` and `parseChecks` consume the recorded responses. A fake runner asserts that `hub-f` sends no thread authors, and that the summed `rateLimit.cost` over a refresh is at most 18 (measured: hub-f 11, threads 5, checks 1). Each call keeps its own envelope; the figure is re-measured after the query changes and updated here.
   - `sync`: `schedule` and `diff` run on a fake clock from 0 to 3600 s. The probe fires at 60 s, a change or focus triggers a refresh within the 30 s debounce, checks poll at 30 s only while a check runs, and the total cost stays at most 220 points.
 
 ### Fixture plan
@@ -781,7 +786,7 @@ tern plugin reload
 
 Later issues add their own fixtures (`merge-methods`, `selection`, `details`, `fixes`, `flake`, `rereview`, `agent`, `summary`, `tandem-*`), each with `asOf` where time matters.
 
-**The extended `hub-f.graphql`.** It doesn't select several fields the rules need. Before recording, add `additions`, `deletions`, `changedFiles`, `createdAt`, `baseRefName`, `autoMergeRequest { enabledAt }` and the latest `RemovedFromMergeQueueEvent` (`timelineItems(last: 1, itemTypes: [REMOVED_FROM_MERGE_QUEUE_EVENT])`, with its `reason`). Add a `pullRequest(number:)` alias per PR added by link. **Re-measure its cost and time** against the 9 points in the table above, and update the table, the 18-point test limit and the budget. `threads.graphql` and `checks.graphql` gain `id`. Never add thread authors to the search (159 points).
+**The extended `hub-f.graphql`.** It doesn't select several fields the rules need. Before recording, add `additions`, `deletions`, `changedFiles`, `createdAt`, `baseRefName`, `autoMergeRequest { enabledAt }` and the latest `RemovedFromMergeQueueEvent` (`timelineItems(last: 1, itemTypes: [REMOVED_FROM_MERGE_QUEUE_EVENT])`, with its `reason`). Add a `pullRequest(number:)` alias per PR added by link. **Re-measured** at 11 points and 6–9 s (the table above). The 18-point test limit and the budget hold because `threads.graphql` reads 30 threads per PR (5 points for 17 PRs, not 9). `threads.graphql` and `checks.graphql` gain `id`. Never add thread authors to the search (159 points).
 
 ### The fake runner
 
