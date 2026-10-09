@@ -70,7 +70,7 @@ draws the code near where you are, so an 85-file PR stays responsive.
 ## Install
 
 ```sh
-tern plugin install github.com/jdeocampo99/tern-pr-guide
+tern plugin install github.com/jubbydev/tern-pr-guide
 ```
 
 You also need the [GitHub CLI](https://cli.github.com) logged in (`gh auth login`). A local clone
