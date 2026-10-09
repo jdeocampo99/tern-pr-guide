@@ -193,6 +193,23 @@ review block** (see [AI guided review](#ai-guided-review)).
 | `i` | PR description | `m` | mark / unmark all reviewed | | |
 | `t` | guided / file view | | | | |
 
+### PR hub keys
+
+**New PR hub sample block** opens the PR hub on recorded sample data (`fixture=cases`).
+
+| Move | | The selected card | | The board | |
+|---|---|---|---|---|---|
+| `h` `j` `k` `l` / arrows | move between cards | `⏎` / double-click | open | `/` | search |
+| `T` | switch tab | `A` | fix with agent, or summarize | `F` | filter by repository |
+| `I` | show or hide Inactive | `⇧A` | summarize feedback | `S` | sort |
+| | | `C` | copy link | `⇧M` | agent model |
+| | | `M` | merge | `Esc` | clear or close |
+| | | `U` | update branch | `?` | all shortcuts |
+| | | `,` | merge method | | |
+| | | `X` | remove from Review requests | | |
+
+In a menu, `j` `k` move, `Space` chooses (a repository toggles), `⏎` chooses or closes, `Esc` closes, and in the agent menu `←` `→` change the effort.
+
 ## Good to know
 
 - GitHub only accepts review comments on lines the PR changed, so only those lines get a `+`, and a

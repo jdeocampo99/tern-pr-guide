@@ -6,7 +6,7 @@
    --panel, --sf-shade) and the syntax colors (--tk-*). These pinned colors carry GitHub's review meaning and
    stay the same under every Tern theme: blue is where the reader is, green is added and submit, red is removed
    and problems, orange asks twice before posting. See DESIGN.md. */
-.gp-root, .sf-layer[data-surface="plugin.prguide.guide"] {
+.gp-root, .sf-layer[data-surface="plugin.prguide.guide"], .sf-layer[data-surface="plugin.prguide.hub"] {
  --gp-blue: light-dark(#2f6fe0, #8ab4ff); --gp-blue-line: light-dark(#4f86e8, #5b8ff0); --gp-blue-fill: light-dark(#3b6fd8, #4a7ce0);
  --gp-blue-wash: light-dark(#e9f0fc, #22304a); --gp-blue-wash-line: light-dark(#c4d6f6, #34507e); --gp-blue-ink: light-dark(#0b1f44, #ffffff);
  --gp-merge: light-dark(#1f883d, #238636); --gp-merge-hover: light-dark(#1a7f37, #2ea043);
@@ -15,7 +15,7 @@
  --gp-danger-wash: light-dark(#fdf0ef, #33201f); --gp-danger-wash-line: light-dark(#f0b4ae, #6b2f2b);
  --gp-changed: light-dark(#9a6700, #e3b341); --gp-changed-wash: light-dark(#fdf6e7, #332c1d); --gp-changed-wash-line: light-dark(#ecd8a8, #5c4c2a);
  --gp-confirm: light-dark(#bc4c00, #c9510c); --gp-question: light-dark(#0969da, #79b8ff); --gp-suggestion: light-dark(#8250df, #c297ff);
- --gp-marker: light-dark(#fff3c4, #3d3620);
+ --gp-marker: light-dark(#fff3c4, #3d3620); --gp-suggestion-wash: light-dark(#f3edfc, #2a2340);
 }
 .gp-root { --gp-ease-out: cubic-bezier(0.23, 1, 0.32, 1); --gp-ease-in-out: cubic-bezier(0.77, 0, 0.175, 1); --gp-dur-press: 120ms; --gp-dur-out: 150ms; --gp-dur-in: 200ms; --gp-dur-unroll: 240ms; --gp-dur-roll: 180ms; --gp-dur-rare: 320ms; display: flex; flex-direction: column; gap: 12px; }
 .gp-title-text, .gp-band-title, .gp-band-why, .gp-band-label, .gp-ol-steptitle, .gp-ol-stepbody, .gp-card-body, .gp-card-who, .gp-card-action, .gp-status-text, .gp-status-link, .gp-sup-title, .gp-sup-sub, .gp-panel-h, .gp-keylabel, .gp-btn, .gp-check-label, .gp-wholefile, .gp-card-state {
@@ -1031,6 +1031,141 @@
   .gp-st-sweep { width: 100%; animation: gp-pulse 1600ms ease-in-out infinite; }
   .gp-sk-list { animation: none; opacity: 0.7; }
   .gp-btn:active, .gp-rv-button:active, .gp-rv-submit:active { transform: none; }
+  .gp-hc-ring-bad, .gp-hc-ring-good { animation: gp-fade-in var(--gp-dur-in) ease; }
+  .gp-hc-spin { animation: none; border-color: var(--gp-changed); }
+  .gp-hub-ctl:active, .gp-sb-main:active { transform: none; }
 }
 /* the switch between a guided PR's walkthrough and its plain file view: Tern's tabs, with the key that flips them beside it */
 .gp-vs { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
+
+/* PR hub: header, tab row, board, cards, menus. See DESIGN.md (Board card, Card actions, Status chip). */
+.sf-layer[data-surface="plugin.prguide.hub"] { z-index: 30; }
+.gp-hub { gap: 0; }
+.gp-hub-head { gap: 12px; padding: 14px 4px 0; border-bottom: none; }
+.gp-hub-top { display: flex; gap: 16px; align-items: center; }
+.gp-hub-title { font-family: var(--sans); font-size: 21px; font-weight: 650; white-space: nowrap; }
+.gp-hub-search { flex: 1 1 auto; min-width: 0; max-width: 560px; padding: 5px 10px; border-color: var(--l3); cursor: text; }
+.gp-hub-search-on { border-color: var(--gp-blue-line); }
+.gp-hub-search .sf-icon, .gp-hub-search .ico { color: var(--t3); }
+.gp-hub-fresh-row { display: flex; gap: 8px; align-items: center; flex-shrink: 0; white-space: nowrap; }
+.gp-hub-fresh { font-family: var(--sans); font-size: 12.5px; color: var(--t3); }
+.gp-hub-tabrow { display: flex; gap: 12px; align-items: flex-end; box-shadow: inset 0 -1px 0 var(--l2); }
+.gp-hub-tabs { flex-shrink: 0; box-shadow: none; }
+.gp-hub-tabs .sf-tab { height: 34px; font-size: 13px; }
+.gp-hub-pill { margin-left: 7px; padding: 0 6px; border-radius: 9px; font-size: 11px; font-weight: 650; line-height: 16px; color: #fff; background: var(--gp-blue-fill); font-variant-numeric: tabular-nums; }
+.gp-hub-ctls { display: flex; gap: 4px; align-items: center; align-self: center; }
+.gp-hub-ctl { display: flex; gap: 6px; align-items: center; flex-shrink: 0; padding: 3px 6px 3px 9px; border: 1px solid transparent; border-radius: var(--r-ctl); font-family: var(--sans); font-size: 12.5px; color: var(--t2); white-space: nowrap; cursor: pointer; transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease, transform var(--gp-dur-press) var(--gp-ease-out); }
+.gp-hub-ctl:active { transform: scale(0.97); }
+.gp-hub-ctl:hover { background: var(--l1); color: var(--t1); }
+.gp-hub-ctl-open, .gp-hub-ctl-open:hover { background: var(--l1); border-color: var(--l3); color: var(--t1); }
+.gp-hub-ctl-act, .gp-hub-ctl-act:hover { background: var(--gp-blue-wash); border-color: var(--gp-blue-wash-line); color: var(--gp-blue-ink); }
+.gp-hub-ctl .sf-icon, .gp-hub-ctl .ico { width: 12px; height: 12px; color: var(--t3); }
+.gp-hub-ctl-label { display: flex; font-family: var(--sans); }
+.gp-hub-ctl-strong { font-weight: 600; color: var(--t1); }
+.gp-hub-ctl-act .gp-hub-ctl-strong { color: var(--gp-blue-ink); }
+.gp-hub-body { display: flex; flex-direction: column; gap: 24px; padding: 16px 0 8px; }
+.gp-hub-body > * { flex-shrink: 0; }
+.gp-hub-board { display: flex; gap: 24px; align-items: flex-start; }
+.gp-hub-narrow .gp-hub-board { flex-direction: column; align-items: stretch; gap: 20px; }
+.gp-hub-col { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.gp-hub-col > * { flex-shrink: 0; }
+.gp-hub-col-act { flex-grow: 1.35; }
+.gp-hub-colhead { display: flex; gap: 8px; align-items: center; margin-bottom: 4px; padding: 0 2px 10px; border-bottom: 1px solid var(--l2); }
+.gp-hub-colname { font-family: var(--sans); font-size: 15px; font-weight: 650; }
+.gp-hub-col-wait .gp-hub-colname { color: var(--t2); }
+.gp-hub-colcount { padding: 0 7px; border-radius: 10px; font-family: var(--sans); font-size: 12px; font-weight: 650; line-height: 18px; font-variant-numeric: tabular-nums; color: var(--t2); background: var(--chip-bg); }
+.gp-hub-col-bad .gp-hub-colhead { border-bottom-color: var(--gp-danger-wash-line); }
+.gp-hub-col-bad .gp-hub-colcount { color: #fff; background: var(--gp-danger-fill); }
+.gp-hub-col-info .gp-hub-colhead { border-bottom-color: var(--gp-blue-wash-line); }
+.gp-hub-col-info .gp-hub-colcount { color: #fff; background: var(--gp-blue-fill); }
+.gp-hub-col-done .gp-hub-colhead { border-bottom-color: var(--gp-success-wash-line); }
+.gp-hub-col-done .gp-hub-colcount { color: var(--gp-added); background: var(--gp-success-wash); }
+.gp-hub-repo { display: flex; gap: 8px; align-items: baseline; padding: 10px 2px 2px; font-size: 12px; color: var(--t2); }
+.gp-hub-repo-n { color: var(--t3); }
+.gp-hub-empty { padding: 14px 10px; font-family: var(--sans); font-size: 13.5px; color: var(--t3); }
+.gp-hub-error { padding: 10px 12px; border-radius: var(--r-ctl); border: 1px solid var(--gp-danger-wash-line); background: var(--gp-danger-wash); color: var(--gp-danger-text); font-family: var(--sans); font-size: 13px; }
+
+/* the card: chip line, title, optional note, repo line. Selecting it changes colors and the repo line's slot, never its height. */
+.gp-hc { display: flex; gap: 10px; align-items: flex-start; padding: 11px 16px 10px; border: 1px solid var(--l2); border-radius: var(--r-ctl); background: var(--sf-shade); cursor: pointer; }
+.gp-soft .gp-hc { transition: border-color 140ms ease, box-shadow 140ms ease, background-color 140ms ease; }
+.gp-hc:hover { border-color: var(--l3); background: var(--l1); }
+.gp-hc-bad, .gp-hc-bad:hover { background: var(--gp-danger-wash); border-color: var(--gp-danger-wash-line); }
+.gp-hc-info, .gp-hc-info:hover { background: var(--gp-blue-wash); border-color: var(--gp-blue-wash-line); }
+.gp-hc-done { border-color: var(--gp-success-wash-line); }
+.gp-hc-on, .gp-hc-on:hover { border-color: var(--gp-blue-line); box-shadow: 0 0 0 1px var(--gp-blue-line); }
+.gp-hc-tick { flex-shrink: 0; width: 14px; display: flex; padding-top: 3px; color: var(--gp-added); }
+.gp-hc-tick .sf-icon, .gp-hc-tick .ico { width: 14px; height: 14px; }
+.gp-hc-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.gp-hc-body > * { flex-shrink: 0; }
+.gp-hc-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-height: 20px; }
+.gp-hc-chip { display: inline-flex; gap: 6px; align-items: center; flex-shrink: 0; padding: 0 7px; border-radius: var(--r-chip); font-family: var(--sans); font-size: 12px; font-weight: 600; line-height: 20px; white-space: nowrap; }
+.gp-hc-chip-text { font-family: var(--sans); }
+.gp-hc-chip-bad { color: #fff; background: var(--gp-danger-fill); }
+.gp-hc-chip-bad-soft { color: var(--gp-danger-text); background: var(--gp-danger-wash); }
+.gp-hc-chip-info { color: #fff; background: var(--gp-blue-fill); }
+.gp-hc-chip-wait { color: var(--t2); background: var(--chip-bg); }
+.gp-hc-chip-done { color: var(--gp-added); background: var(--gp-success-wash); }
+.gp-hc-chip-agent { color: var(--gp-suggestion); background: var(--gp-suggestion-wash); }
+.gp-hc-spin { flex-shrink: 0; width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid var(--l3); border-top-color: var(--gp-changed); animation: gp-spin 800ms linear infinite; }
+.gp-hc-title { font-family: var(--sans); font-size: 15px; font-weight: 600; line-height: 1.35; color: var(--t1); overflow-wrap: anywhere; }
+.gp-hc-wait .gp-hc-title, .gp-hc-quiet .gp-hc-title { font-size: 13.5px; font-weight: 500; color: var(--t2); }
+.gp-hc-done .gp-hc-title { font-size: 14px; font-weight: 500; }
+.gp-hc-note { font-family: var(--sans); font-size: 13px; line-height: 1.45; color: var(--t2); }
+.gp-hc-meta { display: flex; gap: 10px; align-items: center; min-width: 0; min-height: 22px; }
+.gp-hc-lead { flex: 1 1 auto; min-width: 0; display: flex; gap: 8px; align-items: baseline; overflow: hidden; white-space: nowrap; font-size: 12px; color: var(--t3); }
+.gp-hc-lead > * { flex-shrink: 0; }
+.gp-hc-bad .gp-hc-lead, .gp-hc-info .gp-hc-lead { color: var(--t2); }
+.gp-hc-size { display: flex; gap: 6px; }
+.gp-hc-add { color: var(--gp-added); }
+.gp-hc-del { color: var(--gp-removed); }
+.gp-hc-stats { display: inline-flex; gap: 10px; align-items: center; flex-shrink: 0; min-height: 22px; font-size: 12px; color: var(--t3); }
+.gp-hc-ci { display: inline-flex; gap: 5px; align-items: center; font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.gp-hc-ci .sf-icon, .gp-hc-ci .ico { width: 12px; height: 12px; }
+.gp-hc-ci-ok { color: var(--gp-added); }
+.gp-hc-ci-bad { color: var(--gp-removed); }
+.gp-hc-age { font-variant-numeric: tabular-nums; }
+.gp-hc-bad .gp-hc-age, .gp-hc-info .gp-hc-age { color: var(--t2); }
+.gp-hc-acts { display: none; flex-shrink: 0; align-items: center; }
+.gp-hc-act:hover .gp-hc-stats, .gp-hc-on .gp-hc-stats { display: none; }
+.gp-hc-act:hover .gp-hc-acts, .gp-hc-on .gp-hc-acts { display: inline-flex; }
+.gp-hc-ring-bad { animation: gp-hc-ring-bad 1600ms ease; }
+.gp-hc-ring-good { animation: gp-hc-ring-good 1600ms ease; }
+@keyframes gp-hc-ring-bad { from { box-shadow: 0 0 0 3px light-dark(rgba(207, 34, 46, 0.45), rgba(255, 123, 114, 0.45)); } to { box-shadow: 0 0 0 0 transparent; } }
+@keyframes gp-hc-ring-good { from { box-shadow: 0 0 0 3px light-dark(rgba(26, 127, 55, 0.4), rgba(111, 221, 139, 0.4)); } to { box-shadow: 0 0 0 0 transparent; } }
+
+/* the split button: the card's main action, quiet while hovered, filled with its key while selected; ▾ holds the alternatives */
+.gp-sb { display: inline-flex; gap: 1px; align-items: center; }
+.gp-sb-main, .gp-sb-more { display: inline-flex; align-items: center; height: 22px; border: 1px solid var(--l3); background: var(--card); color: var(--t1); cursor: pointer; transition: background-color 140ms ease, border-color 140ms ease, transform var(--gp-dur-press) var(--gp-ease-out); }
+.gp-sb-main { gap: 6px; padding: 0 8px; border-radius: var(--r-ctl); font-family: var(--sans); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.gp-sb-main:active { transform: scale(0.97); }
+.gp-sb-main:hover, .gp-sb-more:hover { border-color: var(--t4); }
+.gp-sb-nokey { display: none; }
+.gp-sb-split .gp-sb-main { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.gp-sb-more { justify-content: center; width: 22px; padding: 0; border-radius: 0 var(--r-ctl) var(--r-ctl) 0; }
+.gp-sb-more .sf-icon, .gp-sb-more .ico { width: 12px; height: 12px; }
+.gp-sb-on .gp-sb-main, .gp-sb-on .gp-sb-more { color: #fff; background: var(--gp-blue-fill); border-color: transparent; }
+.gp-hc-done .gp-sb-on .gp-sb-main, .gp-hc-done .gp-sb-on .gp-sb-more { background: var(--gp-merge); }
+.gp-sb-on .sf-kbd .kbd { background: transparent; border: 1px solid rgba(255,255,255,0.35); box-shadow: none; color: rgba(255,255,255,0.85); }
+
+/* the Inactive fold under the board */
+.gp-hub-foldhead { display: flex; gap: 10px; align-items: center; padding: 8px 10px; border: 1px dashed var(--l3); border-radius: var(--r-ctl); cursor: pointer; transition: background-color 140ms ease; }
+.gp-hub-foldhead:hover { background: var(--l1); }
+.gp-hub-foldnote { font-family: var(--sans); font-size: 12.5px; color: var(--t3); }
+.gp-hub-foldrows { display: flex; flex-direction: column; gap: 8px; max-width: 760px; padding-top: 8px; }
+.gp-hub-foldrows > * { flex-shrink: 0; }
+
+/* the menus and the key panel: Tern overlays holding rows like the model menu's */
+[data-role='gp.hubmenu'] .sf-ov-body, [data-role='gp.hubhelp'] .sf-ov-body { padding: 0; gap: 0; }
+.gp-hm-head { padding: 10px 14px 0; font-family: var(--sans); font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--t3); }
+.gp-hm-list { max-height: 360px; }
+.gp-hm-row { font-size: 13px; white-space: nowrap; }
+.gp-hm-box { flex-shrink: 0; width: 14px; height: 14px; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: #fff; box-shadow: inset 0 0 0 1.5px var(--t4); }
+.gp-hm-box-on { background: var(--gp-blue-fill); box-shadow: none; }
+.gp-hm-box .sf-icon, .gp-hm-box .ico { width: 10px; height: 10px; }
+.gp-hm-tick { flex-shrink: 0; width: 14px; display: flex; color: var(--gp-blue); }
+.gp-hm-tick .sf-icon, .gp-hm-tick .ico { width: 13px; height: 13px; }
+.gp-hm-label { color: var(--t1); }
+.gp-hm-count { font-size: 11.5px; color: var(--t3); font-variant-numeric: tabular-nums; }
+.gp-hm-sub { padding-left: 16px; font-size: 12px; color: var(--t3); }
+.gp-hm-clear .gp-hm-label { color: var(--t2); }
+.gp-hh { display: flex; flex-wrap: wrap; gap: 20px 28px; padding: 18px 22px 16px; }
