@@ -5,7 +5,7 @@ local Ui = require("../ui")
 
 local el, span = Ui.el, Ui.span
 
-type Group = { title: string, keys: { { string } } } -- a key row is { keys, label, more keys? }
+type Group = { title: string, keys: { { string } } } -- a key row is { keys, label, keys on a second line? }
 
 local GROUPS: { Group } = {
 	{ title = "Move", keys = {
@@ -42,8 +42,9 @@ function M.view(): Node
 	for _, group in GROUPS do
 		local rows: { Node } = { span("gp-panel-h", group.title) }
 		for _, key in group.keys do
-			local row: { Node } = { el("span", { class = "gp-hh-keys" }, { Ui.keys(key[1]) }), span("gp-keylabel", key[2]) }
-			if key[3] then table.insert(row, Ui.keys(key[3])) end
+			local caps: { Node } = { Ui.keys(key[1]) }
+			if key[3] then table.insert(caps, Ui.keys(key[3])) end
+			local row: { Node } = { el("span", { class = "gp-hh-keys" }, caps), span("gp-keylabel", key[2]) }
 			table.insert(rows, el("div", { class = "gp-keyrow" }, row))
 		end
 		table.insert(cols, el("div", { class = "gp-keycol" }, rows))
