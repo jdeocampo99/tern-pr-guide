@@ -56,6 +56,15 @@
   --mono: 'Berkeley Mono', ui-monospace, 'SF Mono', SFMono-Regular, Menlo, monospace;
   --tv-font: var(--mono);
 
+  /* syntax colors, as Tern's code blocks use them (DESIGN.md, Syntax) */
+  --tk-comment: var(--t3);
+  --tk-keyword: light-dark(#8a3fd6, #c29bff);
+  --tk-function: light-dark(#2448c4, #8fb6ff);
+  --tk-string: light-dark(#1d7f52, #5fd39c);
+  --tk-number: light-dark(#b25e00, #f5b54a);
+  --tk-type: light-dark(#0b7894, #4fd2ee);
+  --tk-punct: var(--t2);
+
   /* terminal surface */
   --tv-bg: light-dark(#fcfcfb, #0b0b0c);
   --tv-fg: light-dark(#1f2126, #e4e4e7);

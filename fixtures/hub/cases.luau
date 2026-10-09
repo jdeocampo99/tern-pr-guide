@@ -20,6 +20,55 @@ local PASSING = { state = "passing", passing = 4, failing = 0, pending = 0 }
 local PENDING = { state = "pending", passing = 2, failing = 0, pending = 1 }
 local QUEUE_FAIL = { kind = "queue", reason = "Removed from the merge queue: a required check failed" }
 
+-- Realistic titles, the long ones long enough to need truncation on a card.
+local TITLES: { [number]: string } = {
+	[101] = "Checkout: keep the promo code when the cart re-prices after a shipping change",
+	[102] = "Search: highlight the matched part of each suggestion",
+	[103] = "Settings: move notification preferences into their own page",
+	[104] = "Quiz: accept both \"po\" and \"ho\" in polite answers",
+	[105] = "Lessons API: paginate the unit list and return a cursor with every page of results",
+	[106] = "Dark mode: fix the low-contrast hint text on cards",
+	[107] = "Docs: the coordinator lifecycle, with a diagram",
+	[108] = "Onboarding: pick a dialect before the placement quiz",
+	[109] = "Analytics: drop the duplicate lesson_complete event",
+	[110] = "Flashcards: keep the flipped state when the deck reshuffles",
+	[111] = "Sync: retry progress uploads with exponential backoff when the device is offline for a long time",
+	[112] = "Streaks: grace day for travelers crossing time zones",
+	[113] = "Stories: audio-synced highlighting for read-along",
+	[114] = "Spaced repetition: schedule reviews by the learner's local midnight",
+	[115] = "Accessibility: larger tap targets on the answer chips",
+	[116] = "Pronunciation: show the stress mark on the syllable it falls on, including borrowed Spanish words",
+	[118] = "Leaderboard: hide learners who opted out of rankings",
+	[119] = "Paywall: restore purchases on a fresh install",
+	[120] = "Offline packs: download a unit in the background",
+	[121] = "Settings: daily reminder time picker respects 24h locale",
+	[122] = "Tests: snapshot the lesson summary screen",
+	[201] = "zsh: lazy-load nvm",
+	[202] = "Status line: plugins can contribute a clickable segment",
+	[203] = "Toasts: plugin API with action buttons",
+	[204] = "Router: one table owns route confidence thresholds across every coordinator and worker",
+	[205] = "Worktree: prune stale locks on startup",
+	[206] = "CLI: tandem logs follows a task across restarts",
+	[207] = "Chore: bump Expo SDK and fix the deprecated imports",
+	[208] = "Vocab: group words by root",
+	[209] = "Grammar notes: render baybayin glyphs with the bundled font",
+	[210] = "Files: counts in fixed right-aligned columns",
+	[211] = "Code scrolls sideways per run of lines",
+	[212] = "Guided view: steps point at removed lines too",
+	[213] = "Picker: recently opened PRs from any repo",
+	[214] = "Scheduler: retry a stalled worker from its last checkpoint",
+	[215] = "Session: drop duplicate receipts when a coordinator restarts",
+	[216] = "Refactor: split the receipts module",
+	[301] = "Settings: move notification prefs into their own page",
+	[302] = "Search: debounce the typeahead and cancel stale requests",
+	[303] = "Images: serve AVIF with a WebP fallback and keep the original for crawlers that cannot decode it",
+	[304] = "Cart: show the delivery estimate under each item",
+	[305] = "Docs: fix the onboarding command for fish shell",
+	[306] = "Profile: show the learner's streak on their avatar",
+	[307] = "Lessons API: add an etag to the unit list response",
+	[308] = "Auth: refresh the session before a long lesson ends",
+}
+
 -- One case: the fields that differ from a quiet PR. `size` splits into additions and deletions.
 type Spec = { [string]: any }
 
@@ -145,7 +194,7 @@ local function build(spec: Spec, patch: Spec?): any
 	local key = merged.repo .. "#" .. merged.n
 	return {
 		key = key, id = "PR_" .. key, repo = merged.repo, number = merged.n,
-		url = "https://github.com/" .. merged.repo .. "/pull/" .. merged.n, title = "Case " .. merged.n,
+		url = "https://github.com/" .. merged.repo .. "/pull/" .. merged.n, title = TITLES[merged.n] or ("Case " .. merged.n),
 		author = if role == "mine" then VIEWER else "maria-k", authorBot = false,
 		role = role, draft = merged.draft or false,
 		createdAt = merged.created, lastActivityAt = merged.active,

@@ -10,3 +10,8 @@ styles = ["guide.css"]
 id = "guide"
 title = "PR Guide"
 palette = false
+
+[[blocks]]
+id = "hub"
+title = "PR hub"
+palette = false

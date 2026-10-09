@@ -172,6 +172,7 @@ To review has its own field: "Paste a pull request link to review" (`N`, from ei
 | h j k l / arrows | Move: up and down within a column, left and right to the nearest card in the next column |
 | ⏎ / double-click | Open (Needs fixes cards open at the fixes) |
 | T | Switch tab |
+| I | Show or hide Inactive |
 | F / S | Repository filter / Sort menu (menus: j/k, ⏎ or Space, Esc) |
 | ⇧M | Agent model menu (↑↓ model, ←→ effort) |
 | N | Add a PR by link |
@@ -567,8 +568,14 @@ export type AgentFixState =
 	| { kind: "failed", reason: string, worktree: string? }
 -- A ready fix is "reviewed" once `reviewed` holds every hunk id: State.reviewed(fix, reviewed): boolean.
 
+-- A pill on a card's chip line; `kind` picks its look ("running" carries the amber spinner).
+export type Chip = { text: string, kind: "bad" | "bad-soft" | "info" | "wait" | "done" | "agent" | "running" }
+
 export type Card = {
 	pr: HubPR, column: Column, reasons: { Reason },
+	chips: { Chip },                  -- the job, or who the card waits on; empty on done cards
+	detail: string?,                  -- the first job's detail, shown after the chips ("Conflicts with main")
+	detailKind: ("bad" | "info")?,    -- the detail's color: red on your PRs, blue on review requests
 	main: CardAction?,                -- the split button's action
 	more: { CardAction },             -- behind the attached ▾
 	agent: AgentFixState?, summary: Summary?, merge: MergeResolution?,
@@ -586,9 +593,14 @@ export type BoardData = {
 	grid: { { string } },                               -- keys per column, for h j k l
 	counts: { mine: number, review: number },           -- your-turn cards per tab: the blue counts
 	repositories: { RepoOption },
+	open: { inactive: boolean, recent: boolean },       -- which folds show their rows (a search opens Inactive)
 	nextUp: NextUp?,
 	empty: boolean,
 }
+
+-- The agent's model and effort, and the models the ⇧M menu offers. nil until the block has found the agent.
+export type AgentModel = { selector: string, name: string, efforts: { string } }
+export type AgentChoice = { models: { AgentModel }, model: string, effort: string? }
 
 export type State = {
 	prs: { HubPR }, now: number,
@@ -600,13 +612,15 @@ export type State = {
 	search: Fields.Field, link: Fields.Field,
 	mode: Mode, menu: MenuId?, menuCursor: number,
 	confirm: { kind: string, keys: { string } }?,
-	folded: { [string]: boolean },
+	folded: { [string]: boolean },    -- true: the fold is closed; Inactive and Recently opened start closed
 	walking: boolean,                 -- Next up is being walked: the banner shows "2 of 11"
 	ringed: { [string]: "bad" | "good" },
 	agents: { [string]: AgentFixState },
 	details: { [string]: FixDetails }, summaries: { [string]: Summary },
 	merges: { [string]: MergeResolution },    -- by repo
 	refreshedAt: string?, loading: boolean, error: Error?,
+	agent: AgentChoice?,
+	narrow: boolean,                  -- the pane is split beside a terminal: the columns stack
 	keyed: boolean,                   -- as src/state.luau:108
 	born: { [string]: string }, booted: boolean,   -- arrival motion, as src/state.luau:113
 }
@@ -623,7 +637,10 @@ Every file in `src/view/hub/` exports `function M.view(s: State.State, motion: U
 
 ```luau
 function M.hubAction(s: HubState.State, key: Key): Action?   -- the hub's counterpart of `M.action` (keys.luau:98)
+function M.hubAfterTyping(mode: HubState.Mode, outcome: Fields.Outcome): Action?   -- after a key typed into the search field
 ```
+
+`I` shows or hides Inactive (the fold is a control, so it has a key). A card's action keys (`A`, `⇧A`, `C`, `M`, `U`, `,`, `X`) come from the selected card's `main` and `more`, so a click and a key send the same `Card.main.act`.
 
 `M.pickerAction` (`:109`) is deleted with the picker. Typing modes (`search`, `link`) return nil for letters, as `searchKey` does (`:22`).
 
@@ -631,8 +648,10 @@ function M.hubAction(s: HubState.State, key: Key): Action?   -- the hub's counte
 
 ```luau
 export type Timers = { probe: TimerHandle?, refresh: TimerHandle?, checks: TimerHandle?, debounce: TimerHandle?, ring: TimerHandle? }
+-- #5 declares `s`, `fixture`, `generate` and `agent`; the GitHub client, cache, timers and flights arrive with #4.
 export type Block = {
 	s: State.State, cache: Sync.Cache?,
+	agent: Agent.Agent?,              -- the reader's omp, once found (never with a fixture)
 	github: Github.Client, timers: Timers,
 	flights: { refresh: boolean, checks: boolean, probe: boolean },   -- one call of each kind at a time
 	fixture: string?,                 -- `fixture=cases`: no network, no timers

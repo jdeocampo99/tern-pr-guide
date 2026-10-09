@@ -35,6 +35,7 @@ colors:
   gp-changed-wash-line: "light-dark(#ecd8a8, #5c4c2a)"
   gp-confirm: "light-dark(#bc4c00, #c9510c)"
   gp-suggestion: "light-dark(#8250df, #c297ff)"
+  gp-suggestion-wash: "light-dark(#f3edfc, #2a2340)"
   gp-question: "light-dark(#0969da, #79b8ff)"
   gp-marker: "light-dark(#fff3c4, #3d3620)"
   guide-amber: "#d9822b"
@@ -174,9 +175,10 @@ Two palettes with separate jobs: Tern's theme variables for everything structura
 
 ### Tertiary
 - **Removed Red** (`gp-removed`, `gp-danger-fill`, `gp-danger-text`, `gp-danger-wash`, `gp-danger-wash-line`): removed-line counts, the Problem comment kind, the request-changes verdict, and error notices (`gp-danger-text` on `gp-danger-wash`, for contrast).
-- **Changed Amber** (`gp-changed`, `gp-changed-wash`, `gp-changed-wash-line`): the "changed" box in the before/after diagram only.
+- **Changed Amber** (`gp-changed`, `gp-changed-wash`, `gp-changed-wash-line`): the "changed" box in the before/after diagram, and running CI on a board card (the amber spinner beside the check count).
 - **Confirm Orange** (`gp-confirm`): the submit button's second state, "Post to GitHub? Press ⌘⏎ again". Nothing else.
 - **Comment kinds**: `gp-question` for Question and `gp-suggestion` for Suggestion, GitHub's own label hues. Nit uses `ink-muted`.
+- **Agent Purple** (`gp-suggestion`, `gp-suggestion-wash`): the same hue marks an agent or Tandem working, as the agent status chip ("Waiting on Tandem"). The wash is a fixed `light-dark()` pair, never computed from the hue.
 - **Marker Yellow** (`gp-marker`): lines being commented on and search hits in code. It overrides the add/remove tints.
 - **Guide Amber** (`#d9822b`): the AI reviewer's avatar, as an identity color.
 
@@ -297,16 +299,32 @@ One-line rows at `--r-ctl`, hover `--l1`, selected Review Blue wash. Search rows
 Tern's native `overlay`, anchored under the model button. It holds a search field, grouped model rows, and a footer with effort and lens segments. Segments are chip fills, and the chosen one is a card fill with a 1px lift.
 
 ### Board card
-One box per item, in this order: a chip line (the job, in its meaning color, with a short reason), the title, an optional note (what an agent found, or why a fix failed), and the meta line (repo #number, checks, age). Your-turn cards take their meaning color as a wash; waiting cards are neutral (`--sf-shade`); done cards take a green hairline and a ✓. The selected card takes a Review Blue outline. Selecting a card never changes its height.
+Washed action cards: your-turn cards carry their meaning as a wash (Removed Red on your PRs, Review Blue on review requests), with the matching `-wash-line` hairline. Cards that wait take the shade fill, and a card in Inactive reads quieter still. Review cards show their size as `+additions −deletions` (Added Green and Removed Red, terminal font) on the meta line. One box per item, in this order: a chip line (the job, in its meaning color, with a short reason), the title, an optional note (what an agent found, or why a fix failed), and the meta line (repo #number, checks, age). Your-turn cards take their meaning color as a wash; waiting cards are neutral (`--sf-shade`); done cards take a green hairline and a ✓. The selected card takes a Review Blue outline. Selecting a card never changes its height.
 
 ### Card actions (split button)
-A card's actions are one split button: the main action, with its alternatives behind an attached ▾. It's hidden at rest, appears quiet on hover, and fills (with its key) on the selected card. It takes the place of checks and age at the end of the meta line, so it never pushes other text. There is one split button per card, always in that slot.
+A card's actions are one split button: the main action, with its alternatives behind an attached ▾. It's hidden at rest, appears quiet on hover (card fill, `--l3` hairline, ink text), and fills (with its key) on the selected card: Review Blue, or Merge Green on a Ready to merge card, with the keycap inverted to white at 35%. The ▾ shows only on the selected card. It is 22px high, takes the place of checks and age at the end of the meta line, so it never pushes other text or changes the card's height. There is one split button per card, always in that slot.
 
 ### Selection bar
 When several items are selected, a bar sits at the top of their group: "N selected", the one action, and Clear (Esc). Its confirm lists at most 5 titles plus "and N more".
 
 ### Inline confirm
 An action that can't be undone asks in place: one bold question line, a filled confirm button with ⌘⏎ (Confirm Orange, or Removed Red for deletion), and Cancel (Esc). No modal.
+
+### Status chip
+A short pill on a card's chip line that names the job or who the card waits on, never a sentence. On your-turn cards the first job's detail follows the chips as plain text in the card's meaning color ("Conflicts with main", "@maria-k asked 4h ago"). It is a `--r-chip` pill, 12px sans at weight 600, padding 0 7px. Fill follows the Color Meaning Rule:
+- **Job for the reader:** solid fill with white text. Removed Red (`gp-danger-fill`) for a reason a PR needs fixes, one chip per reason ("Merge failed", "Checks failing", "Feedback", "Merge conflict"). Review Blue (`gp-blue-fill`) for "Review".
+- **Waiting:** chip fill (`--chip-bg`) with `--t2` text ("Waiting on review", "You commented"). While checks run it holds the amber spinner.
+- **Done:** `gp-success-wash` with Added Green text ("Approved").
+- **Agent or Tandem:** `gp-suggestion-wash` with Agent Purple text ("Waiting on Tandem").
+
+### Tabs with counts
+The board's two tabs look like Tern's `tabs` node (13px sans, muted until active, a 2px underline in Tern's accent like the view switch), but are `gp-hub-tab` elements, because a native `tabs` node cannot carry a count and Tern's `sf-tab` rules don't style elements outside it. The count after the label is a Review Blue pill (`gp-blue-fill`, white text, 11px) and counts only the cards in the tab's your-turn column. A tab with none shows no pill.
+
+### Boxes
+A 14px square with a 4px radius for a choice that can be several. Empty it is a 1.5px `--t4` outline; chosen it is Review Blue filled with a white check. Used by the repository menu, and by selecting several cards later. A single choice shows only a Review Blue check.
+
+### Menu rows
+Rows in an overlay menu are `--r-ctl` rows, hover and keyboard cursor in `--l1` and Review Blue wash, a box or check first, then the label, then a muted count or hint at the right. Menus opened by a key draw without animation. The key panel (`?`) is an overlay with three columns of key rows: Move, The selected card, The board.
 
 ### Banner
 One quiet line above a board for an item that spans the board (for example Next up): shade fill, `--l2` hairline, sized to its content and left-aligned, read left to right, ending in its action. Never a meaning-color wash.

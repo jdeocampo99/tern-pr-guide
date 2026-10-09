@@ -13,3 +13,6 @@ tern.command({ id = "generate", title = "New AI generated PR review block", keys
 tern.command({ id = "sample", title = "New PR Guide sample block", run = function(cx: WindowCx)
  cx:new_block("prguide.guide", {}, "tab")
 end })
+tern.command({ id = "hub-sample", title = "New PR hub sample block", run = function(cx: WindowCx)
+ cx:new_block("prguide.hub", { "fixture=cases" }, "tab")
+end })
