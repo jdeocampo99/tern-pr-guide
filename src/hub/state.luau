@@ -828,11 +828,15 @@ export type LinkTarget =
 -- The pull request the add field's text names: a github.com pull request link, or `owner/repo#123`.
 local function parseRef(text: string): Model.PRRef?
 	local trimmed = string.match(text, "^%s*(.-)%s*$") :: string
+	-- A link pasted without its scheme ("github.com/owner/repo/pull/123") is the same link.
+	local lowered = string.lower(trimmed)
+	if string.find(lowered, "^github%.com/") or string.find(lowered, "^www%.github%.com/") then trimmed = "https://" .. trimmed end
 	local repo: string?
 	local number: number?
 	local host = Links.linkHost(trimmed)
 	if host then
-		if string.lower(host) ~= "github.com" then return nil end
+		local lowerHost = string.lower(host)
+		if lowerHost ~= "github.com" and lowerHost ~= "www.github.com" then return nil end
 		repo, number = Links.linkRepo(trimmed), Links.named(trimmed)
 	else
 		local r, n = string.match(trimmed, "^([%w_.%-]+/[%w_.%-]+)#(%d+)$")

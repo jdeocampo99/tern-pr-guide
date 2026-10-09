@@ -356,6 +356,14 @@ return function()
 	assert(target("").kind == "empty" and target("   ").kind == "empty")
 	assert(target("hello").kind == "invalid" and target("123").kind == "invalid" and target("https://example.com/a/b/pull/3").kind == "invalid")
 	assert(target("https://gitlab.com/acme/api/pull/3").kind == "invalid")
+	for _, form in { "github.com/acme/new/pull/77", "https://github.com/acme/new/pull/77", "http://www.github.com/acme/new/pull/77", "www.github.com/acme/new/pull/77/files", "GitHub.com/acme/new/pull/77", "acme/new#77" } do
+		local t = target(form) :: any
+		assert(t.kind == "new" and t.repo == "acme/new" and t.number == 77, form)
+	end
+	assert((target("github.com/ACME/web/pull/301") :: any).kind == "board")
+	for _, form in { "gitlab.com/acme/new/pull/77", "https://notgithub.com/acme/new/pull/77", "github.com.evil.io/acme/new/pull/77", "https://github.com/acme/new/issues/77" } do
+		assert(target(form).kind == "invalid", form)
+	end
 	local fresh1 = target("https://github.com/acme/new/pull/77/files") :: any
 	assert(fresh1.kind == "new" and fresh1.repo == "acme/new" and fresh1.number == 77)
 	fresh1 = target("acme/new#78") :: any
