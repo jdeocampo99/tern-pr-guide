@@ -6,7 +6,7 @@ A Tern plugin (Luau and one stylesheet) that turns a GitHub PR into a guided rev
 
 Each module's header comment names its one job. Put new code in the module that comment already covers. If none covers it, make a new module with its own header comment.
 
-- **Boundary:** only `src/fetch.luau` reaches outside the plugin: `gh`, `git`, `omp`, `tern.kv`, and files.
+- **Boundary:** only `src/fetch.luau` and `src/github.luau` reach outside the plugin. `fetch.luau`: `gh`, `git`, `omp`, `tern.kv`, and files. `github.luau`: GitHub, only through the runner it is given (`Fetch.runner` in the plugin).
 - **Glue:** only `src/block.luau` and `src/hub/block.luau` do window effects: scrolling, focus, timers, toasts. A new action is one `ACTIONS` entry, sent by both clicks and `keys.luau`.
 - **Views:** `src/view/*.luau` turn state into nodes and nothing else. Build them with `Ui.el` and `Ui.span`.
 - **Styles:** `guide.css` only, with `gp-` classes and the color tokens `DESIGN.md` names. To change a look, edit the rule where it lives.
