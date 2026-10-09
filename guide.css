@@ -1040,8 +1040,9 @@
 
 /* PR hub: header, tab row, board, cards, menus. See DESIGN.md (Board card, Card actions, Status chip). */
 .sf-layer[data-surface="plugin.prguide.hub"] { z-index: 30; }
-.gp-hub { gap: 0; }
-.gp-hub-head { gap: 12px; padding: 14px 4px 0; border-bottom: none; }
+.gp-hub { gap: 0; min-height: calc(100vh - 40px); }
+.gp-hub .gp-hintbar { margin-top: 0; }
+.gp-hub-head { gap: 12px; padding: 14px 0 0; border-bottom: none; }
 .gp-hub-top { display: flex; gap: 16px; align-items: center; }
 .gp-hub-title { font-family: var(--sans); font-size: 21px; font-weight: 650; white-space: nowrap; }
 .gp-hub-search { flex: 1 1 auto; min-width: 0; max-width: 560px; padding: 5px 10px; border-color: var(--l3); cursor: text; }
@@ -1050,7 +1051,7 @@
 .gp-hub-fresh-row { display: flex; gap: 8px; align-items: center; flex-shrink: 0; white-space: nowrap; }
 .gp-hub-fresh { font-family: var(--sans); font-size: 12.5px; color: var(--t3); }
 .gp-hub-tabrow { display: flex; gap: 12px; align-items: flex-end; box-shadow: inset 0 -1px 0 var(--l2); }
-.gp-hub-tabs { display: flex; gap: 12px; align-items: stretch; flex-shrink: 0; font-family: var(--sans); }
+.gp-hub-tabs { display: flex; margin-left: -10px; gap: 12px; align-items: stretch; flex-shrink: 0; font-family: var(--sans); }
 .gp-hub-tab { display: flex; align-items: center; height: 34px; padding: 0 10px; border-radius: 6px 6px 0 0; font-family: var(--sans); font-size: 13px; font-weight: 500; color: var(--t3); white-space: pre; cursor: pointer; transition: color 150ms ease, background-color 150ms ease; }
 .gp-hub-tab:hover { color: var(--t1); background: var(--l1); }
 .gp-hub-tab-on, .gp-hub-tab-on:hover { color: var(--t1); background: transparent; box-shadow: inset 0 -2px 0 var(--accent); }
@@ -1061,20 +1062,19 @@
 .gp-hub-ctl:active { transform: scale(0.97); }
 .gp-hub-ctl:hover { background: var(--l1); color: var(--t1); }
 .gp-hub-ctl-open, .gp-hub-ctl-open:hover { background: var(--l1); border-color: var(--l3); color: var(--t1); }
-.gp-hub-ctl-act, .gp-hub-ctl-act:hover { background: var(--gp-blue-wash); border-color: var(--gp-blue-wash-line); color: var(--gp-blue-ink); }
+.gp-hub-ctl-act, .gp-hub-ctl-act:hover { background: var(--chip-bg); border-color: var(--l2); color: var(--t1); }
 .gp-hub-ctl .sf-icon, .gp-hub-ctl .ico { width: 12px; height: 12px; color: var(--t3); }
 .gp-hub-ctl-label { display: flex; gap: 5px; font-family: var(--sans); }
 .gp-hub-ctl-dim { font-family: var(--sans); color: var(--t3); }
 .gp-hub-ctl-strong { font-family: var(--sans); font-weight: 600; color: var(--t1); }
-.gp-hub-ctl-act .gp-hub-ctl-strong { color: var(--gp-blue-ink); }
-.gp-hub-body { display: flex; flex-direction: column; gap: 24px; padding: 16px 0 8px; }
+.gp-hub-body { flex: 1 1 auto; display: flex; flex-direction: column; gap: 24px; padding: 16px 0 56px; }
 .gp-hub-body > * { flex-shrink: 0; }
 .gp-hub-board { display: flex; gap: 24px; align-items: flex-start; }
 .gp-hub-narrow .gp-hub-board { flex-direction: column; align-items: stretch; gap: 20px; }
 .gp-hub-col { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
 .gp-hub-col > * { flex-shrink: 0; }
 .gp-hub-col-act { flex-grow: 1.35; }
-.gp-hub-colhead { display: flex; gap: 8px; align-items: center; margin-bottom: 4px; padding: 0 2px 10px; border-bottom: 1px solid var(--l2); }
+.gp-hub-colhead { display: flex; gap: 8px; align-items: center; margin-bottom: 4px; padding: 0 0 10px; border-bottom: 1px solid var(--l2); }
 .gp-hub-colname { font-family: var(--sans); font-size: 15px; font-weight: 650; }
 .gp-hub-col-wait .gp-hub-colname { color: var(--t2); }
 .gp-hub-colcount { padding: 0 7px; border-radius: 10px; font-family: var(--sans); font-size: 12px; font-weight: 650; line-height: 18px; font-variant-numeric: tabular-nums; color: var(--t2); background: var(--chip-bg); }
@@ -1084,8 +1084,9 @@
 .gp-hub-col-info .gp-hub-colcount { color: #fff; background: var(--gp-blue-fill); }
 .gp-hub-col-done .gp-hub-colhead { border-bottom-color: var(--gp-success-wash-line); }
 .gp-hub-col-done .gp-hub-colcount { color: var(--gp-added); background: var(--gp-success-wash); }
-.gp-hub-repo { display: flex; gap: 8px; align-items: baseline; padding: 10px 2px 2px; font-size: 12px; color: var(--t2); }
+.gp-hub-repo { display: flex; gap: 8px; align-items: baseline; padding: 10px 0 2px; font-size: 12px; color: var(--t2); }
 .gp-hub-repo-n { color: var(--t3); }
+.gp-hub-col .gp-hub-colcount-zero { color: var(--t2); background: var(--chip-bg); }
 .gp-hub-empty { padding: 14px 10px; font-family: var(--sans); font-size: 13.5px; color: var(--t3); }
 .gp-hub-error { padding: 10px 12px; border-radius: var(--r-ctl); border: 1px solid var(--gp-danger-wash-line); background: var(--gp-danger-wash); color: var(--gp-danger-text); font-family: var(--sans); font-size: 13px; }
 
@@ -1115,7 +1116,7 @@
 .gp-hc-title { min-width: 0; font-family: var(--sans); font-size: 15px; font-weight: 600; line-height: 1.35; color: var(--t1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .gp-hc-titlerow { display: flex; gap: 10px; align-items: center; min-width: 0; }
 .gp-hc-titlerow > .gp-hc-title { flex: 1 1 auto; }
-.gp-hc-why { min-width: 0; font-family: var(--sans); font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gp-hc-why { flex: 1 1 0; min-width: 0; font-family: var(--sans); font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .gp-hc-why-bad { color: var(--gp-danger-text); }
 .gp-hc-why-info { color: var(--gp-blue-ink); }
 .gp-hc-wait .gp-hc-title, .gp-hc-quiet .gp-hc-title { font-size: 13.5px; font-weight: 500; color: var(--t2); }
@@ -1178,4 +1179,9 @@
 .gp-hm-count { font-size: 11.5px; color: var(--t3); font-variant-numeric: tabular-nums; }
 .gp-hm-sub { padding-left: 16px; font-size: 12px; color: var(--t3); }
 .gp-hm-clear .gp-hm-label { color: var(--t2); }
-.gp-hh { display: flex; flex-wrap: wrap; gap: 20px 28px; padding: 18px 22px 16px; }
+.gp-hh { display: flex; gap: 28px; padding: 18px 22px 16px; background: var(--card); }
+.gp-hh .gp-keycol { flex: 1 1 0; min-width: 0; }
+.gp-hh-keys { display: flex; flex-shrink: 0; width: 104px; }
+/* menus and the key panel are opaque cards, so the board never shows through; the menus are narrow */
+.sf-overlay[data-role='gp.hubmenu'] .sf-ov-card, .sf-overlay[data-role='gp.hubhelp'] .sf-ov-card { background: var(--card); }
+.sf-overlay[data-role='gp.hubmenu'], .sf-overlay[data-role='gp.hubmenu'] .sf-ov-card { width: 260px; }

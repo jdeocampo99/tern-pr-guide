@@ -122,8 +122,7 @@ local function columnClass(column: Model.Column, tab: Model.Tab): string
 	return "gp-hub-col-wait"
 end
 
-local function emptyText(s: State.State, column: Model.Column): string
-	if s.search.text ~= "" or s.repositories ~= nil then return "None match the search or filter." end
+local function emptyText(column: Model.Column): string
 	return EMPTY[column]
 end
 
@@ -133,11 +132,11 @@ local function columns(s: State.State): Node
 		local kids: { Node } = {
 			el("div", { class = "gp-hub-colhead", key = "head" }, {
 				span("gp-hub-colname", LABELS[entry.column]),
-				span("gp-hub-colcount", tostring(#entry.cards)),
+				span("gp-hub-colcount" .. (if #entry.cards == 0 then " gp-hub-colcount-zero" else ""), tostring(#entry.cards)),
 			}),
 		}
 		if #entry.cards == 0 then
-			table.insert(kids, span("gp-hub-empty", emptyText(s, entry.column)))
+			table.insert(kids, span("gp-hub-empty", emptyText(entry.column)))
 		else
 			for _, node in cards(s, entry.cards) do table.insert(kids, node) end
 		end
@@ -175,9 +174,13 @@ local function body(s: State.State, motion: Ui.Motion): Node
 	if s.board.empty and s.loading then
 		table.insert(kids, span("gp-hub-empty", "Loading pull requests…"))
 	else
-		table.insert(kids, columns(s))
-		local inactive = fold(s, motion)
-		if inactive then table.insert(kids, inactive) end
+		if s.board.empty and (s.search.text ~= "" or s.repositories ~= nil) then
+			table.insert(kids, span("gp-hub-empty", "No pull requests match the search or filter."))
+		else
+			table.insert(kids, columns(s))
+			local inactive = fold(s, motion)
+			if inactive then table.insert(kids, inactive) end
+		end
 	end
 	return el("div", { class = "gp-hub-body", key = "body" }, kids)
 end

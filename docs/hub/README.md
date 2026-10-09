@@ -568,8 +568,14 @@ export type AgentFixState =
 	| { kind: "failed", reason: string, worktree: string? }
 -- A ready fix is "reviewed" once `reviewed` holds every hunk id: State.reviewed(fix, reviewed): boolean.
 
+-- A pill on a card's chip line; `kind` picks its look ("running" carries the amber spinner).
+export type Chip = { text: string, kind: "bad" | "bad-soft" | "info" | "wait" | "done" | "agent" | "running" }
+
 export type Card = {
 	pr: HubPR, column: Column, reasons: { Reason },
+	chips: { Chip },                  -- the job, or who the card waits on; empty on done cards
+	detail: string?,                  -- the first job's detail, shown after the chips ("Conflicts with main")
+	detailKind: ("bad" | "info")?,    -- the detail's color: red on your PRs, blue on review requests
 	main: CardAction?,                -- the split button's action
 	more: { CardAction },             -- behind the attached ▾
 	agent: AgentFixState?, summary: Summary?, merge: MergeResolution?,

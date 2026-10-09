@@ -26,7 +26,8 @@ local function chipLine(card: State.Card): Node
 			table.insert(out, span("gp-hc-chip " .. CHIP_CLASS[chip.kind], chip.text))
 		end
 	end
-	if card.detail then table.insert(out, span("gp-hc-why gp-hc-why-" .. (card.detailKind or "bad"), card.detail)) end
+	-- Three or more chips leave no room for the detail to read, so it is dropped.
+	if card.detail and #card.chips < 3 then table.insert(out, span("gp-hc-why gp-hc-why-" .. (card.detailKind or "bad"), card.detail)) end
 	return el("div", { class = "gp-hc-chips", key = "chips" }, out)
 end
 
@@ -73,8 +74,9 @@ function M.view(card: State.Card, now: number): Node
 	local main = card.main
 	local lead: { Node } = {}
 	table.insert(lead, span("gp-hc-repo", (string.match(pr.repo, "[^/]+$") :: string) .. " #" .. pr.number))
+	local named = card.detail ~= nil and string.find(card.detail, "@" .. pr.author, 1, true) ~= nil
 	if pr.role == "review" then
-		table.insert(lead, span("gp-hc-who", "@" .. pr.author))
+		if not named then table.insert(lead, span("gp-hc-who", "@" .. pr.author)) end
 		table.insert(lead, el("span", { class = "gp-hc-size" }, {
 			span("gp-hc-add", "+" .. pr.additions),
 			span("gp-hc-del", "−" .. pr.deletions),

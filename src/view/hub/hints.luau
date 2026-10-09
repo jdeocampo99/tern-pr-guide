@@ -15,7 +15,7 @@ local M = {}
 
 function M.view(s: State.State): Node
 	local fixed = FIXED[s.mode]
-	local title, keys = "Pull requests", { { "h j k l", "Move" }, { "⏎", "Open" } }
+	local title, keys = "Pick a pull request", { { "h j k l", "Move" }, { "⏎", "Open" } }
 	if fixed then
 		title, keys = fixed.title, fixed.keys
 	else

@@ -37,7 +37,7 @@ export type Card = {
 	pr: HubPR,
 	chips: { Chip }, -- the job, or who the card waits on; empty on done cards
 	detail: string?, -- the first job's detail, after the chips
-	detailKind: ("bad" | "info")?,
+	detailKind: ("bad" | "info")?, -- the detail's color: red on your PRs, blue on review requests
 	column: Column,
 	reasons: { Model.Reason },
 	main: CardAction?, -- the split button's action
@@ -247,10 +247,10 @@ local function chipsFor(pr: HubPR, placement: Model.Placement, now: number): ({ 
 					open = pr.reviews.unresolved
 				end
 				if asker then add("Address changes", "Changes requested by @" .. asker) end
-				if open > 0 or not asker then add("Reply", open .. " unresolved comments") end
+				if open > 0 or not asker then add("Reply", open .. (if open == 1 then " unresolved comment" else " unresolved comments")) end
 			elseif reason == "checks" then
 				local total = pr.checks.passing + pr.checks.failing + pr.checks.pending
-				add("Fix checks", pr.checks.failing .. "/" .. total .. " checks failing")
+				add("Fix checks", pr.checks.failing .. "/" .. total .. (if total == 1 then " check failing" else " checks failing"))
 			elseif reason == "conflict" then
 				add("Resolve conflicts", "Conflicts with main")
 			end

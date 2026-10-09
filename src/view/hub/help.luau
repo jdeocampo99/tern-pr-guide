@@ -5,12 +5,11 @@ local Ui = require("../ui")
 
 local el, span = Ui.el, Ui.span
 
-type Group = { title: string, keys: { { string } } }
+type Group = { title: string, keys: { { string } } } -- a key row is { keys, label, more keys? }
 
 local GROUPS: { Group } = {
 	{ title = "Move", keys = {
-		{ "h j k l", "Move between cards" },
-		{ "← ↑ ↓ →", "Move between cards" },
+		{ "h j k l", "Move between cards", "← ↑ ↓ →" },
 		{ "⏎", "Open the card" },
 		{ "T", "Switch tab" },
 		{ "I", "Show or hide Inactive" },
@@ -43,12 +42,14 @@ function M.view(): Node
 	for _, group in GROUPS do
 		local rows: { Node } = { span("gp-panel-h", group.title) }
 		for _, key in group.keys do
-			table.insert(rows, el("div", { class = "gp-keyrow" }, { Ui.keys(key[1]), span("gp-keylabel", key[2]) }))
+			local row: { Node } = { el("span", { class = "gp-hh-keys" }, { Ui.keys(key[1]) }), span("gp-keylabel", key[2]) }
+			if key[3] then table.insert(row, Ui.keys(key[3])) end
+			table.insert(rows, el("div", { class = "gp-keyrow" }, row))
 		end
 		table.insert(cols, el("div", { class = "gp-keycol" }, rows))
 	end
 	local body = el("div", { class = "gp-hh", key = "body" }, cols)
-	return { k = "overlay", p = { key = "help", role = "gp.hubhelp", aria = "All shortcuts", anchor = { node = Paths.titleLabel, side = "below" }, size = "md" }, c = { body } } :: any
+	return { k = "overlay", p = { key = "help", role = "gp.hubhelp", aria = "All shortcuts", anchor = { node = Paths.titleLabel, side = "below" }, size = "lg" }, c = { body } } :: any
 end
 
 return M
