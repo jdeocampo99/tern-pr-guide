@@ -171,8 +171,10 @@ To review has its own field: "Paste a pull request link to review" (`N`, from ei
 |---|---|
 | h j k l / arrows | Move: up and down within a column, left and right to the nearest card in the next column |
 | ⏎ / double-click | Open (Needs fixes cards open at the fixes) |
+| ⇧⏎ | Open with the AI guide started |
 | T | Switch tab |
 | I | Show or hide Inactive |
+| R | Show or hide Recently opened (Review requests) |
 | F / S | Repository filter / Sort menu (menus: j/k, ⏎ or Space, Esc) |
 | ⇧M | Agent model menu (↑↓ model, ←→ effort) |
 | N | Add a PR by link |
@@ -227,14 +229,15 @@ Every issue builds against these types and signatures. An issue that needs a cha
 | `src/hub/sync.luau` | `model` |
 | `src/hub/agent-fix.luau` | `model`, `fixes` |
 | `src/hub/summary.luau` | `model`, `fixes` |
+| `window.luau` | `src/links.luau`, `src/hub/sync.luau` (to read `hub.cache`) |
 | `src/hub/state.luau` | `model`, `sync`, `fixes`, `agent-fix`, `summary`, `src/text-field.luau`. Never `fetch`, `github` or `block`. |
 | `src/keys.luau` | `src/hub/state.luau`, plus what it requires today minus `picker` |
 | `src/view/hub/*.luau` | `state`, `model`, `fixes`, `src/view/ui.luau`, `src/text.luau`. Never `sync` or `github`. |
-| `src/fetch.luau` | `model` and `fixes` for types, `github` for the `Runner` type, plus what it requires today minus `picker` |
+| `src/fetch.luau` | `model` and `fixes` for types, `github` for the `Runner` type, `src/links.luau`, `src/hub/sync.luau` (the recent store), plus what it requires today minus `picker` |
 | `src/hub/block.luau` | everything above; it is the only module that wires them |
 | `tools/conflicts` | nothing (a standalone script) |
 
-### `src/links.luau` (pure; the picker's link parsing, moved)
+### `src/links.luau` (pure; the picker's link parsing, moved, and the way in's decisions)
 
 ```luau
 function M.named(text: string): number?            -- "354", "#354" or a PR link -> 354 (picker.luau:179)
@@ -243,7 +246,27 @@ function M.linkHost(text: string): string?         -- the link's host (picker.lu
 function M.reference(slug: string?, number: number): string  -- link, or the bare number without a slug (picker.luau:196)
 function M.remoteRepo(url: string): string?        -- "owner/repo" of a git remote URL (picker.luau:202)
 function M.sameRepo(a: string?, b: string?): boolean  -- case-insensitive (picker.luau:211)
+function M.resolve(text: string, slug: string?): string?  -- ⏎ on pasted text: a PR link as it is; a bare number only with a `slug` (then its link); else nil, so a number alone is refused (the picker's `choice`)
+
+-- The link the hub opens a PR with, and the window's route (`window.luau`) that claims it.
+export type OpenRoute = { number: number, root: string, generate: boolean, search: boolean, link: string }
+function M.openLink(slug: string, number: number, root: string, generate: boolean, search: boolean): string
+	-- https://github.com/<slug>/pull/<n>#prguide-open=<escaped root>[&generate=true][&search=true]
+function M.openRoute(url: string): OpenRoute?     -- nil for any other link (GitHub's page opens)
+function M.routeArgs(route: OpenRoute): { string }
+	-- { "pr=<n>", "repo=<root>", "generate=true"? }; with `search`, "pr=<link>" instead of the number
+
+-- ⌥⌘R and the status segment.
+export type PaneLike = { pane: number, block: string?, parked: boolean? }
+export type Entry = { kind: "new" | "focus" | "unpark", pane: number? }
+function M.hubEntry(panes: { PaneLike }, focused: number?): Entry   -- the focused hub, else a tiled one, else a parked one
+function M.statusText(toReview: number, needFixes: number): string  -- "PRs · 2 to review · 10 need fixes"; zero parts are left out, both zero is "PRs"
+function M.flashing(flashAt: number?, now: number): boolean          -- FLASH_SECONDS (10)
+function M.watchDelay(flashAt: number?, now: number): number         -- WATCH_SECONDS (15), sooner when a flash ends first
+function M.statusChanged(old: Seen?, new: Seen?): boolean            -- refreshedAt, a count or the flash changed
 ```
+
+With `search` the root is a folder to look for a checkout in (no clone was found, and PR Guide's own copy of the repo is used): the guide gets the link and resolves it as it does a pasted link, since a saved copy is a bare repo the guide cannot open by path.
 
 ### `src/hub/model.luau` (pure rules)
 
@@ -615,6 +638,7 @@ export type State = {
 	mode: Mode, menu: MenuId?, menuCursor: number,
 	confirm: { kind: string, keys: { string } }?,
 	folded: { [string]: boolean },    -- true: the fold is closed; Inactive and Recently opened start closed
+	recent: { Opened },               -- hub.recent, newest first, set by the block
 	walking: boolean,                 -- Next up is being walked: the banner shows "2 of 11"
 	ringed: { [string]: "bad" | "good" },
 	agents: { [string]: AgentFixState },
@@ -628,6 +652,10 @@ export type State = {
 }
 
 function M.new(prs: { HubPR }, now: number, saved: any): State
+function M.setRecent(s: State, recent: { Opened })   -- hub.recent; builds BoardData.recent (Review requests only, narrowed by the search)
+function M.recentKey(opened: Opened): string
+function M.recentRow(s: State, key: string): Opened?
+function M.selectedRecent(s: State): Opened?
 function M.replace(s: State, prs: { HubPR }, now: number, refreshedAt: string?)   -- a refresh's PRs: sets time, clears loading and error, re-projects
 function M.project(s: State)                 -- recomputes s.board from s.prs and the inputs
 function M.mode(s: State): Mode
@@ -639,11 +667,11 @@ Every file in `src/view/hub/` exports `function M.view(s: State.State, motion: U
 ### `src/keys.luau` (hub keys)
 
 ```luau
-function M.hubAction(s: HubState.State, key: Key): Action?   -- the hub's counterpart of `M.action` (keys.luau:98)
+function M.hubAction(s: HubState.State, key: Key): Action?   -- the hub's counterpart of `M.action` (keys.luau:98). ⇧⏎ sends `hub-open-generate`; `R` sends `hub-fold=recent` on the Review requests tab
 function M.hubAfterTyping(mode: HubState.Mode, outcome: Fields.Outcome): Action?   -- after a key typed into the search field
 ```
 
-`I` shows or hides Inactive (the fold is a control, so it has a key). A card's action keys (`A`, `⇧A`, `C`, `M`, `U`, `,`, `X`) come from the selected card's `main` and `more`, so a click and a key send the same `Card.main.act`.
+`I` shows or hides Inactive and `R` shows or hides Recently opened (a fold is a control, so it has a key). A Recently opened row is selected by `State.recentKey` (`rc:<repo>#<n>`), moved to by `j`/`k` after the last card, and opened by ⏎ or a double-click. A card's action keys (`A`, `⇧A`, `C`, `M`, `U`, `,`, `X`) come from the selected card's `main` and `more`, so a click and a key send the same `Card.main.act`.
 
 `M.pickerAction` (`:109`) is deleted with the picker. Typing modes (`search`, `link`) return nil for letters, as `searchKey` does (`:22`).
 
@@ -670,7 +698,7 @@ The hub has its own `ACTIONS` table, sent by clicks (`event`) and by `Keys.hubAc
 
 ### `src/fetch.luau` (additions)
 
-`src/fetch.luau` keeps local git, treehouse, `omp` and Tandem CLI calls, and one new export: `M.runner: Github.Runner`, which resolves `gh` and the shell's PATH the way `run` does (`:69-121`). The agent engine, Fix bot comments and the Tandem hand-off add their own functions here, each in the `(value?, err?)` style above.
+`src/fetch.luau` keeps local git, treehouse, `omp` and Tandem CLI calls, the recent store (`recentPrs`, `rememberPr`, and `migrateRecent`, which the hub runs on first load), and one new export: `M.runner: Github.Runner`, which resolves `gh` and the shell's PATH the way `run` does (`:69-121`). The agent engine, Fix bot comments and the Tandem hand-off add their own functions here, each in the `(value?, err?)` style above.
 
 ## How this maps onto Tern
 
@@ -681,7 +709,7 @@ The hub has its own `ACTIONS` table, sent by clicks (`event`) and by `Keys.hubAc
   - Found and parked (`PaneInfo.parked`, `:377`): `cx.layout:unpark(pane)` (`:1487`), which deals it into the current tab.
   - Found otherwise: `cx.layout:focus(pane)` (`:1466`).
   - Not found: `cx:new_block("prguide.hub", args, "tab")` (`:1596`), with `args = { "generate=true" }` when `generate`.
-  - Opening with `generate` while a hub exists sends it `cx.session:event(pane, { ev = "action", act = "set-generate", value = "true" })` (`:1443`). **[INFERENCE]** that an action event without a node id reaches the block's `event`. The one-way-in issue checks it in Tern and, if it doesn't, sends the event with the id of a node the view always has.
+  - Opening while a hub exists sends it `cx.session:event(pane, { ev = "action", id = "main.hub", act = "set-generate", value = "true" })` (`:1443`), with `"false"` for ⌥⌘R so a hub opened for AI guides does not stay that way. **[INFERENCE]** that an action event without a node id reaches the block's `event`; the event carries `id = "main.hub"`, the hub's root node, which the view always has, so it does not depend on it. `window.luau` sends `hub-focused` the same way.
 - **Callers.** The ⌥⌘R command (`review`), the ⌥⇧⌘R command (`generate`) and the status segment all call `openHub`. Command ids stay, so existing key bindings and `plugin.prguide.review` keep working. Their palette titles become "PR hub" and "PR hub, AI guides". The **New PR Guide sample block** command stays, and a **New PR hub sample block** command (`hub-sample`) opens `prguide.hub` with `fixture=cases`.
 - **Block arguments** follow `options` in `src/block.luau:452-471`: `name=value`, unknown names rejected with a message. The hub takes `generate=true|false` and `fixture=<name>`.
 
@@ -690,7 +718,7 @@ The hub has its own `ACTIONS` table, sent by clicks (`event`) and by `Keys.hubAc
 `BlockCx` has no `new_block`; `WindowCx` does (`tern.d.luau:1141-1160`, `:1596`). The block therefore asks the window half to open it:
 
 1. The block resolves the card's `owner/repo` with the existing resolver: `Fetch.checkoutFor(near, dir, slug, done)` (`src/fetch.luau:388`), then `Fetch.savedCopy(host, slug)` (`:445`) when it finds none. `dir` is `cx.cwd` (`tern.d.luau:1145`), else `HOME`. When neither gives a repo, the block shows a toast with the reason and opens nothing.
-2. It calls `cx:open(url)` (`tern.d.luau:1134-1135`, which goes through the window's `route.link`) with `https://github.com/<owner>/<repo>/pull/<n>#prguide-open=<url-encoded root>`, plus `&generate=true` for ⇧⏎ or ⌥⇧⌘R.
+2. It calls `cx:open(url)` (`tern.d.luau:1134-1135`, which goes through the window's `route.link`) with `https://github.com/<owner>/<repo>/pull/<n>#prguide-open=<url-encoded root>`, plus `&generate=true` for ⇧⏎ or ⌥⇧⌘R. When no checkout exists but PR Guide can make its own copy, `root` is the folder searched and the link ends `&search=true`: the route then answers `pr=<link>` so the guide resolves it as it does a pasted link. The resolver is `openPr` in `src/hub/block.luau`, shared by every open.
 3. `window.luau` registers `tern.route.link` (`:1928`) and claims only links carrying `#prguide-open=`, answering `{ block = "prguide.guide", args = { "pr=<n>", "repo=<root>", "generate=true"? } }` (`RouteDecision`, `:1011-1025`). The guide requires `repo=` with `pr=` (`src/block.luau:469`).
 4. A link the route doesn't claim opens GitHub's own page, so a missing route degrades to the browser.
 
@@ -731,7 +759,7 @@ The picker is `src/picker.luau`, `src/view/picker.luau`, and the picker paths in
 1. **Migrate** (everything below has a new home before anything is deleted):
    - the 8-entry recent store (`Picker.openedList`, `remember`, `RECENT_CAP`, `Opened`; `Fetch.recentPrs`, `rememberPr`, `RECENT_KEY`) moves to `Sync` and `hub.recent`. On first load of the hub, a missing `hub.recent` is filled from `recent`, and `recent` is deleted. `Fetch.rememberPr` keeps being called when the guide opens a PR;
    - link and number parsing (`named`, `linkRepo`, `linkHost`, `reference`, `remoteRepo`, `sameRepo`) moves to `src/links.luau`. Its callers are `src/block.luau:590,602,718` and `src/fetch.luau:372,431,439`;
-   - `epoch` and `ago` move to `model`; `guideNumbers` (`src/fetch.luau:352`) becomes a local helper of `fetch.luau`.
+   - `epoch` and `ago` move to `model`; `guideNumbers` (`src/fetch.luau:352`) is deleted with `guidedPrs`, its only caller.
 2. **Preserve** in the Review requests fold: ⏎ and a pasted link open the PR, a number alone is refused when it names no repo, and a PR appears once, newest first.
 3. **Delete** `src/picker.luau`, `src/view/picker.luau`, `Keys.pickerAction`, `PICKER_ACTIONS`, `pickerKey`, `pickerDispatch`, `showPicker`, `openPicker` and the `picker` field and branches of `src/block.luau`, `Fetch.listAnywhere`, `Fetch.listPrs`, `Fetch.guidedPrs`, and the `gp-pk-*` rules of `guide.css`. A guide block launched with `repo=` and no `pr=` shows "Open a pull request from the PR hub (⌥⌘R)" instead of a picker.
 4. **Update** the README, PRODUCT.md and the `docs/screenshots/picker.png` mention in the same change.

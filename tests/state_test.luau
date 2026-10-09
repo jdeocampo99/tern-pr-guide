@@ -262,4 +262,38 @@ return function()
 	assert(names == "Waiting on review")
 	names = chipsOf("acme/api#110")
 	assert(names == "", "done cards have no chip line")
+	-- Recently opened: a fold under Review requests only, closed to start, newest first, narrowed by the search.
+	local recent: { State.Opened } = {
+		{ repo = "acme/api", number = 9, title = "Add retries", author = "dana", at = "2026-10-08T09:12:33Z" },
+		{ repo = "acme/web", number = 4, title = "Move tabs", author = "ruben", at = "2026-10-07T09:12:33Z" },
+	}
+	local rs = fresh({ tab = "review" })
+	State.setRecent(rs, recent)
+	assert(#rs.board.recent == 2 and not rs.board.open.recent)
+	assert(State.move(rs, "down") and rs.selected ~= nil and State.recentRow(rs, rs.selected) == nil)
+	State.toggleFold(rs, "recent")
+	assert(rs.board.open.recent and State.recentKey(recent[1]) == "rc:acme/api#9")
+	State.select(rs, "rc:acme/web#4")
+	local picked = State.selectedRecent(rs)
+	assert(picked and picked.number == 4 and State.selectedCard(rs) == nil)
+	State.setSearch(rs, "retries")
+	assert(#rs.board.recent == 1 and rs.board.recent[1].number == 9 and rs.selected == nil)
+	State.setSearch(rs, "")
+	-- down from the last card of the last column walks into the fold, rows in order
+	local last = fresh({ tab = "review" })
+	State.setRecent(last, recent)
+	State.toggleFold(last, "recent")
+	local lastKeys = last.board.grid[#last.board.grid]
+	for _, keys in last.board.grid do
+		if #keys > 0 then lastKeys = keys end
+	end
+	State.select(last, lastKeys[#lastKeys])
+	assert(State.move(last, "down") and last.selected == "rc:acme/api#9")
+	assert(State.move(last, "down") and last.selected == "rc:acme/web#4")
+	assert(not State.move(last, "down") and last.selected == "rc:acme/web#4")
+	assert(State.move(last, "up") and last.selected == "rc:acme/api#9")
+	-- Your pull requests has no such fold
+	local mine = fresh({ tab = "mine" })
+	State.setRecent(mine, recent)
+	assert(#mine.board.recent == 0 and not mine.board.open.recent)
 end

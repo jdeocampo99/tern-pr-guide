@@ -11,8 +11,10 @@ local GROUPS: { Group } = {
 	{ title = "Move", keys = {
 		{ "h j k l", "Move between cards", "← ↑ ↓ →" },
 		{ "⏎", "Open the card" },
+		{ "⇧⏎", "Open with the AI guide started" },
 		{ "T", "Switch tab" },
 		{ "I", "Show or hide Inactive" },
+		{ "R", "Show or hide Recently opened" },
 	} },
 	{ title = "The selected card", keys = {
 		{ "A", "Fix with agent, or Summarize" },

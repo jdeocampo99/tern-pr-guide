@@ -1,5 +1,5 @@
 --!strict
--- Where the plugin reaches outside itself: `gh` for the PR list, the PR's metadata and posting the
+-- Where the plugin reaches outside itself: `gh` for the PR's metadata and posting the
 -- review, `git` in a checkout (the reader's own, or PR Guide's saved light copy of a repo) for the
 -- PR's changes and files, the checkout's guide files, the review lens files, and the reader's AI
 -- agent writing a guide. Each step starts the next from its callback; the first failure ends the
@@ -9,9 +9,10 @@ local Github = require("./github")
 local GitOutput = require("./git-output")
 local Guide = require("./guide")
 local Lens = require("./lens")
-local Picker = require("./picker")
+local Links = require("./links")
 local Pr = require("./pr")
 local Review = require("./review")
+local Sync = require("./hub/sync")
 local Text = require("./text")
 
 -- A PR as the reader named it (number, URL or branch), the root of its repository's checkout, and
@@ -347,12 +348,6 @@ function M.guidePath(repo: Repo, number: number): string
  return repo.guides .. "/" .. number .. ".json"
 end
 
--- The PRs of `repo` that have a guide file.
-function M.guidedPrs(repo: Repo): { [number]: boolean }
- if not tern.fs.exists(repo.guides) then return {} end
- return Picker.guideNumbers(tern.fs.list(repo.guides))
-end
-
 -- Finds the checkout `dir` is in. Calls `done` once, with it or with what failed.
 function M.findRepo(dir: string, done: (repo: Repo?, err: string?) -> ())
  local job: Job = { repo = dir, fail = function(message: string) done(nil, message) end }
@@ -370,7 +365,7 @@ end
 -- The "owner/repo" the `origin` remote of the checkout at `root` points at, or nil.
 local function originOf(root: string, done: (slug: string?) -> ())
  run({ "git", "-C", root, "remote", "get-url", "origin" }, { timeout_ms = GIT_MS }, function() done(nil) end, function(stdout)
-  done(Picker.remoteRepo(stdout))
+  done(Links.remoteRepo(stdout))
  end)
 end
 
@@ -429,7 +424,7 @@ function M.checkoutFor(near: Repo?, dir: string, slug: string, done: (repo: Repo
   if waiting == 0 then return finish() end
   for _, candidate in candidates do
    originOf(candidate.path, function(origin)
-    if Picker.sameRepo(origin, slug) then table.insert(matches, candidate) end
+    if Links.sameRepo(origin, slug) then table.insert(matches, candidate) end
     waiting -= 1
     if waiting == 0 then finish() end
    end)
@@ -437,7 +432,7 @@ function M.checkoutFor(near: Repo?, dir: string, slug: string, done: (repo: Repo
  end
  if not near then return search() end
  originOf(near.root, function(own)
-  if Picker.sameRepo(own, slug) then done(near) else search() end
+  if Links.sameRepo(own, slug) then done(near) else search() end
  end)
 end
 
@@ -450,55 +445,6 @@ function M.savedCopy(host: string?, slug: string): (Repo?, string?)
  end
  local root = tern.plugin.data .. "/repos/" .. string.lower(owner) .. "/" .. string.lower(name) .. ".git"
  return { root = root, guides = root .. "/prguide", cache = slug }, nil
-end
-
--- The reader's open PRs across GitHub, those waiting on their review first, then their own. Calls
--- `done` once, with the list or with the first line of what `gh` said went wrong; one of the two
--- searches failing leaves the other's list.
-function M.listAnywhere(done: (prs: { Picker.Summary }?, err: string?) -> ())
- local searches = { { "--review-requested=@me", Picker.REQUESTED }, { "--author=@me", Picker.OWN } }
- local lists: { { Picker.Summary }? } = { nil, nil }
- local problem: string? = nil
- local waiting = #searches
- local function finish()
-  waiting -= 1
-  if waiting > 0 then return end
-  if not lists[1] and not lists[2] then return done(nil, problem) end
-  done(Picker.combine({ lists[1] or {}, lists[2] or {} }, Picker.ANYWHERE_CAP), nil)
- end
- for i, search in searches do
-  local argv = { "gh", "search", "prs", search[1], "--state=open", "--sort=updated", "--limit", tostring(Picker.ANYWHERE_CAP), "--json", Picker.SEARCH_FIELDS }
-  run(argv, { timeout_ms = GH_MS }, function(message)
-   problem = problem or message
-   finish()
-  end, function(stdout)
-   lists[i] = Picker.parseSearch(stdout, search[2])
-   finish()
-  end)
- end
-end
-
--- The open PRs of the checkout at `root` and the number of its current branch's PR, if it has one.
--- Calls `done` once, with the list or with the first line of what `gh` said went wrong.
-function M.listPrs(root: string, done: (prs: { Picker.Summary }?, current: number?, err: string?) -> ())
- local prs, current, waiting, failed = nil, nil, 2, false
- local function finish()
-  waiting -= 1
-  if waiting == 0 and not failed then done(prs, current, nil) end
- end
- local list = { "gh", "pr", "list", "--state", "open", "--limit", "50", "--json", Picker.LIST_FIELDS }
- run(list, { cwd = root, timeout_ms = GH_MS }, function(message)
-  failed = true
-  done(nil, nil, message)
- end, function(stdout)
-  prs = Picker.parse(stdout)
-  finish()
- end)
- -- A branch without a PR is no failure: the list just has no "This branch" row.
- run({ "gh", "pr", "view", "--json", "number" }, { cwd = root, timeout_ms = GH_MS }, finish, function(stdout)
-  current = tern.json.decode(stdout).number
-  finish()
- end)
 end
 
 -- What the fetch stage says: for a saved copy, whether it is the first download.
@@ -672,19 +618,35 @@ function M.saveRunSeconds(seconds: number)
  pcall(tern.kv.set, RUN_SECONDS_KEY, seconds)
 end
 
--- The PRs the reader opened lately, newest first, which the picker lists above the rest.
-local RECENT_KEY = "recent"
+-- The PRs the reader opened lately, newest first, which the hub lists under Review requests. They
+-- live in `hub.recent`; the picker kept them in `recent`, which is read until the hub moves them.
+local RECENT_KEY, LEGACY_RECENT_KEY = "hub.recent", "recent"
 
-function M.recentPrs(): { Picker.Opened }
- local ok, saved = pcall(tern.kv.get, RECENT_KEY)
- return Picker.openedList(if ok then saved else nil)
+local function kvGet(key: string): any
+ local ok, saved = pcall(tern.kv.get, key)
+ return if ok then saved else nil
+end
+
+function M.recentPrs(): { Sync.Opened }
+ local saved = kvGet(RECENT_KEY)
+ if saved == nil then saved = kvGet(LEGACY_RECENT_KEY) end
+ return Sync.openedList(saved)
+end
+
+-- Moves the picker's `recent` list to `hub.recent` (a list already there stands) and deletes it.
+-- Run when the hub first loads; safe to run again.
+function M.migrateRecent()
+ local legacy = kvGet(LEGACY_RECENT_KEY)
+ if legacy == nil then return end
+ if kvGet(RECENT_KEY) == nil then pcall(tern.kv.set, RECENT_KEY, Sync.openedList(legacy)) end
+ pcall(tern.kv.set, LEGACY_RECENT_KEY, nil)
 end
 
 -- Puts `pr` first in the recently opened list.
 function M.rememberPr(pr: Pr.PR)
  if pr.repo == "" then return end
  local opened = { repo = pr.repo, number = pr.number, title = pr.title, author = pr.author, at = os.date("!%Y-%m-%dT%H:%M:%SZ") :: string }
- pcall(tern.kv.set, RECENT_KEY, Picker.remember(M.recentPrs(), opened))
+ pcall(tern.kv.set, RECENT_KEY, Sync.remember(M.recentPrs(), opened))
 end
 
 -- The models `agent` can run with, from `omp models`. Calls `done` once; the list is empty when

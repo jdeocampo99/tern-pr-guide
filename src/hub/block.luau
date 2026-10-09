@@ -8,6 +8,7 @@ local Fetch = require("../fetch")
 local Fields = require("../text-field")
 local Github = require("../github")
 local Keys = require("../keys")
+local Links = require("../links")
 local Model = require("./model")
 local Paths = require("../view/hub/paths")
 local State = require("./state")
@@ -48,6 +49,13 @@ local FIXTURES: { [string]: () -> any } = {
 	cases = function() return require("../../fixtures/hub/cases") end,
 }
 
+-- The recently opened pull requests a fixture board shows, so the fold has rows without a kv store.
+local SAMPLE_RECENT: { Sync.Opened } = {
+	{ repo = "acme/api", number = 412, title = "Add retry budget to the billing client", author = "dana", at = "2026-10-08T09:12:33Z" },
+	{ repo = "acme/web", number = 977, title = "Move the settings tabs into the sidebar", author = "ruben", at = "2026-10-06T16:40:02Z" },
+	{ repo = "acme/api", number = 398, title = "Drop the unused webhook table", author = "mei", at = "2026-09-29T11:05:48Z" },
+}
+
 -- A pane narrower than this many columns is split beside a terminal: the board's columns stack.
 local NARROW_COLS = 110
 
@@ -71,7 +79,9 @@ end
 
 local function revealSelected(b: Block, cx: BlockCx)
 	local card = State.selectedCard(b.s)
-	if card then frameLater(cx, { { "reveal", Paths.card(card), "nearest" } }) end
+	if card then return frameLater(cx, { { "reveal", Paths.card(card), "nearest" } }) end
+	local recent = State.selectedRecent(b.s)
+	if recent then frameLater(cx, { { "reveal", Paths.recentRow(State.recentKey(recent)), "nearest" } }) end
 end
 
 -- Reads `name=value` block arguments.
@@ -104,11 +114,40 @@ local function notYet(what: string): Handler
 	end
 end
 
-local function openCard(b: Block, cx: BlockCx, value: string)
+-- Opens PR `number` of `slug` ("owner/repo") in the guide. The block can't open blocks, so it finds a
+-- checkout of the repo (beside the hub's folder, else PR Guide's own copy) and opens a link the window
+-- routes to the guide (`Links.openLink`). With no checkout and no copy to make, it says why and opens
+-- nothing. A card's open action uses this too.
+local function openPr(b: Block, cx: BlockCx, slug: string, number: number, generate: boolean)
+	local dir = cx.cwd or tern.getenv("HOME") or ""
+	Fetch.checkoutFor(nil, dir, slug, function(found)
+		if b.closed then return end
+		if found then
+			cx:open(Links.openLink(slug, number, found.root, generate, false))
+			return
+		end
+		local _, why = Fetch.savedCopy("github.com", slug)
+		if why or dir == "" then
+			cx:toast("error", "Couldn't open #" .. number .. " of " .. slug, why or "No folder to look for a checkout in.")
+			return
+		end
+		cx:open(Links.openLink(slug, number, dir, generate, true))
+	end)
+end
+
+-- ⏎ and a double-click open the selected row; ⇧⏎ (or a hub opened for AI guides) starts the AI guide too.
+local function openRow(b: Block, cx: BlockCx, value: string, withGuide: boolean)
 	local s = b.s
 	if value ~= "" then State.select(s, value) end
+	local generate = withGuide or b.generate
+	local recent = State.selectedRecent(s)
+	if recent then return openPr(b, cx, recent.repo, recent.number, generate) end
 	local card = State.selectedCard(s)
 	if card then cx:toast("info", "Opening a pull request isn't available yet", card.pr.key) end
+end
+
+local function openCard(b: Block, cx: BlockCx, value: string)
+	openRow(b, cx, value, false)
 end
 
 local function closeMenu(b: Block)
@@ -357,14 +396,23 @@ local ACTIONS: { [string]: Handler } = {}
 -- The window sends this when the hub's pane gains focus; the schedule applies the debounce.
 ACTIONS["hub-focused"] = function(b, cx)
 	if b.fixture then return end
+	State.setRecent(b.s, Fetch.recentPrs())
 	b.sched.focusedAt = os.time()
 	rearm(b, cx)
+end
+
+-- The window sends this when ⌥⇧⌘R (true) or ⌥⌘R (false) finds the hub already open.
+ACTIONS["set-generate"] = function(b, cx, value)
+	b.generate = value == "true"
 end
 
 ACTIONS["hub-select"] = function(b, cx, key)
 	State.select(b.s, key)
 end
 ACTIONS["hub-open"] = openCard
+ACTIONS["hub-open-generate"] = function(b, cx, value)
+	openRow(b, cx, value, true)
+end
 ACTIONS["open"] = openCard
 ACTIONS["hub-move"] = function(b, cx, direction)
 	if State.move(b.s, direction :: any) then revealSelected(b, cx) end
@@ -509,6 +557,13 @@ local block: BlockDef<Block> = {
 			if cache then prs, refreshedAt = cache.prs, cache.refreshedAt end
 		end
 		local s = State.new(prs, now, saved)
+		if fixture then
+			State.setRecent(s, SAMPLE_RECENT)
+		else
+			-- The picker's list moves to hub.recent the first time the hub loads.
+			Fetch.migrateRecent()
+			State.setRecent(s, Fetch.recentPrs())
+		end
 		s.refreshedAt = refreshedAt
 		s.loading = live and cache == nil
 		s.narrow = cx.cols > 0 and cx.cols < NARROW_COLS

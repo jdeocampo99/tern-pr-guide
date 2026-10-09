@@ -2,7 +2,6 @@
 -- What each key does in each mode, as the same actions the page's clicks send.
 local Fields = require("./text-field")
 local HubState = require("./hub/state")
-local Picker = require("./picker")
 local Review = require("./review")
 local State = require("./state")
 
@@ -105,18 +104,6 @@ function M.action(s: State.State, key: Key): Action?
  return readingKey(s, key)
 end
 
--- The action `key` triggers on the PR picker, or nil when it types into the filter field. j and k
--- move only while the field is empty, so they can still be typed.
-function M.pickerAction(p: Picker.Picker, key: Key): Action?
- local name = key.name
- local empty = p.field.text == "" and not (key.ctrl or key.meta or key.alt or key.shift)
- if name == "down" or (empty and name == "j") then return act("picker-move", 1) end
- if name == "up" or (empty and name == "k") then return act("picker-move", -1) end
- if name == "enter" then return act("picker-open") end
- if name == "escape" then return act("picker-clear") end
- return nil
-end
-
 -- The shortcut label a key press has on a card's split button: "A", "⇧A", ",", "⏎".
 local function cardKeyLabel(key: Key): string?
 	if key.ctrl or key.meta or key.alt then return nil end
@@ -145,7 +132,7 @@ local function hubBoardKey(s: HubState.State, key: Key): Action?
 	if name == "/" or key.text == "/" then return act("hub-search") end
 	if key.ctrl or key.meta or key.alt then return nil end
 	if name == "escape" then return act("hub-escape") end
-	if name == "enter" then return act("hub-open") end
+	if name == "enter" then return act(if key.shift then "hub-open-generate" else "hub-open") end
 	local label = cardKeyLabel(key)
 	if name == "left" or name == "h" then return act("hub-move", "left") end
 	if name == "right" or name == "l" then return act("hub-move", "right") end
@@ -153,6 +140,7 @@ local function hubBoardKey(s: HubState.State, key: Key): Action?
 	if name == "up" or name == "k" then return act("hub-move", "up") end
 	if label == "T" then return act("hub-tab") end
 	if label == "I" then return act("hub-fold", "inactive") end
+	if label == "R" and s.tab == "review" then return act("hub-fold", "recent") end
 	if label == "F" then return act("hub-menu", "repositories") end
 	if label == "S" then return act("hub-menu", "sort") end
 	if label == "⇧M" then return act("hub-menu", "agent") end
