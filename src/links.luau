@@ -98,10 +98,13 @@ end
 
 -- ⌥⌘R: the hub pane to open ------------------------------------------------------------------------
 
-export type PaneLike = { pane: number, block: string?, parked: boolean? }
+export type PaneLike = { pane: number, block: string?, parked: boolean?, exited: number?, error: string? }
 export type Entry = { kind: "new" | "focus" | "unpark", pane: number? }
 
+-- A hub pane that is still running: one whose program exited or failed to start (a block left over from
+-- a plugin reload) is a dead block, not a hub.
 local function isHub(pane: PaneLike): boolean
+ if pane.exited ~= nil or pane.error ~= nil then return false end
  local block = pane.block
  return block ~= nil and (block == "prguide.hub" or string.match(block, "%.prguide%.hub$") ~= nil)
 end

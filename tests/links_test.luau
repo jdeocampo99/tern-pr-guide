@@ -76,6 +76,11 @@ return function()
 	entry = Links.hubEntry({ { pane = 5, block = hub, parked = true }, { pane = 6, block = hub } }, 1)
 	assert(entry.kind == "focus" and entry.pane == 6)
 	assert(Links.hubEntry({ { pane = 3, block = "plugin.prguide.hub" } }, nil).pane == 3)
+	-- a dead hub (its program exited or failed) is no hub
+	assert(Links.hubEntry({ { pane = 7, block = hub, exited = 1 } }, 7).kind == "new")
+	assert(Links.hubEntry({ { pane = 7, block = hub, error = "failed" }, { pane = 8, block = hub, parked = true, exited = 0 } }, nil).kind == "new")
+	entry = Links.hubEntry({ { pane = 7, block = hub, exited = 1 }, { pane = 9, block = hub } }, 7)
+	assert(entry.kind == "focus" and entry.pane == 9)
 
 	-- the status segment
 	assert(Links.statusText(2, 10) == "PRs · 2 to review · 10 need fixes")
