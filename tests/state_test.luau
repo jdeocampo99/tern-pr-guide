@@ -228,4 +228,38 @@ return function()
 	assert(both.main and both.main.label == "Fix with agent" and #both.more == 1 and both.more[1].key == "⇧A")
 	local added = State.card(fresh({ tab = "review" }), "acme/web#303") :: State.Card
 	assert(added.main and added.main.label == "Review" and #added.more == 1 and added.more[1].label == "Remove from Review requests")
+
+	-- Chip lines: one chip per job, then the first job's detail.
+	local function chipsOf(key: string, tab: string?): (string, string?)
+		local card = State.card(fresh({ tab = tab or "mine" }), key) :: State.Card
+		local names = {}
+		for _, chip in card.chips do table.insert(names, chip.text) end
+		return join(names), card.detail
+	end
+	local names, detail = chipsOf("acme/api#116")
+	assert(names == "Merge failed,Address changes,Fix checks,Resolve conflicts" and detail == "Removed from the merge queue: a required check failed")
+	names, detail = chipsOf("acme/api#119")
+	assert(names == "Reply" and detail == "1 unresolved comments")
+	names, detail = chipsOf("acme/web#103")
+	assert(names == "Address changes" and detail == "Changes requested by @bob")
+	names, detail = chipsOf("acme/api#105")
+	assert(names == "Resolve conflicts" and detail == "Conflicts with main")
+	names, detail = chipsOf("acme/web#104")
+	assert(names == "Fix checks" and detail == "1/4 checks failing")
+	names, detail = chipsOf("acme/web#301", "review")
+	assert(names == "Review" and detail == "@maria-k asked 2h ago")
+	names, detail = chipsOf("acme/web#302", "review")
+	assert(names == "Re-review" and detail == "New commits since you approved")
+	names, detail = chipsOf("acme/web#303", "review")
+	assert(names == "Review" and detail == "Added by you")
+	names, detail = chipsOf("acme/web#304", "review")
+	assert(names == "You requested changes" and detail == nil)
+	names = chipsOf("acme/web#305", "review")
+	assert(names == "You commented")
+	names = chipsOf("acme/api#114")
+	assert(names == "Waiting on checks")
+	names = chipsOf("acme/api#106")
+	assert(names == "Waiting on review")
+	names = chipsOf("acme/api#110")
+	assert(names == "", "done cards have no chip line")
 end

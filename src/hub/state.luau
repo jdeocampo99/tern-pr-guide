@@ -30,8 +30,14 @@ export type AgentFixState =
 	| { kind: "pushing", fix: Fix }
 	| { kind: "failed", reason: string, worktree: string? }
 
+-- A pill on a card's chip line. `kind` picks its look; `running` carries the amber spinner.
+export type Chip = { text: string, kind: "bad" | "bad-soft" | "info" | "wait" | "done" | "agent" | "running" }
+
 export type Card = {
 	pr: HubPR,
+	chips: { Chip }, -- the job, or who the card waits on; empty on done cards
+	detail: string?, -- the first job's detail, after the chips
+	detailKind: ("bad" | "info")?,
 	column: Column,
 	reasons: { Model.Reason },
 	main: CardAction?, -- the split button's action
@@ -208,10 +214,87 @@ local function actionsFor(pr: HubPR, column: Column, reasons: { Model.Reason }):
 	return nil, {}
 end
 
+local function chip(text: string, kind: "bad" | "bad-soft" | "info" | "wait" | "done" | "agent" | "running"): Chip
+	return { text = text, kind = kind }
+end
+
+-- The chip line's labels and detail text, from the mockup's job names.
+local function chipsFor(pr: HubPR, placement: Model.Placement, now: number): ({ Chip }, string?, ("bad" | "info")?)
+	local column = placement.column
+	local chips: { Chip } = {}
+	local detail: string? = nil
+	local kind: ("bad" | "info")? = nil
+	if column == "needs_fixes" then
+		kind = "bad"
+		local function add(text: string, why: string)
+			table.insert(chips, chip(text, "bad"))
+			if detail == nil then detail = why end
+		end
+		for _, reason in placement.reasons do
+			if reason == "merge_failed" then
+				add("Merge failed", if pr.mergeFailure then pr.mergeFailure.reason else "Merge failed")
+			elseif reason == "feedback" then
+				local asker: string? = nil
+				for _, review in pr.reviews.latest do
+					if review.verdict == "changes_requested" and not review.bot then asker = review.author end
+				end
+				local open = 0
+				if pr.reviews.threadsKnown then
+					for _, thread in pr.reviews.threads do
+						if not thread.bot then open += 1 end
+					end
+				else
+					open = pr.reviews.unresolved
+				end
+				if asker then add("Address changes", "Changes requested by @" .. asker) end
+				if open > 0 or not asker then add("Reply", open .. " unresolved comments") end
+			elseif reason == "checks" then
+				local total = pr.checks.passing + pr.checks.failing + pr.checks.pending
+				add("Fix checks", pr.checks.failing .. "/" .. total .. " checks failing")
+			elseif reason == "conflict" then
+				add("Resolve conflicts", "Conflicts with main")
+			end
+		end
+	elseif column == "to_review" then
+		kind = "info"
+		local mine = pr.reviews.mine
+		if mine and mine.oid ~= pr.headOid and not pr.reviews.requestedMe then
+			table.insert(chips, chip("Re-review", "info"))
+			detail = "New commits since you " .. (if mine.verdict == "approved" then "approved" else "reviewed")
+		else
+			table.insert(chips, chip("Review", "info"))
+			if pr.reviews.requestedMe then
+				detail = "@" .. pr.author .. " asked " .. Model.ago(pr.lastActivityAt, now)
+			elseif pr.addedByMe then
+				detail = "Added by you"
+			end
+		end
+	elseif column == "in_review" then
+		if pr.tandem then
+			table.insert(chips, chip("Waiting on Tandem", "agent"))
+		elseif pr.checks.state == "pending" then
+			table.insert(chips, chip("Waiting on checks", "running"))
+		else
+			table.insert(chips, chip("Waiting on review", "wait"))
+		end
+	elseif column == "waiting_on_author" then
+		local mine = pr.reviews.mine
+		if mine and mine.verdict == "changes_requested" then
+			table.insert(chips, chip("You requested changes", "bad-soft"))
+		else
+			table.insert(chips, chip("You commented", "wait"))
+		end
+	elseif column == "inactive" then
+		table.insert(chips, chip(if pr.draft then "Draft" else "No recent activity", "wait"))
+	end
+	return chips, detail, kind
+end
+
 local function toCard(pr: HubPR, placement: Model.Placement, s: State): Card
 	local main, more = actionsFor(pr, placement.column, placement.reasons)
+	local chips, detail, detailKind = chipsFor(pr, placement, s.now)
 	return {
-		pr = pr, column = placement.column, reasons = placement.reasons, main = main, more = more,
+		pr = pr, chips = chips, detail = detail, detailKind = detailKind, column = placement.column, reasons = placement.reasons, main = main, more = more,
 		agent = s.agents[pr.key], summary = s.summaries[pr.key], merge = s.merges[pr.repo],
 		ring = s.ringed[pr.key], selected = s.selected == pr.key, marked = s.marked[pr.key] == true,
 	}

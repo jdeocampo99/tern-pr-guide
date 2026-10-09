@@ -11,42 +11,23 @@ local el, span = Ui.el, Ui.span
 
 local M = {}
 
-local REASONS: { [Model.Reason]: string } = {
-	merge_failed = "Merge failed",
-	feedback = "Feedback",
-	checks = "Checks failing",
-	conflict = "Merge conflict",
+local CHIP_CLASS: { [string]: string } = {
+	bad = "gp-hc-chip-bad", ["bad-soft"] = "gp-hc-chip-bad-soft", info = "gp-hc-chip-info", wait = "gp-hc-chip-wait",
+	done = "gp-hc-chip-done", agent = "gp-hc-chip-agent", running = "gp-hc-chip-wait",
 }
 
-local function chip(class: string, text: string): Node
-	return span("gp-hc-chip " .. class, text)
-end
-
--- The chip line: the job, or who the card waits on.
-local function chips(card: State.Card): { Node }
-	local pr = card.pr
+-- The chip line: one pill per job, then the first job's detail.
+local function chipLine(card: State.Card): Node
 	local out: { Node } = {}
-	if card.column == "needs_fixes" then
-		for _, reason in card.reasons do table.insert(out, chip("gp-hc-chip-bad", REASONS[reason])) end
-	elseif card.column == "to_review" then
-		table.insert(out, chip("gp-hc-chip-info", "Review"))
-	elseif card.column == "in_review" then
-		if pr.tandem then
-			table.insert(out, chip("gp-hc-chip-agent", "Waiting on Tandem"))
-		elseif pr.checks.state == "pending" then
-			table.insert(out, el("span", { class = "gp-hc-chip gp-hc-chip-wait" }, { span("gp-hc-spin", ""), span("gp-hc-chip-text", "Waiting on checks") }))
+	for _, chip in card.chips do
+		if chip.kind == "running" then
+			table.insert(out, el("span", { class = "gp-hc-chip gp-hc-chip-wait" }, { span("gp-hc-spin", ""), span("gp-hc-chip-text", chip.text) }))
 		else
-			table.insert(out, chip("gp-hc-chip-wait", "Waiting on review"))
+			table.insert(out, span("gp-hc-chip " .. CHIP_CLASS[chip.kind], chip.text))
 		end
-	elseif card.column == "waiting_on_author" then
-		local mine = pr.reviews.mine
-		table.insert(out, chip(if mine and mine.verdict == "changes_requested" then "gp-hc-chip-bad-soft" else "gp-hc-chip-wait", if mine and mine.verdict == "changes_requested" then "You requested changes" else "You commented"))
-	elseif card.column == "approved" then
-		table.insert(out, chip("gp-hc-chip-done", "Approved"))
-	elseif card.column == "inactive" then
-		table.insert(out, chip("gp-hc-chip-wait", if pr.draft then "Draft" else "No recent activity"))
 	end
-	return out
+	if card.detail then table.insert(out, span("gp-hc-why gp-hc-why-" .. (card.detailKind or "bad"), card.detail)) end
+	return el("div", { class = "gp-hc-chips", key = "chips" }, out)
 end
 
 -- Checks as one mark and a count, as GitHub shows them.
@@ -112,10 +93,11 @@ function M.view(card: State.Card, now: number): Node
 	local kids: { Node } = {}
 	local body: { Node } = {}
 	if card.column == "ready" or card.column == "approved" then
-		table.insert(kids, el("span", { class = "gp-hc-tick", key = "tick" }, { Ui.icon("check") }))
+		table.insert(body, el("div", { class = "gp-hc-titlerow", key = "titlerow" }, { el("span", { class = "gp-hc-tick", key = "tick" }, { Ui.icon("check") }), span("gp-hc-title", pr.title) }))
+	else
+		table.insert(body, chipLine(card))
+		table.insert(body, span("gp-hc-title", pr.title))
 	end
-	table.insert(body, el("div", { class = "gp-hc-chips", key = "chips" }, chips(card)))
-	table.insert(body, span("gp-hc-title", pr.title))
 	local summary = card.summary
 	if summary then table.insert(body, span("gp-hc-note", summary.verdict)) end
 	table.insert(body, el("div", { class = "gp-hc-meta", key = "meta" }, meta))

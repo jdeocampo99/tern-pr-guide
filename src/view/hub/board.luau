@@ -35,9 +35,9 @@ local function tabs(s: State.State): Node
 		local count = if tab.id == "mine" then s.board.counts.mine else s.board.counts.review
 		local kids: { Node } = { span("gp-hub-tab-label", tab.label) }
 		if count > 0 then table.insert(kids, span("gp-hub-pill", tostring(count))) end
-		table.insert(items, el("span", { class = "sf-tab" .. (if tab.id == s.tab then " on" else ""), key = tab.id, actions = { click = "hub-tab=" .. tab.id } }, kids))
+		table.insert(items, el("span", { class = "gp-hub-tab" .. (if tab.id == s.tab then " gp-hub-tab-on" else ""), key = tab.id, actions = { click = "hub-tab=" .. tab.id } }, kids))
 	end
-	return el("div", { class = "sf-tabs gp-hub-tabs", key = "strip" }, items)
+	return el("div", { class = "gp-hub-tabs", key = "strip" }, items)
 end
 
 local function control(key: string, open: boolean, active: boolean, label: Node, menu: string): Node
@@ -59,7 +59,7 @@ local function controls(s: State.State): Node
 	for _, sort in State.SORTS do
 		if sort.id == s.sort then sortName = sort.label end
 	end
-	local sort = el("span", { class = "gp-hub-ctl-label" }, { span("gp-hub-ctl-dim", "Sort: "), span("gp-hub-ctl-strong", sortName) })
+	local sort = el("span", { class = "gp-hub-ctl-label" }, { span("gp-hub-ctl-dim", "Sort:"), span("gp-hub-ctl-strong", sortName) })
 	return el("div", { class = "gp-hub-ctls", key = "ctls" }, {
 		control("repos", s.menu == "repositories", #chosen > 0, repos, "repositories"),
 		control("sort", s.menu == "sort", false, sort, "sort"),
@@ -80,12 +80,12 @@ local function header(s: State.State): Node
 		table.insert(fresh, span("gp-hub-fresh", "Loading…"))
 	end
 	table.insert(fresh, el("span", { class = "gp-hub-ctl" .. (if s.menu == "agent" then " gp-hub-ctl-open" else ""), key = "agent", actions = { click = "hub-menu=agent" } }, {
-		span("gp-hub-ctl-label", State.agentLabel(s)),
+		el("span", { class = "gp-hub-ctl-label" }, if s.agent then { span("gp-hub-ctl-dim", "Agent:"), span("gp-hub-ctl-strong", State.agentLabel(s)) } else { span("gp-hub-ctl-strong", State.agentLabel(s)) }),
 		Ui.icon("chev"),
 	}))
 	return el("div", { class = "gp-header gp-hub-head", key = "header" }, {
 		el("div", { class = "gp-hub-top", key = "top" }, {
-			span("gp-hub-title", "Pull requests"),
+			el("span", { class = "gp-hub-title", key = "title", text = "Pull requests" }),
 			search,
 			Ui.spacer(),
 			el("span", { class = "gp-hub-fresh-row", key = "fresh" }, fresh),

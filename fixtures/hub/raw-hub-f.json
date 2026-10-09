@@ -21,7 +21,7 @@
     {
      "id": "PR_acme/web#101",
      "number": 101,
-     "title": "Case 101",
+     "title": "Checkout: keep the promo code when the cart re-prices after a shipping change",
      "url": "https://github.com/acme/web/pull/101",
      "isDraft": false,
      "createdAt": "2026-09-30T00:00:00Z",
@@ -79,7 +79,7 @@
     {
      "id": "PR_acme/web#104",
      "number": 104,
-     "title": "Case 104",
+     "title": "Quiz: accept both \"po\" and \"ho\" in polite answers",
      "url": "https://github.com/acme/web/pull/104",
      "isDraft": false,
      "createdAt": "2026-10-05T00:00:00Z",
@@ -217,7 +217,7 @@
     {
      "id": "PR_acme/api#105",
      "number": 105,
-     "title": "Case 105",
+     "title": "Lessons API: paginate the unit list and return a cursor with every page of results",
      "url": "https://github.com/acme/api/pull/105",
      "isDraft": false,
      "createdAt": "2026-10-04T00:00:00Z",
@@ -270,7 +270,7 @@
     {
      "id": "PR_acme/api#106",
      "number": 106,
-     "title": "Case 106",
+     "title": "Dark mode: fix the low-contrast hint text on cards",
      "url": "https://github.com/acme/api/pull/106",
      "isDraft": false,
      "createdAt": "2026-10-07T00:00:00Z",
@@ -339,7 +339,7 @@
     {
      "id": "PR_acme/api#107",
      "number": 107,
-     "title": "Case 107",
+     "title": "Docs: the coordinator lifecycle, with a diagram",
      "url": "https://github.com/acme/api/pull/107",
      "isDraft": false,
      "createdAt": "2026-10-02T00:00:00Z",
@@ -400,7 +400,7 @@
     {
      "id": "PR_acme/api#108",
      "number": 108,
-     "title": "Case 108",
+     "title": "Onboarding: pick a dialect before the placement quiz",
      "url": "https://github.com/acme/api/pull/108",
      "isDraft": false,
      "createdAt": "2026-09-28T00:00:00Z",
@@ -557,7 +557,7 @@
     {
      "id": "PR_acme/api#109",
      "number": 109,
-     "title": "Case 109",
+     "title": "Analytics: drop the duplicate lesson_complete event",
      "url": "https://github.com/acme/api/pull/109",
      "isDraft": false,
      "createdAt": "2026-10-01T00:00:00Z",
@@ -622,7 +622,7 @@
     {
      "id": "PR_acme/web#113",
      "number": 113,
-     "title": "Case 113",
+     "title": "Stories: audio-synced highlighting for read-along",
      "url": "https://github.com/acme/web/pull/113",
      "isDraft": true,
      "createdAt": "2026-10-06T00:00:00Z",
@@ -760,7 +760,7 @@
     {
      "id": "PR_acme/api#114",
      "number": 114,
-     "title": "Case 114",
+     "title": "Spaced repetition: schedule reviews by the learner's local midnight",
      "url": "https://github.com/acme/api/pull/114",
      "isDraft": false,
      "createdAt": "2026-10-08T00:00:00Z",
@@ -898,7 +898,7 @@
     {
      "id": "PR_acme/api#118",
      "number": 118,
-     "title": "Case 118",
+     "title": "Leaderboard: hide learners who opted out of rankings",
      "url": "https://github.com/acme/api/pull/118",
      "isDraft": false,
      "createdAt": "2026-10-02T00:00:00Z",
@@ -1052,7 +1052,7 @@
     {
      "id": "PR_acme/api#119",
      "number": 119,
-     "title": "Case 119",
+     "title": "Paywall: restore purchases on a fresh install",
      "url": "https://github.com/acme/api/pull/119",
      "isDraft": false,
      "createdAt": "2026-10-06T00:00:00Z",
@@ -1121,7 +1121,7 @@
     {
      "id": "PR_acme/api#120",
      "number": 120,
-     "title": "Case 120",
+     "title": "Offline packs: download a unit in the background",
      "url": "https://github.com/acme/api/pull/120",
      "isDraft": false,
      "createdAt": "2026-10-07T12:00:00Z",
@@ -1181,7 +1181,7 @@
     {
      "id": "PR_acme/api#121",
      "number": 121,
-     "title": "Case 121",
+     "title": "Settings: daily reminder time picker respects 24h locale",
      "url": "https://github.com/acme/api/pull/121",
      "isDraft": false,
      "createdAt": "2026-10-05T00:00:00Z",
@@ -1247,7 +1247,7 @@
     {
      "id": "PR_acme/web#301",
      "number": 301,
-     "title": "Case 301",
+     "title": "Settings: move notification prefs into their own page",
      "url": "https://github.com/acme/web/pull/301",
      "isDraft": false,
      "createdAt": "2026-10-07T00:00:00Z",
@@ -1307,7 +1307,7 @@
     {
      "id": "PR_acme/api#307",
      "number": 307,
-     "title": "Case 307",
+     "title": "Lessons API: add an etag to the unit list response",
      "url": "https://github.com/acme/api/pull/307",
      "isDraft": false,
      "createdAt": "2026-09-30T00:00:00Z",
@@ -1379,7 +1379,7 @@
     {
      "id": "PR_acme/api#308",
      "number": 308,
-     "title": "Case 308",
+     "title": "Auth: refresh the session before a long lesson ends",
      "url": "https://github.com/acme/api/pull/308",
      "isDraft": false,
      "createdAt": "2026-10-08T00:00:00Z",
@@ -1448,7 +1448,7 @@
     {
      "id": "PR_acme/web#302",
      "number": 302,
-     "title": "Case 302",
+     "title": "Search: debounce the typeahead and cancel stale requests",
      "url": "https://github.com/acme/web/pull/302",
      "isDraft": false,
      "createdAt": "2026-10-01T00:00:00Z",
@@ -1513,7 +1513,7 @@
     {
      "id": "PR_acme/web#304",
      "number": 304,
-     "title": "Case 304",
+     "title": "Cart: show the delivery estimate under each item",
      "url": "https://github.com/acme/web/pull/304",
      "isDraft": false,
      "createdAt": "2026-10-02T00:00:00Z",
@@ -1578,7 +1578,7 @@
     {
      "id": "PR_acme/web#305",
      "number": 305,
-     "title": "Case 305",
+     "title": "Docs: fix the onboarding command for fish shell",
      "url": "https://github.com/acme/web/pull/305",
      "isDraft": false,
      "createdAt": "2026-10-06T00:00:00Z",
@@ -1643,7 +1643,7 @@
     {
      "id": "PR_acme/web#306",
      "number": 306,
-     "title": "Case 306",
+     "title": "Profile: show the learner's streak on their avatar",
      "url": "https://github.com/acme/web/pull/306",
      "isDraft": false,
      "createdAt": "2026-10-04T00:00:00Z",
@@ -1708,7 +1708,7 @@
     {
      "id": "PR_acme/api#307",
      "number": 307,
-     "title": "Case 307",
+     "title": "Lessons API: add an etag to the unit list response",
      "url": "https://github.com/acme/api/pull/307",
      "isDraft": false,
      "createdAt": "2026-09-30T00:00:00Z",

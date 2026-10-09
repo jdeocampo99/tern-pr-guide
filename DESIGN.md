@@ -311,14 +311,14 @@ When several items are selected, a bar sits at the top of their group: "N select
 An action that can't be undone asks in place: one bold question line, a filled confirm button with ⌘⏎ (Confirm Orange, or Removed Red for deletion), and Cancel (Esc). No modal.
 
 ### Status chip
-A short pill on a card's chip line that names the job or who the card waits on, never a sentence. It is a `--r-chip` pill, 12px sans at weight 600, padding 0 7px. Fill follows the Color Meaning Rule:
+A short pill on a card's chip line that names the job or who the card waits on, never a sentence. On your-turn cards the first job's detail follows the chips as plain text in the card's meaning color ("Conflicts with main", "@maria-k asked 4h ago"). It is a `--r-chip` pill, 12px sans at weight 600, padding 0 7px. Fill follows the Color Meaning Rule:
 - **Job for the reader:** solid fill with white text. Removed Red (`gp-danger-fill`) for a reason a PR needs fixes, one chip per reason ("Merge failed", "Checks failing", "Feedback", "Merge conflict"). Review Blue (`gp-blue-fill`) for "Review".
 - **Waiting:** chip fill (`--chip-bg`) with `--t2` text ("Waiting on review", "You commented"). While checks run it holds the amber spinner.
 - **Done:** `gp-success-wash` with Added Green text ("Approved").
 - **Agent or Tandem:** `gp-suggestion-wash` with Agent Purple text ("Waiting on Tandem").
 
 ### Tabs with counts
-The board's two tabs use Tern's own tab classes (`sf-tabs`, `sf-tab`), so the underline is Tern's accent like the view switch. A native `tabs` node cannot carry a count, so each tab is an element of those classes. The count after the label is a Review Blue pill (`gp-blue-fill`, white text, 11px) and counts only the cards in the tab's your-turn column. A tab with none shows no pill.
+The board's two tabs look like Tern's `tabs` node (13px sans, muted until active, a 2px underline in Tern's accent like the view switch), but are `gp-hub-tab` elements, because a native `tabs` node cannot carry a count and Tern's `sf-tab` rules don't style elements outside it. The count after the label is a Review Blue pill (`gp-blue-fill`, white text, 11px) and counts only the cards in the tab's your-turn column. A tab with none shows no pill.
 
 ### Boxes
 A 14px square with a 4px radius for a choice that can be several. Empty it is a 1.5px `--t4` outline; chosen it is Review Blue filled with a white check. Used by the repository menu, and by selecting several cards later. A single choice shows only a Review Blue check.
