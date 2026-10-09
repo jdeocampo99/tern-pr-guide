@@ -1,0 +1,651 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PR fixes</title>
+<link rel="stylesheet" href="../../tern-tokens.css">
+<link rel="stylesheet" href="../../../guide.css">
+<style>
+/* Tern window (mockup frame; Tern draws this). Same frame as review-fix.html. */
+/* Tern's syntax token colors (highlight.css, kit-only). tern-tokens.css doesn't carry them; Tern sets them in the real page. */
+:root {
+  --tk-comment: var(--t3);
+  --tk-keyword: light-dark(#8a3fd6, #c29bff);
+  --tk-function: light-dark(#2448c4, #8fb6ff);
+  --tk-string: light-dark(#1d7f52, #5fd39c);
+  --tk-number: light-dark(#b25e00, #f5b54a);
+  --tk-type: light-dark(#0b7894, #4fd2ee);
+  --tk-punct: var(--t2);
+}
+html, body { margin: 0; height: 100%; }
+body { font: 400 14px/1.5 var(--sans); color: var(--t1); background: var(--page); -webkit-font-smoothing: antialiased; overflow: hidden; }
+button { font: inherit; color: inherit; }
+.app { height: 100%; gap: 0; }
+.tabbar { flex-shrink: 0; height: 40px; display: flex; align-items: center; gap: 2px; padding: 0 12px 0 84px; font-size: 13px; color: var(--t2); }
+.tab { padding: 5px 12px; border-radius: var(--r-ctl); white-space: nowrap; }
+.tab-on { background: var(--l2); color: var(--t1); }
+.win { flex-grow: 1; min-height: 0; display: flex; gap: 6px; padding: 0 6px; }
+.pane { position: relative; flex-grow: 1; min-width: 0; border-radius: 11px; background: var(--panel); overflow: hidden; display: flex; flex-direction: column; }
+.statusline { flex-shrink: 0; height: 28px; display: flex; align-items: center; gap: 4px; padding: 0 12px; font-size: 12px; color: var(--t3); }
+.sl-seg { padding: 2px 8px; border-radius: var(--r-chip); white-space: nowrap; }
+.sl-sp { flex-grow: 1; }
+.mock { position: fixed; top: 6px; right: 10px; z-index: 50; display: flex; gap: 6px; align-items: center; padding: 3px 4px 3px 10px; border-radius: var(--r-ctl); border: 1px dashed var(--l4); background: var(--pop-bg); font-size: 12px; color: var(--t3); }
+.mseg { display: flex; gap: 2px; padding: 2px; border-radius: var(--r-ctl); background: var(--chip-bg); }
+.mseg button { border: 0; background: transparent; padding: 2px 9px; border-radius: var(--r-chip); cursor: pointer; font-size: 12px; font-weight: 600; color: var(--t3); }
+.mseg button:hover { color: var(--t1); }
+.mseg button.on { background: var(--card); color: var(--t1); }
+
+/* page: one scroller holding the pinned header, the two columns and the pinned hint bar */
+.page { flex-grow: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
+.page > * { flex-shrink: 0; }
+.page > .gp-header { padding: 14px 16px 12px; }
+.page > .gp-hintbar { margin-top: 0; overflow: hidden; }
+.fx-guide { flex-grow: 1; padding: 20px 16px 28px; }
+.gp-hb-mode { white-space: nowrap; }
+
+/* header */
+.gp-title-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fx-hdr { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
+.fx-hdr .gp-btn { display: flex; gap: 8px; align-items: center; padding: 5px 8px 5px 12px; background: var(--card); border-color: var(--l3); }
+.fx-hdr .gp-btn:hover { background: var(--l1); }
+.fx-status { min-height: 28px; }
+.fx-chip { flex-shrink: 0; padding: 0 7px; border-radius: var(--r-chip); font-family: var(--sans); font-size: 12px; font-weight: 650; line-height: 19px; white-space: nowrap; color: #fff; background: var(--gp-danger-fill); }
+.fx-clear { font-weight: 600; color: var(--gp-added); }
+.fx-repo { font-family: var(--sans); color: var(--t3); }
+.gp-btn.fx-agent-btn, .fx-hdr .gp-btn.fx-agent-btn { font-weight: 600; color: var(--gp-suggestion); background: rgb(from var(--gp-suggestion) r g b / 12%); border-color: rgb(from var(--gp-suggestion) r g b / 40%); }
+.gp-btn.fx-agent-btn:hover, .fx-hdr .gp-btn.fx-agent-btn:hover { background: rgb(from var(--gp-suggestion) r g b / 20%); }
+.gp-btn.fx-off, .gp-btn.fx-off:hover { opacity: 0.5; cursor: default; }
+.gp-btn.fx-off:active { transform: none; }
+.fx-item-on { outline: 2px solid var(--gp-blue-line); outline-offset: 2px; }
+
+/* left column: one step per problem */
+.gp-ccard .fx-first { margin-top: 0; }
+.fx-step { border-radius: var(--r-ctl); cursor: pointer; margin-bottom: 4px; padding: 2px 0; border: 1px solid transparent; }
+.fx-step.gp-ol-herebox { padding: 2px 0; }
+.fx-step:not(.gp-ol-herebox):hover { background: var(--l1); }
+.fx-st-t { flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.fx-st-a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; }
+.fx-who { font-weight: 650; color: var(--t1); }
+.gp-ol-herebox .fx-who { color: var(--gp-blue-ink); }
+.fx-st-f { display: flex; gap: 10px; align-items: baseline; font-family: var(--tv-font); font-size: 12px; font-weight: 400; color: var(--t3); min-width: 0; }
+.gp-ol-herebox .fx-st-f { color: var(--t2); }
+.fx-pth { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fx-state { margin-left: auto; flex-shrink: 0; font-family: var(--sans); font-size: 12px; font-weight: 600; }
+.fx-state-done { color: var(--gp-added); }
+.fx-state-work { color: var(--gp-suggestion); }
+.fx-step .gp-ol-dot { font-size: 13px; }
+.fx-step .gp-ol-dot.fx-dot-open, .gp-ol-herebox .gp-ol-dot.fx-dot-open { color: var(--gp-removed); }
+.fx-step .gp-ol-dot.fx-dot-done, .gp-ol-herebox .gp-ol-dot.fx-dot-done { color: var(--gp-added); font-weight: 700; }
+.fx-step .gp-ol-dot.fx-dot-work, .gp-ol-herebox .gp-ol-dot.fx-dot-work { color: var(--gp-suggestion); font-weight: 700; }
+.fx-pf .gp-ol-herebox { background: var(--l1); border-color: var(--l2); }
+.fx-pf .gp-ol-herebox .gp-ol-steptitle, .fx-pf .gp-ol-herebox .fx-who { color: var(--t1); }
+.fx-gn { color: var(--t3); }
+.fx-g { display: flex; flex-direction: column; }
+.fx-gh { display: flex; gap: 10px; align-items: baseline; padding: 5px 8px; border-radius: var(--r-ctl); cursor: pointer; }
+.fx-gh:hover { background: var(--l1); }
+.fx-gh .gp-ol-dot { width: 26px; font-size: 14px; }
+.fx-gt { font-family: var(--sans); font-size: 13.5px; color: var(--t3); }
+.fx-gh:hover .fx-gt { color: var(--t1); }
+.fx-gh .kbd { margin-left: auto; align-self: center; }
+.fx-muted { font-family: var(--sans); font-size: 13px; line-height: 1.5; color: var(--t3); padding: 0 8px 0 44px; }
+
+/* right column */
+.gp-fhead .gp-fcaret { width: 14px; }
+.gp-code { tab-size: 2; }
+.fx-path { display: flex; align-items: center; gap: 0; }
+.fx-fbtns { display: flex; gap: 8px; align-items: center; }
+.fx-fbtns .gp-btn { display: flex; gap: 8px; align-items: center; padding: 2px 6px 2px 10px; font-size: 12.5px; }
+.gp-gap { cursor: default; }
+.fx-av { background: var(--l3); color: var(--t1); }
+.fx-av-bad { background: var(--gp-danger-fill); color: #fff; }
+.fx-msg > .gp-card-head { padding-top: 11px; }
+.fx-msg + .fx-msg { border-top: 1px solid var(--l2); }
+.fx-dim { opacity: 0.6; }
+.gp-card-body p { margin: 0; }
+.gp-card .gp-icode { font-family: var(--tv-font); font-size: 12.5px; }
+.fx-composer { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px 12px 46px; border-top: 1px solid var(--l2); }
+.fx-ta { display: block; box-sizing: border-box; width: 100%; min-height: 64px; resize: none; padding: 8px 10px; border-radius: var(--r-ctl); border: 1px solid var(--l3); background: var(--chip-bg); font: 400 14px/1.5 var(--sans); color: var(--t1); outline: none; }
+.fx-ta:focus { border-color: var(--gp-blue-line); }
+.fx-ta::placeholder { color: var(--t3); }
+.fx-crow { display: flex; gap: 8px; align-items: center; }
+.fx-crow .gp-btn { display: flex; gap: 8px; align-items: center; padding: 3px 6px 3px 12px; }
+.gp-btn.fx-ok { color: #fff; font-weight: 600; background: var(--gp-merge); border-color: transparent; }
+.gp-btn.fx-ok:hover { background: var(--gp-merge-hover); }
+.fx-ok .kbd { background: transparent; box-shadow: none; border: 1px solid rgba(255,255,255,0.35); color: rgba(255,255,255,0.85); }
+.gp-card-foot .gp-btn { display: flex; gap: 8px; align-items: center; padding: 3px 6px 3px 12px; }
+.fx-err { background: var(--gp-danger-wash); box-shadow: inset 3px 0 0 var(--gp-danger-fill); }
+.fx-stack { display: flex; flex-direction: column; }
+.fx-stack > * { flex-shrink: 0; }
+.fx-chk { display: flex; gap: 12px; align-items: center; padding: 0 4px 12px; }
+.fx-cname { font-family: var(--tv-font); font-size: 15px; font-weight: 650; }
+.fx-cfail { font-family: var(--sans); font-size: 13px; font-weight: 600; color: var(--gp-danger-text); }
+.fx-cmeta { font-family: var(--sans); font-size: 13px; color: var(--t3); }
+.fx-chk .gp-btn { display: flex; gap: 8px; align-items: center; padding: 3px 6px 3px 12px; }
+.fx-panel-note { display: flex; flex-direction: column; gap: 4px; font-family: var(--sans); }
+.fx-panel-note .fx-t { font-size: 14.5px; color: var(--t1); }
+.fx-panel-note .fx-n { font-size: 13px; color: var(--t3); }
+.fx-cause { padding: 7px 12px; font-family: var(--sans); font-size: 12.5px; color: var(--t3); background: var(--sf-shade); border-top: 1px solid var(--l2); }
+.fx-cause b { font-weight: 600; color: var(--t2); }
+.fx-chead { padding: 5px 12px; font-family: var(--sans); font-size: 12.5px; color: var(--t3); background: var(--sf-shade); border-top: 1px dashed var(--l2); border-bottom: 1px dashed var(--l2); }
+.fx-side { display: flex; flex-direction: column; }
+.fx-side + .fx-side { border-top: 1px solid var(--l2); }
+.fx-side > * { flex-shrink: 0; }
+.fx-side-h { display: flex; gap: 10px; align-items: baseline; padding: 7px 12px; background: var(--sf-shade); border-bottom: 1px solid var(--l2); }
+.fx-side-n { font-family: var(--sans); font-size: 13px; font-weight: 650; }
+.fx-side-b { font-size: 12px; color: var(--t3); }
+.fx-shared { opacity: 0.55; }
+.fx-side .gp-row:last-child { margin-bottom: 0; }
+.fx-pad { height: 6px; }
+
+/* toast: Tern's, drawn here at the bottom of the pane */
+.fx-toast { position: absolute; left: 50%; bottom: 56px; z-index: 30; display: flex; gap: 8px; align-items: center; padding: 7px 12px; border-radius: var(--r-ctl); background: var(--card); box-shadow: inset 0 0 0 1px var(--l3), 0 8px 24px -10px light-dark(rgba(30, 42, 90, 0.3), rgba(0, 0, 0, 0.7)); font-size: 13px; color: var(--t1); white-space: nowrap; pointer-events: none; opacity: 0; transform: translate(-50%, 6px); transition: opacity var(--gp-dur-out) var(--gp-ease-out), transform var(--gp-dur-in) var(--gp-ease-out); }
+.fx-toast.show { opacity: 1; transform: translate(-50%, 0); }
+.fx-toast .ok { font-weight: 700; color: var(--gp-added); }
+.fx-toast .no { font-weight: 700; color: var(--gp-danger-text); }
+@media (prefers-reduced-motion: reduce) { .fx-toast, .fx-toast.show { transform: translate(-50%, 0); transition: opacity 120ms ease; } }
+</style>
+</head>
+<body>
+<div class="gp-root app" id="root">
+  <div class="tabbar"><span class="tab">Default</span><span class="tab tab-on" id="tabname"></span><span class="tab">Pull requests</span></div>
+  <div class="win"><div class="pane"><div class="page" id="page"></div><div class="fx-toast" id="toast"></div></div></div>
+  <div class="statusline" id="statusline"></div>
+</div>
+<div class="mock" id="mock">Mockup
+  <div class="mseg" id="prsw"></div>
+  <div class="mseg"><button id="theme"></button><button id="reset">Reset</button><button id="hub">Back to the hub</button></div>
+</div>
+<script>
+/* PR Guide on one of the reader's own PRs, from the hub's Needs fixes column. The page leads with what needs
+   fixing: requested changes, comments, failing checks and merge conflicts, one step each. */
+
+/* ---- sample data ---- */
+const PRS = {
+  58: {
+    num: 58, repo: 'jdeocampo99/tern-pr-guide', branch: 'skip-removed-lines',
+    title: 'Guided view: steps point at removed lines too',
+    bot: { name: 'CodeRabbit', note: 'Reviewed 3 files and left 2 nitpicks. Bot reviews aren\u2019t counted as requested changes.' },
+    steps: [
+      {
+        kind: 'change', lang: 'luau', author: 'maria-k', action: 'requested changes', line: 142,
+        msgs: [{ who: 'maria-k', text: 'Steps should skip removed lines; step 3 now points at a deleted line.' }],
+        file: {
+          dir: 'src/', base: 'guide.luau', start: 138, before: 137, after: 51,
+          rows: [
+            ['c', 'local function stepTargets(change: Change): { number }'],
+            ['c', '\tlocal targets = {}'],
+            ['c', '\tfor _, line in change.lines do'],
+            ['d', '\t\tif line.kind \u27e6== "added"\u27e7 then'],
+            ['a', '\t\tif line.kind \u27e6~= "context"\u27e7 then'],
+            ['a', '\t\t\ttable.insert(targets, \u27e6line.new or line.old\u27e7)'],
+            ['c', '\t\tend'],
+            ['c', '\tend'],
+            ['c', '\treturn targets'],
+            ['c', 'end'],
+          ],
+        },
+      },
+    ],
+  },
+  404: {
+    num: 404, repo: 'acme/web', branch: 'promo-survives-reprice',
+    title: 'Checkout: keep the promo code when the cart re-prices',
+    steps: [
+      {
+        kind: 'comment', lang: 'ts', author: 'maria-k', action: 'commented', line: 57,
+        msgs: [
+          { who: 'maria-k', text: 'Does the promo code survive a currency change?\n`reprice` rebuilds `promo` from `next.promoCode`, which is undefined when only `currency` changes.' },
+          { who: 'devon', text: 'Hit this in QA: switching from USD to EUR drops SPRING10.' },
+        ],
+        file: {
+          dir: 'src/cart/', base: 'reprice.ts', start: 51, before: 50, after: 84,
+          rows: [
+            ['c', 'export function reprice(cart: Cart, next: PriceInput): Cart {'],
+            ['c', '  const rates = rateTable(next.currency);'],
+            ['c', '  const items = cart.items.map(item => ({'],
+            ['c', '    ...item,'],
+            ['c', '    unitPrice: convert(item.basePrice, rates),'],
+            ['c', '  }));'],
+            ['d', '  const promo = \u27e6cart.promo\u27e7;'],
+            ['a', '  const promo = \u27e6next.promoCode ? findPromo(next.promoCode) : null\u27e7;'],
+            ['a', '  const subtotal = sum(items.map(i => i.unitPrice * i.quantity));'],
+            ['c', '  return {'],
+            ['c', '    ...cart,'],
+            ['c', '    items,'],
+            ['c', '    promo,'],
+            ['a', '    total: applyDiscount(subtotal, promo),'],
+            ['c', '  };'],
+            ['c', '}'],
+          ],
+        },
+      },
+      {
+        kind: 'comment', lang: 'ts', author: 'devon', action: 'suggested a change', line: 12,
+        msgs: [{ who: 'devon', text: 'Could this test have a clearer name?\n`works with promo` doesn\u2019t say what it checks. Maybe `keeps the promo code when the currency changes`.' }],
+        file: {
+          dir: 'src/cart/', base: 'reprice.test.ts', start: 8, before: 7, after: 21,
+          rows: [
+            ['c', "import { reprice } from './reprice';"],
+            ['c', "import { makeCart } from '../testing/cart';"],
+            ['c', ''],
+            ['c', "describe('reprice', () => {"],
+            ['a', "  it('\u27e6works with promo\u27e7', () => {"],
+            ['a', "    const cart = makeCart({ currency: 'USD', promoCode: 'SPRING10' });"],
+            ['a', "    const next = reprice(cart, { currency: 'EUR', promoCode: 'SPRING10' });"],
+            ['a', "    expect(next.promo?.code).toBe('SPRING10');"],
+            ['a', '  });'],
+            ['c', '});'],
+          ],
+        },
+      },
+    ],
+  },
+  418: {
+    num: 418, repo: 'jdeocampo99/tandem', branch: 'dedupe-receipts-on-restart',
+    title: 'fix(session): drop duplicate receipts when a coordinator restarts',
+    steps: [
+      {
+        kind: 'check', lang: 'ts', name: 'typecheck', failing: 1, total: 5, took: '1m 12s', summary: 'tsc --noEmit found 1 error.',
+        /* GitHub returns every annotation; the guide drops the noise (see usable()). */
+        annotations: [
+          { path: 'src/session/receipts.ts', line: 42, msg: "Property 'id' does not exist on type 'Receipt'", rule: 'TS2339' },
+          { path: '.github/workflows/ci.yml', line: 17, msg: 'Process completed with exit code 2.' },
+        ],
+        file: {
+          dir: 'src/session/', base: 'receipts.ts', start: 36, before: 35, after: 62,
+          rows: [
+            ['c', "import type { Receipt } from './types';"],
+            ['c', ''],
+            ['a', 'export function dedupeReceipts(receipts: Receipt[]): Receipt[] {'],
+            ['a', '  const seen = new Set<string>();'],
+            ['a', '  const kept: Receipt[] = [];'],
+            ['a', '  for (const receipt of receipts) {'],
+            ['a', '    const key = receipt.id;'],
+            ['a', '    if (seen.has(key)) continue;'],
+            ['a', '    seen.add(key);'],
+            ['a', '    kept.push(receipt);'],
+            ['a', '  }'],
+            ['a', '  return kept;'],
+            ['a', '}'],
+            ['c', ''],
+          ],
+        },
+      },
+      {
+        kind: 'conflict', lang: 'ts', dir: 'src/session/', base: 'receipts.ts',
+        cause: { pr: 415, title: 'refactor(session): receipts keyed by coordinator', by: 'devon' },
+        conflicts: [
+          {
+            start: 14,
+            branch: [
+              'export function addReceipt(store: Store, receipt: Receipt): void {',
+              '  if (store.receipts.has(receipt.id)) return;',
+              '  store.receipts.set(receipt.id, receipt);',
+              '}',
+            ],
+            main: [
+              'export function addReceipt(store: Store, receipt: Receipt): void {',
+              '  const bucket = store.receipts.get(receipt.coordinatorId) ?? new Map<string, Receipt>();',
+              '  bucket.set(receipt.key, receipt);',
+              '  store.receipts.set(receipt.coordinatorId, bucket);',
+              '}',
+            ],
+          },
+          {
+            start: 71,
+            branch: [
+              'export function receiptsSince(store: Store, since: number): Receipt[] {',
+              '  return [...store.receipts.values()].filter(r => r.at >= since);',
+              '}',
+            ],
+            main: [
+              'export function receiptsSince(store: Store, since: number): Receipt[] {',
+              '  return [...store.receipts.values()]',
+              '    .flatMap(bucket => [...bucket.values()])',
+              '    .filter(r => r.at >= since);',
+              '}',
+            ],
+          },
+        ],
+      },
+      {
+        kind: 'conflict', lang: 'ts', dir: 'src/session/', base: 'store.ts',
+        cause: { pr: 415, title: 'refactor(session): receipts keyed by coordinator', by: 'devon' },
+        conflicts: [
+          {
+            start: 23,
+            branch: [
+              'export function createStore(): Store {',
+              '  return { receipts: new Map<string, Receipt>(), seenRestart: false };',
+              '}',
+            ],
+            main: [
+              'export function createStore(): Store {',
+              '  return { receipts: new Map<string, Map<string, Receipt>>(), seenRestart: false };',
+              '}',
+            ],
+          },
+        ],
+      },
+    ],
+  },
+};
+
+const GROUPS = [['change', 'Requested changes'], ['comment', 'Comments'], ['check', 'Failing checks'], ['conflict', 'Merge conflicts']];
+const CHIPS = { change: 'Address changes', comment: 'Reply', check: 'Fix checks', conflict: 'Resolve conflicts' };
+
+/* Annotations under .github/ and the runner's exit-code line say nothing about the code. */
+const usable = (check, noann) => check.annotations.filter(a => !a.path.startsWith('.github/') && !/Process completed with exit code/.test(a.msg) && !(noann && a.rule));
+
+/* ---- state ---- */
+const q = new URLSearchParams(location.search);
+const PR = PRS[q.get('pr')] || PRS[418];
+const STEPS = PR.steps;
+const N = STEPS.length;
+const NOANN = !!q.get('noann');
+if (q.get('t')) document.documentElement.style.colorScheme = q.get('t');
+const theme = () => document.documentElement.style.colorScheme || 'dark';
+
+const S = {};
+function initial() {
+  Object.assign(S, {
+    cur: Math.max(0, Math.min(N - 1, +(q.get('cur') || 0))),
+    focus: q.get('focus') === 'panel' ? 'panel' : 'steps', item: 0,
+    st: {}, extra: {}, composing: false, draft: '', bot: !!q.get('bot'), working: false, mouse: true, enter: false,
+  });
+  if (q.get('reply') && STEPS[S.cur].msgs) { S.composing = true; S.focus = 'panel'; }
+}
+initial();
+let fixTimer;
+
+/* ---- helpers ---- */
+const kbd = k => `<span class="kbd">${k}</span>`;
+const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const md = s => esc(s).replace(/`([^`]+)`/g, '<code class="gp-icode">$1</code>');
+const bare = s => s.replace(/`/g, '');
+const initialOf = who => who[0].toUpperCase();
+const isThread = s => s.kind === 'change' || s.kind === 'comment';
+const isDone = i => S.st[i] === 'resolved' || S.st[i] === 'fixed';
+const msgsOf = i => STEPS[i].msgs.concat(S.extra[i] || []);
+const pathOf = s => s.kind === 'check' ? (usable(s, NOANN)[0] ? `${s.file.dir}${s.file.base}:${usable(s, NOANN)[0].line}` : '')
+  : s.kind === 'conflict' ? `${s.dir}${s.base}:${s.conflicts[0].start}` : `${s.file.dir}${s.file.base}:${s.line}`;
+const prUrl = () => `https://github.com/${PR.repo}/pull/${PR.num}`;
+
+/* A small highlighter for Luau and TypeScript: Tern colors the real thing. */
+const LANG = {
+  ts: { kw: new Set(['import', 'from', 'export', 'const', 'let', 'async', 'function', 'await', 'return', 'type', 'as', 'for', 'of', 'if', 'continue', 'new', 'void']), re: /(\/\/.*)|('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|`[^`]*`)|(\b0x[0-9a-f]+\b|\b\d+\b)|([A-Za-z_$][\w$]*)/gi },
+  luau: { kw: new Set(['local', 'function', 'for', 'in', 'do', 'if', 'then', 'else', 'elseif', 'end', 'return', 'not', 'and', 'or', 'nil', 'true', 'false', 'while', 'type', 'export']), re: /(--.*)|('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")|(\b0x[0-9a-f]+\b|\b\d+\b)|([A-Za-z_][\w]*)/gi },
+};
+function hl(s, lang) {
+  const L = LANG[lang], re = new RegExp(L.re.source, 'gi');
+  let out = '', last = 0, m;
+  while ((m = re.exec(s))) {
+    out += esc(s.slice(last, m.index));
+    last = re.lastIndex;
+    const t = m[0];
+    if (m[1]) out += `<span class="gp-tk-com">${esc(t)}</span>`;
+    else if (m[2]) out += `<span class="gp-tk-str">${esc(t)}</span>`;
+    else if (m[3]) out += `<span class="gp-tk-num">${t}</span>`;
+    else if (L.kw.has(t)) out += `<span class="gp-tk-kw">${t}</span>`;
+    else if (s[last] === '(') out += `<span class="gp-tk-fn">${t}</span>`;
+    else if (/^[A-Z]/.test(t)) out += `<span class="gp-tk-type">${t}</span>`;
+    else out += t;
+  }
+  return out + esc(s.slice(last));
+}
+/* \u27e6 \u27e7 marks the words that changed inside a line */
+const lineHtml = (s, lang) => s.split(/\u27e6|\u27e7/).map((p, i) => i % 2 ? `<span class="gp-chg">${hl(p, lang)}</span>` : hl(p, lang)).join('');
+
+/* ---- the code excerpt: file header, line numbers, washes, a card pinned under its line ---- */
+const gap = (arrow, n) => `<div class="gp-gap"><span class="gp-gap-gut">${arrow}</span><span class="gp-gap-count">${n} unchanged lines</span></div>`;
+
+function excerpt(s, pins) {
+  const f = s.file, pinMap = new Map(pins.map(p => [p.line, p]));
+  let o = f.start, n = f.start, a = 0, d = 0, seg = '';
+  const blocks = [];
+  const flush = () => { if (seg) { blocks.push(`<div class="gp-hscroll"><div class="gp-hlines">${seg}</div></div>`); seg = ''; } };
+  for (const [k, text] of f.rows) {
+    const go = k !== 'a' ? o++ : '', gn = k !== 'd' ? n++ : '';
+    const pin = k !== 'd' ? pinMap.get(gn) : null;
+    const cls = (k === 'a' ? 'gp-add' : k === 'd' ? 'gp-del' : 'gp-ctx') + (pin ? ` gp-on ${pin.cls || ''}` : '');
+    if (k === 'a') a++; if (k === 'd') d++;
+    seg += `<div class="gp-row ${cls}"><span class="gp-plus-none"></span><span class="gp-gut">${go}</span><span class="gp-gut">${gn}</span><span class="gp-sign">${k === 'a' ? '+' : k === 'd' ? '\u2212' : ' '}</span><span class="gp-code">${lineHtml(text, s.lang)}</span></div>`;
+    if (pin) { flush(); blocks.push(pin.html); }
+  }
+  flush();
+  return `<div class="gp-excerpt gp-current">
+    <div class="gp-fhead">
+      <span class="fx-path"><span class="gp-fcaret">\u25be</span><span class="gp-fdir">${f.dir}</span><span class="gp-fbase">${f.base}</span></span>
+      <span class="gp-frange">lines ${f.start}\u2013${n - 1}</span>
+      <span class="gp-fspacer"></span><span class="gp-adds">+${a}</span><span class="gp-dels">\u2212${d}</span>
+    </div>
+    <div class="gp-body">${gap('\u2191', f.before)}${blocks.join('')}${gap('\u2193', f.after)}</div>
+  </div>`;
+}
+
+/* ---- right column, one renderer per kind of step ---- */
+const on = (i, act) => S.focus === 'panel' && !S.composing && items(S.cur)[S.item] === act ? 'fx-item-on' : '';
+
+function thread(s, i) {
+  const done = S.st[i] === 'resolved', who = s.msgs[0].who;
+  const msgs = msgsOf(i).map(m => `<div class="fx-msg ${done ? 'fx-dim' : ''}">
+      <div class="gp-card-head"><span class="gp-avatar ${m.who === 'jdeocampo99' ? 'gp-avatar-you' : 'fx-av'}">${initialOf(m.who)}</span>
+        <span class="gp-card-line"><span class="gp-card-who">${m.who}</span>${m === s.msgs[0] ? `<span class="gp-card-action">${s.action}</span>` : '<span class="gp-card-action">replied</span>'}</span>${m === s.msgs[0] ? `<span class="gp-card-where">line ${s.line}</span>` : ''}</div>
+      <div class="gp-card-body">${m.text.split('\n').map(p => `<p>${md(p)}</p>`).join('')}</div>
+    </div>`).join('');
+  const foot = S.composing
+    ? `<div class="fx-composer ${S.enter ? 'gp-enter-panel' : ''}"><textarea class="fx-ta" id="ta" placeholder="Reply to @${who}" aria-label="Reply to ${who}">${esc(S.draft)}</textarea>
+        <div class="fx-crow"><button class="gp-btn fx-ok" data-act="post">Reply ${kbd('\u2318\u23ce')}</button><button class="gp-btn gp-btn-ghost" data-act="cancel">Cancel ${kbd('Esc')}</button></div></div>`
+    : `<div class="gp-card-foot"><button class="gp-btn ${on(i, 'reply')}" data-act="reply">Reply ${kbd('R')}</button>
+        <button class="gp-btn ${on(i, 'resolve')}" data-act="resolve">${done ? 'Unresolve' : 'Resolve'} ${kbd('E')}</button>
+        <span style="flex-grow:1"></span>${done ? `<span class="gp-card-state gp-card-state-added">\u2713 Resolved</span>` : ''}</div>`;
+  const tone = s.kind === 'change' && !done ? 'gp-card-problem' : '';
+  const card = `<div class="gp-card ${tone} ${S.composing ? 'gp-card-composer' : ''}">${msgs}${foot}</div>`;
+  return excerpt(s, [{ line: s.line, html: card }]);
+}
+
+function check(s, i) {
+  const anns = usable(s, NOANN);
+  const strip = `<div class="fx-chk"><span class="fx-cname">${s.name}</span><span class="fx-cfail">Failed</span><span class="fx-cmeta">${s.failing} of ${s.total} checks failing \u00b7 ${s.took}</span><span class="gp-fspacer"></span>
+    <button class="gp-btn ${on(i, 'log')}" data-act="log">View log ${kbd('\u21e7L')}</button></div>`;
+  if (!anns.length) {
+    return `<div class="fx-stack">${strip}<div class="gp-panel fx-panel-note"><span class="fx-t">${s.summary}</span><span class="fx-n">No annotations on source files.</span></div></div>`;
+  }
+  const pins = anns.filter(a => a.path === s.file.dir + s.file.base).map(a => ({
+    line: a.line, cls: 'fx-err',
+    html: `<div class="gp-card gp-card-problem"><div class="gp-card-head"><span class="gp-avatar fx-av-bad">\u00d7</span>
+        <span class="gp-card-line"><span class="gp-card-who">${s.name}</span><span class="gp-card-action">reported an error</span></span><span class="gp-card-where">${a.rule ? a.rule + ' \u00b7 ' : ''}line ${a.line}</span></div>
+        <div class="gp-card-body"><p>${esc(a.msg)}</p></div></div>`,
+  }));
+  return `<div class="fx-stack">${strip}${excerpt(s, pins)}</div>`;
+}
+
+function sideBlock(c, label, detail, lines, other) {
+  const shared = new Set(other);
+  const rows = lines.map((t, k) => `<div class="gp-row ${t === '' || shared.has(t) ? 'fx-shared' : ''}"><span class="gp-plus-none"></span><span class="gp-gut">${c.start + k}</span><span class="gp-sign"></span><span class="gp-code">${hl(t, 'ts')}</span></div>`).join('');
+  return `<div class="fx-side"><div class="fx-side-h"><span class="fx-side-n">${label}</span><span class="fx-side-b">${detail}</span></div><div class="gp-hscroll"><div class="gp-hlines">${rows}<div class="fx-pad"></div></div></div></div>`;
+}
+
+function conflict(s, i) {
+  const n = s.conflicts.length;
+  const blocks = s.conflicts.map((c, j) => `<div class="fx-chead">Conflict ${j + 1} of ${n} \u00b7 lines ${c.start}\u2013${c.start + Math.max(c.branch.length, c.main.length) - 1}</div>`
+    + sideBlock(c, 'Your branch', PR.branch, c.branch, c.main) + sideBlock(c, 'main', 'origin/main', c.main, c.branch)).join('');
+  return `<div class="gp-excerpt gp-current">
+    <div class="gp-fhead">
+      <span class="fx-path"><span class="gp-fcaret">\u25be</span><span class="gp-fdir">${s.dir}</span><span class="gp-fbase">${s.base}</span></span>
+      <span class="gp-frange">${n} ${n === 1 ? 'conflict' : 'conflicts'}</span><span class="gp-fspacer"></span>
+      <span class="fx-fbtns"><button class="gp-btn fx-agent-btn ${on(i, 'agent')}" data-act="agent">Fix with agent ${kbd('A')}</button>
+        <button class="gp-btn ${on(i, 'github')}" data-act="github">Resolve on GitHub ${kbd('G')}</button></span>
+    </div>
+    <div class="fx-cause">Main changed this in <b>#${s.cause.pr}</b> ${s.cause.title} by @${s.cause.by}</div>
+    <div class="gp-body">${blocks}</div>
+  </div>`;
+}
+
+/* The things the panel's j and k move between. */
+function items(i) {
+  const s = STEPS[i];
+  return isThread(s) ? ['reply', 'resolve'] : s.kind === 'check' ? ['log'] : ['agent', 'github'];
+}
+
+/* ---- left column: the problems as steps ---- */
+function stepRow(s, i) {
+  const here = i === S.cur, st = S.st[i];
+  const dot = isDone(i) ? '\u2713' : st === 'working' ? '\u2026' : '\u25cb';
+  const dcls = isDone(i) ? 'fx-dot-done' : st === 'working' ? 'fx-dot-work' : 'fx-dot-open';
+  let who, text;
+  if (isThread(s)) { who = '@' + s.author; text = bare(s.msgs[0].text.split('\n')[0]); }
+  else if (s.kind === 'check') { who = s.name; text = usable(s, NOANN)[0]?.msg ?? s.summary; }
+  else { who = s.base; text = `\u00b7 ${s.conflicts.length} ${s.conflicts.length === 1 ? 'conflict' : 'conflicts'}`; }
+  const state = st === 'resolved' ? '<span class="fx-state fx-state-done">Resolved</span>' : st === 'fixed' ? '<span class="fx-state fx-state-done">Fixed</span>'
+    : st === 'working' ? '<span class="fx-state fx-state-work">Agent fixing\u2026</span>' : '';
+  return `<div class="fx-step ${here ? 'gp-ol-herebox' : ''}" data-step="${i}">
+    <div class="gp-ol-step ${here ? 'gp-ol-here' : ''}"><span class="gp-ol-dot ${dcls}">${dot}</span>
+      <span class="gp-ol-steptitle fx-st-t"><span class="fx-st-a" title="${esc(who + ' ' + text)}"><span class="fx-who">${esc(who)}</span> ${esc(text)}</span>
+        <span class="fx-st-f"><span class="fx-pth">${pathOf(s)}</span>${state}</span></span></div>
+  </div>`;
+}
+
+function outline() {
+  let first = true;
+  const groups = GROUPS.map(([kind, label]) => {
+    const rows = STEPS.map((s, i) => [s, i]).filter(([s]) => s.kind === kind);
+    if (!rows.length) return '';
+    const h = `<div class="gp-ccard-h ${first ? 'fx-first' : ''}">${label}<span class="fx-gn"> \u00b7 ${rows.length}</span></div><div class="gp-ccard-steps">${rows.map(([s, i]) => stepRow(s, i)).join('')}</div>`;
+    first = false;
+    return h;
+  }).join('');
+  const bot = PR.bot ? `<div class="gp-ccard-h">Not counted</div><div class="gp-ccard-steps"><div class="fx-g">
+      <div class="fx-gh" data-act="bot"><span class="gp-ol-dot">${S.bot ? '\u25be' : '\u25b8'}</span><span class="fx-gt">${PR.bot.name}<span class="fx-gn"> \u00b7 bot review</span></span>${kbd('B')}</div>
+      ${S.bot ? `<div class="fx-muted">${PR.bot.note}</div>` : ''}</div></div>` : '';
+  return groups + bot;
+}
+
+/* ---- header and hint bar ---- */
+function header() {
+  const open = STEPS.map((s, i) => [s, i]).filter(([, i]) => !isDone(i));
+  const kinds = GROUPS.map(g => g[0]).filter(k => open.some(([s]) => s.kind === k));
+  const chips = kinds.length ? kinds.map(k => `<span class="fx-chip">${CHIPS[k]}</span>`).join('') : '<span class="fx-clear">Nothing left to fix</span>';
+  const left = kinds.length ? `<span class="gp-status-sep">\u00b7</span><span class="gp-status-text">${open.length} left</span>` : '';
+  const atConflict = STEPS[S.cur].kind === 'conflict';
+  const dis = !open.length || S.working;
+  return `<div class="gp-header"><div class="gp-title"><span class="gp-title-num">#${PR.num}</span><span class="gp-title-text">${esc(PR.title)}</span><span class="gp-fspacer"></span>
+      <div class="fx-hdr"><button class="gp-btn fx-agent-btn ${dis ? 'fx-off' : ''}" data-act="agent">Fix with agent ${kbd('A')}</button>
+        <button class="gp-btn" data-act="pr">Open on GitHub ${kbd(atConflict ? '\u21e7G' : 'G')}</button></div></div>
+    <div class="gp-status fx-status">${chips}<span class="gp-status-sep">\u00b7</span><span class="fx-repo">${PR.repo}</span>${left}</div></div>`;
+}
+
+function hintbar() {
+  const item = (k, l) => `<span class="gp-hb-item">${kbd(k)}<span class="gp-hb-label">${l}</span></span>`;
+  const s = STEPS[S.cur];
+  if (S.composing) return `<div class="gp-hintbar"><span class="gp-hb-mode">Replying to @${s.msgs[0].who}</span>${item('\u2318\u23ce', 'post reply')}${item('Esc', 'cancel')}</div>`;
+  const short = isThread(s) ? s.file.base : s.kind === 'check' ? s.name : s.base;
+  const keys = [item('h j k l', 'move'), item('\u23ce', S.focus === 'steps' ? 'go to code' : 'choose')];
+  if (isThread(s)) keys.push(item('R', 'reply'), item('E', S.st[S.cur] === 'resolved' ? 'unresolve' : 'resolve'));
+  if (s.kind === 'check') keys.push(item('\u21e7L', 'view log'));
+  keys.push(item('A', 'fix with agent'), item('G', s.kind === 'conflict' ? 'resolve on GitHub' : 'open on GitHub'));
+  if (s.kind === 'conflict') keys.push(item('\u21e7G', 'open PR'));
+  if (PR.bot) keys.push(item('B', 'bot review'));
+  return `<div class="gp-hintbar"><span class="gp-hb-mode">Step ${S.cur + 1} of ${N} \u00b7 ${short}</span>${keys.join('')}</div>`;
+}
+
+function render() {
+  const page = document.getElementById('page'), top = page.scrollTop, s = STEPS[S.cur];
+  const root = document.getElementById('root');
+  root.classList.toggle('gp-soft', S.mouse);
+  root.classList.toggle('fx-pf', S.focus === 'panel');
+  const panel = isThread(s) ? thread(s, S.cur) : s.kind === 'check' ? check(s, S.cur) : conflict(s, S.cur);
+  page.innerHTML = header() + `<div class="fx-guide"><div class="gp-guide">
+      <div class="gp-outline gp-ccard gp-sticky">${outline()}</div>
+      <div class="gp-code-col">${panel}</div>
+    </div></div>` + hintbar();
+  page.scrollTop = top;
+  document.getElementById('theme').textContent = theme() === 'light' ? 'Dark' : 'Light';
+  document.getElementById('tabname').textContent = `Fixes \u00b7 #${PR.num}`;
+  document.getElementById('statusline').innerHTML = `<span class="sl-seg">\u2387 ${PR.branch}</span><span class="sl-seg">${PR.repo.split('/')[1]}</span><span class="sl-sp"></span><span class="sl-seg">UTF-8</span>`;
+  document.getElementById('prsw').innerHTML = Object.keys(PRS).map(n => `<button class="${+n === PR.num ? 'on' : ''}" data-pr="${n}">${n}</button>`).join('');
+  S.enter = false;
+  if (S.composing) { const ta = document.getElementById('ta'); ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+}
+
+let toastTimer;
+function toast(t, ok = true) {
+  const el = document.getElementById('toast');
+  el.innerHTML = `<span class="${ok ? 'ok' : 'no'}">${ok ? '\u2713' : '\u00d7'}</span>${t}`;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2400);
+}
+
+/* every action runs the same way from its button and from its key */
+const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+const A = {
+  select: i => { S.cur = Math.max(0, Math.min(N - 1, i)); S.item = 0; S.composing = false; render(); },
+  move: d => {
+    if (S.focus === 'steps') return A.select(S.cur + d);
+    S.item = Math.max(0, Math.min(items(S.cur).length - 1, S.item + d)); render();
+  },
+  toPanel: () => { S.focus = 'panel'; S.item = 0; render(); },
+  toSteps: () => { S.focus = 'steps'; render(); },
+  press: () => { if (S.focus === 'steps') return A.toPanel(); A[items(S.cur)[S.item]](); },
+  reply: () => { if (!isThread(STEPS[S.cur])) return; S.composing = true; S.draft = ''; S.focus = 'panel'; S.enter = S.mouse; render(); },
+  cancel: () => { S.composing = false; render(); },
+  post: () => {
+    const text = S.draft.trim();
+    if (!text) { toast('Couldn\u2019t post the reply: it\u2019s empty', false); return; }
+    (S.extra[S.cur] = S.extra[S.cur] || []).push({ who: 'jdeocampo99', text });
+    S.composing = false; render(); toast(`Replied to @${STEPS[S.cur].msgs[0].who}`);
+  },
+  resolve: () => {
+    if (!isThread(STEPS[S.cur])) return;
+    const was = S.st[S.cur] === 'resolved';
+    S.st[S.cur] = was ? undefined : 'resolved'; render(); toast(was ? 'Reopened the thread' : 'Resolved the thread');
+  },
+  log: () => { if (STEPS[S.cur].kind === 'check') toast(`Opened the ${STEPS[S.cur].name} log on GitHub`); },
+  github: () => {
+    if (STEPS[S.cur].kind === 'conflict') toast(`Opened github.com/${PR.repo}/pull/${PR.num}/conflicts`);
+    else toast(`Opened github.com/${PR.repo}/pull/${PR.num}`);
+  },
+  pr: () => { STEPS[S.cur].kind === 'conflict' ? toast(`Opened github.com/${PR.repo}/pull/${PR.num}`) : A.github(); },
+  bot: () => { if (PR.bot) { S.bot = !S.bot; render(); } },
+  agent: () => {
+    const open = STEPS.map((s, i) => i).filter(i => !isDone(i));
+    if (S.working) { toast('Couldn\u2019t start the agent: it\u2019s already working', false); return; }
+    if (!open.length) { toast('Couldn\u2019t start the agent: nothing left to fix', false); return; }
+    S.working = true; open.forEach(i => { S.st[i] = 'working'; }); render();
+    toast(`Agent started on ${plural(open.length, 'problem')}`);
+    fixTimer = setTimeout(() => { S.working = false; open.forEach(i => { S.st[i] = 'fixed'; }); render(); toast(`Agent fixed ${plural(open.length, 'problem')}`); }, 1800);
+  },
+};
+
+const go = href => { location.href = href; };
+document.addEventListener('click', e => {
+  S.mouse = true;
+  const t = e.target;
+  if (t.id === 'theme') { const r = document.documentElement; r.style.colorScheme = theme() === 'light' ? 'dark' : 'light'; render(); return; }
+  if (t.id === 'reset') { clearTimeout(fixTimer); initial(); render(); return; }
+  if (t.id === 'hub') { go('index.html?agent=1&t=' + theme()); return; }
+  if (t.dataset.pr) { go(`pr-fixes.html?pr=${t.dataset.pr}&t=${theme()}`); return; }
+  const ab = t.closest('[data-act]'); if (ab) { const a = ab.dataset.act; if (items(S.cur).includes(a)) { S.focus = 'panel'; S.item = items(S.cur).indexOf(a); } A[a](); return; }
+  const st = t.closest('[data-step]'); if (st) { S.focus = 'steps'; A.select(+st.dataset.step); }
+});
+
+document.addEventListener('input', e => { if (e.target.id === 'ta') S.draft = e.target.value; });
+
+document.addEventListener('keydown', e => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { if (S.composing) { e.preventDefault(); S.mouse = false; A.post(); } return; }
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  S.mouse = false;
+  if (S.composing) { if (e.key === 'Escape') { e.preventDefault(); A.cancel(); } return; }
+  const run = {
+    j: () => A.move(1), ArrowDown: () => A.move(1), k: () => A.move(-1), ArrowUp: () => A.move(-1),
+    l: () => S.focus === 'steps' && A.toPanel(), ArrowRight: () => S.focus === 'steps' && A.toPanel(),
+    h: () => A.toSteps(), ArrowLeft: () => A.toSteps(), Escape: () => A.toSteps(),
+    Enter: A.press, r: A.reply, e: A.resolve, L: A.log, a: A.agent, g: A.github, G: A.pr, b: A.bot,
+  }[e.key];
+  if (run) { e.preventDefault(); document.activeElement?.blur?.(); run(); }
+});
+render();
+</script>
+</body>
+</html>

@@ -181,6 +181,7 @@ Two palettes with separate jobs: Tern's theme variables for everything structura
 - **Guide Amber** (`#d9822b`): the AI reviewer's avatar, as an identity color.
 
 ### Neutral
+Default values for every Tern variable below are in `docs/tern-tokens.css`.
 - **Ink** (`--t1`): titles, body, code, and hover text.
 - **Ink Secondary** (`--t2`): supporting prose such as status text, step notes and the change "why".
 - **Ink Muted** (`--t3`): labels, paths, line ranges, counts, gutters, and placeholder copy.

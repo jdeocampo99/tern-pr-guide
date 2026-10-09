@@ -1,0 +1,5 @@
+# Run after hub-f.graphql with ids = PRs that have an unresolved thread and changed updatedAt.
+query Threads($ids: [ID!]!) {
+  rateLimit { cost remaining }
+  nodes(ids: $ids) { ... on PullRequest { number reviewThreads(first: 50) { nodes { isResolved comments(first: 1) { nodes { author { __typename login } } } } } } }
+}

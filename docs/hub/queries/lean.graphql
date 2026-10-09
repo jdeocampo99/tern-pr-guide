@@ -1,0 +1,44 @@
+query Hub($n: Int = 50) {
+  viewer { login }
+  rateLimit { cost remaining resetAt limit used nodeCount }
+  mine: search(type: ISSUE, query: "is:pr is:open author:@me archived:false", first: $n) {
+    issueCount
+    pageInfo { hasNextPage endCursor }
+    nodes { ...Hub }
+  }
+  requested: search(type: ISSUE, query: "is:pr is:open review-requested:@me archived:false", first: $n) {
+    issueCount
+    pageInfo { hasNextPage endCursor }
+    nodes { ...Hub }
+  }
+  reviewed: search(type: ISSUE, query: "is:pr is:open reviewed-by:@me -author:@me archived:false", first: $n) {
+    issueCount
+    pageInfo { hasNextPage endCursor }
+    nodes { ...Hub }
+  }
+}
+
+fragment Hub on PullRequest {
+  id
+  number
+  title
+  url
+  isDraft
+  updatedAt
+  headRefOid
+  author { login }
+  repository { nameWithOwner }
+  reviewDecision
+  totalCommentsCount
+  latestReviews(first: 20) {
+    nodes { author { login } state submittedAt commit { oid } }
+  }
+  reviewRequests(first: 20) {
+    nodes { requestedReviewer {
+      __typename
+      ... on User { login }
+      ... on Team { slug }
+    } }
+  }
+  comments(last: 1) { totalCount nodes { updatedAt author { login } } }
+}

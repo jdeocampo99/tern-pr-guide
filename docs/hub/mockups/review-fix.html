@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Review fix · #177</title>
+<link rel="stylesheet" href="../../tern-tokens.css">
+<link rel="stylesheet" href="../../../guide.css">
+<style>
+/* Tern window (mockup frame; Tern draws this). Same frame as index.html. */
+/* Tern's syntax token colors (highlight.css, kit-only). tern-tokens.css doesn't carry them; Tern sets them in the real page. */
+:root {
+  --tk-comment: var(--t3);
+  --tk-keyword: light-dark(#8a3fd6, #c29bff);
+  --tk-function: light-dark(#2448c4, #8fb6ff);
+  --tk-string: light-dark(#1d7f52, #5fd39c);
+  --tk-number: light-dark(#b25e00, #f5b54a);
+  --tk-type: light-dark(#0b7894, #4fd2ee);
+  --tk-punct: var(--t2);
+}
+html, body { margin: 0; height: 100%; }
+body { font: 400 14px/1.5 var(--sans); color: var(--t1); background: var(--page); -webkit-font-smoothing: antialiased; overflow: hidden; }
+button { font: inherit; color: inherit; }
+.app { height: 100%; gap: 0; }
+.tabbar { flex-shrink: 0; height: 40px; display: flex; align-items: center; gap: 2px; padding: 0 12px 0 84px; font-size: 13px; color: var(--t2); }
+.tab { padding: 5px 12px; border-radius: var(--r-ctl); white-space: nowrap; }
+.tab-on { background: var(--l2); color: var(--t1); }
+.win { flex-grow: 1; min-height: 0; display: flex; gap: 6px; padding: 0 6px; }
+.pane { position: relative; flex-grow: 1; min-width: 0; border-radius: 11px; background: var(--panel); overflow: hidden; display: flex; flex-direction: column; }
+.statusline { flex-shrink: 0; height: 28px; display: flex; align-items: center; gap: 4px; padding: 0 12px; font-size: 12px; color: var(--t3); }
+.sl-seg { padding: 2px 8px; border-radius: var(--r-chip); white-space: nowrap; }
+.sl-sp { flex-grow: 1; }
+.mock { position: fixed; top: 6px; right: 10px; z-index: 50; display: flex; gap: 6px; align-items: center; padding: 3px 4px 3px 10px; border-radius: var(--r-ctl); border: 1px dashed var(--l4); background: var(--pop-bg); font-size: 12px; color: var(--t3); }
+.mseg { display: flex; gap: 2px; padding: 2px; border-radius: var(--r-ctl); background: var(--chip-bg); }
+.mseg button { border: 0; background: transparent; padding: 2px 9px; border-radius: var(--r-chip); cursor: pointer; font-size: 12px; font-weight: 600; color: var(--t3); }
+.mseg button:hover { color: var(--t1); }
+
+/* page: one scroller holding the pinned header, the two columns and the pinned hint bar */
+.page { flex-grow: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
+.page > * { flex-shrink: 0; }
+.page > .gp-header { padding: 14px 16px 12px; }
+.page > .gp-hintbar { margin-top: 0; overflow: hidden; }
+.fx-guide { flex-grow: 1; padding: 20px 16px 28px; }
+.gp-hb-mode { white-space: nowrap; }
+.gp-hb-item.fx-off { opacity: 0.5; }
+
+/* header */
+.gp-title-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fx-hdr { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
+.fx-hdr .gp-btn { display: flex; gap: 8px; align-items: center; padding: 5px 8px 5px 12px; }
+.fx-ask-row .gp-btn { display: flex; gap: 8px; align-items: center; padding: 3px 6px 3px 12px; }
+.fx-hdr .gp-btn { background: var(--card); border-color: var(--l3); }
+.fx-hdr .gp-btn:hover { background: var(--l1); }
+.fx-hdr .gp-btn.fx-open { background: var(--l2); }
+.fx-status { min-height: 28px; }
+.fx-meter .gp-cell { width: 16px; }
+.fx-agent { font-weight: 600; color: var(--gp-suggestion); }
+.gp-rv-button .kbd { background: transparent; box-shadow: none; border: 1px solid rgba(255,255,255,0.35); color: rgba(255,255,255,0.85); }
+.gp-rv-button.fx-push-off, .gp-rv-button.fx-push-off:hover { background: var(--chip-bg); border-color: var(--l2); cursor: default; }
+.gp-rv-button.fx-push-off:active { transform: none; }
+.fx-push-off .gp-rv-button-label { color: var(--t3); }
+.gp-rv-button.fx-push-off .kbd { background: var(--l1); box-shadow: inset 0 0 0 1px var(--l2); border: 0; color: var(--t3); }
+.fx-ask-row { display: flex; gap: 8px; align-items: center; min-height: 28px; }
+.fx-ask { font-size: 13px; font-weight: 600; margin-right: 6px; }
+.fx-ask-row .gp-btn-ghost { color: var(--t2); }
+.gp-btn.fx-danger, .fx-hdr .gp-btn.fx-danger { background: var(--gp-danger-fill); border-color: transparent; color: #fff; }
+.gp-btn.fx-danger:hover, .fx-hdr .gp-btn.fx-danger:hover { background: var(--gp-danger-fill); filter: brightness(1.1); }
+.fx-danger .kbd { background: transparent; box-shadow: none; border: 1px solid rgba(255,255,255,0.35); color: rgba(255,255,255,0.85); }
+
+/* left column: one step per conflict */
+.gp-ccard .fx-first { margin-top: 0; }
+.fx-step { border-radius: var(--r-ctl); cursor: pointer; margin-bottom: 6px; padding: 2px 0 4px; border: 1px solid transparent; }
+.fx-step.gp-ol-herebox { padding: 2px 0 4px; }
+.fx-step:not(.gp-ol-herebox):hover { background: var(--l1); }
+.fx-st-t { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.fx-st-f { font-size: 12.5px; font-weight: 400; color: var(--t3); }
+.gp-ol-herebox .fx-st-f { color: var(--t2); }
+.fx-step .gp-ol-dot { font-size: 13px; }
+.fx-step .gp-ol-dot.fx-dot-done, .gp-ol-herebox .gp-ol-dot.fx-dot-done { color: var(--gp-added); font-weight: 700; }
+.fx-why { color: var(--t2); }
+.fx-why .gp-icode { font-family: var(--tv-font); font-size: 12.5px; color: var(--t1); }
+.fx-tag { display: inline-block; margin-right: 6px; padding: 0 7px; border-radius: 9px; font-family: var(--sans); font-size: 11.5px; font-weight: 650; line-height: 17px; color: var(--gp-suggestion); background: rgb(from var(--gp-suggestion) r g b / 12%); vertical-align: 1px; white-space: nowrap; }
+.fx-tag-n { color: var(--t2); background: var(--chip-bg); }
+.fx-sfoot { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+.fx-sfoot .gp-check { margin-left: -4px; }
+.fx-delta { margin-left: auto; display: flex; gap: 8px; }
+.gp-check-box { font-size: 11px; line-height: 1; font-weight: 700; }
+.gp-check .kbd { margin-left: 2px; }
+
+/* the two groups under the steps */
+.fx-g { display: flex; flex-direction: column; }
+.fx-gh { display: flex; gap: 10px; align-items: baseline; padding: 5px 8px; border-radius: var(--r-ctl); cursor: pointer; }
+.fx-gh:hover { background: var(--l1); }
+.fx-gh .gp-ol-dot { width: 26px; font-size: 14px; }
+.fx-gt { font-family: var(--sans); font-size: 13.5px; color: var(--t2); }
+.fx-gh:hover .fx-gt { color: var(--t1); }
+.fx-gn { color: var(--t3); }
+.fx-gh .kbd { margin-left: auto; align-self: center; }
+.fx-gbody { padding: 0 8px 0 44px; }
+.fx-gbody .gp-cfile { padding: 4px 8px; margin-left: -8px; cursor: default; }
+.fx-gbody .gp-cfile:hover { background: transparent; }
+.fx-gbody .gp-cfile:hover .gp-cfile-name { text-decoration: none; }
+.fx-gbody .gp-cfile-name { font-size: 13.5px; }
+.fx-gbody .gp-cfile-dir { font-size: 13px; }
+.fx-gh-static { cursor: default; }
+.fx-gh-static:hover { background: transparent; }
+.fx-gh-static:hover .fx-gt { color: var(--t2); }
+.fx-muted { font-family: var(--sans); font-size: 13px; line-height: 1.5; color: var(--t3); padding: 0 8px 0 44px; }
+
+/* right column: the resolution diff, or the two sides of the original conflict */
+.gp-fhead .gp-fcaret { width: 14px; }
+.fx-path { display: flex; align-items: center; gap: 0; }
+.gp-wholefile { display: flex; gap: 8px; align-items: center; }
+.gp-wholefile.fx-on, .gp-wholefile.fx-on:hover { background: var(--gp-blue-wash); border-color: var(--gp-blue-wash-line); color: var(--gp-blue-ink); }
+.gp-fhead .gp-check { margin-right: -4px; }
+.fx-from { margin-left: auto; flex-shrink: 0; padding-left: 28px; padding-right: 12px; font-family: var(--sans); font-size: 11.5px; line-height: 19px; color: var(--t3); }
+.fx-from-agent { color: var(--gp-suggestion); }
+.fx-side { display: flex; flex-direction: column; }
+.fx-side + .fx-side { border-top: 1px solid var(--l2); }
+.fx-side > * { flex-shrink: 0; }
+.fx-side-h { display: flex; gap: 10px; align-items: baseline; padding: 7px 12px; background: var(--sf-shade); border-bottom: 1px solid var(--l2); }
+.fx-side-n { font-family: var(--sans); font-size: 13px; font-weight: 650; }
+.fx-side-b { font-size: 12px; color: var(--t3); }
+.fx-shared { opacity: 0.55; }
+.fx-side .gp-row:last-child { margin-bottom: 0; }
+.fx-pad { height: 6px; }
+
+/* toast: Tern's, drawn here at the bottom of the pane */
+.fx-toast { position: absolute; left: 50%; bottom: 56px; z-index: 30; display: flex; gap: 8px; align-items: center; padding: 7px 12px; border-radius: var(--r-ctl); background: var(--card); box-shadow: inset 0 0 0 1px var(--l3), 0 8px 24px -10px light-dark(rgba(30, 42, 90, 0.3), rgba(0, 0, 0, 0.7)); font-size: 13px; color: var(--t1); white-space: nowrap; pointer-events: none; opacity: 0; transform: translate(-50%, 6px); transition: opacity var(--gp-dur-out) var(--gp-ease-out), transform var(--gp-dur-in) var(--gp-ease-out); }
+.fx-toast.show { opacity: 1; transform: translate(-50%, 0); }
+.fx-toast .ok { font-weight: 700; color: var(--gp-added); }
+.fx-toast .no { font-weight: 700; color: var(--gp-danger-text); }
+@media (prefers-reduced-motion: reduce) { .fx-toast, .fx-toast.show { transform: translate(-50%, 0); transition: opacity 120ms ease; } }
+</style>
+</head>
+<body>
+<div class="gp-root app" id="root">
+  <div class="tabbar"><span class="tab">Default</span><span class="tab tab-on">Review · #177</span><span class="tab">Pull requests</span></div>
+  <div class="win"><div class="pane"><div class="page" id="page"></div><div class="fx-toast" id="toast"></div></div></div>
+  <div class="statusline"><span class="sl-seg">⎇ baybayin-glyph-font</span><span class="sl-seg">Tagalingo-App</span><span class="sl-sp"></span><span class="sl-seg">UTF-8</span></div>
+</div>
+<div class="mock">Mockup <div class="mseg"><button onclick="location.href = 'index.html?agent=1&sel=Tagalingo-App%23177&t=' + (document.documentElement.style.colorScheme || 'dark')">Back to the hub</button><button id="theme"></button><button id="reset">Reset</button></div></div>
+<script>
+/* Review fix: the guided review page in fix mode. The agent merged main into the branch and resolved 2 conflicts;
+   the reader checks only those resolutions, then pushes or discards. */
+const PR = { num: 177, title: 'Grammar notes: render baybayin glyphs with the bundled font', branch: 'baybayin-glyph-font' };
+
+/* kinds: c = kept, a = the agent wrote it, d = dropped. From: which side of the conflict the line came from. */
+const CONFLICTS = [
+  {
+    dir: 'src/fonts/', base: 'loadFonts.ts', start: 1, after: 8,
+    why: "Kept main's font loader and re-applied the baybayin glyph range.",
+    rows: [
+      ['c', 'both', "import * as Font from 'expo-font';"],
+      ['c', 'main', "import { FONT_MANIFEST } from './manifest';"],
+      ['c', 'both', ""],
+      ['c', 'branch', "export const BAYBAYIN_RANGE = [0x1700, 0x171f] as const;"],
+      ['a', 'agent', "export const BAYBAYIN_FAMILY = 'Noto-Baybayin';"],
+      ['c', 'both', ""],
+      ['c', 'both', "export async function loadFonts() {"],
+      ['d', 'branch', "  await Font.loadAsync({"],
+      ['d', 'branch', "    'Inter-Regular': require('../../assets/fonts/Inter-Regular.ttf'),"],
+      ['d', 'branch', "    'Noto-Baybayin': require('../../assets/fonts/NotoSansTagalog-Regular.ttf'),"],
+      ['d', 'branch', "  });"],
+      ['c', 'main', "  await Promise.all("],
+      ['c', 'main', "    FONT_MANIFEST.map(({ family, source }) => Font.loadAsync({ [family]: source })),"],
+      ['c', 'main', "  );"],
+      ['c', 'both', "}"],
+    ],
+    branch: [
+      "import * as Font from 'expo-font';",
+      "",
+      "export const BAYBAYIN_RANGE = [0x1700, 0x171f] as const;",
+      "",
+      "export async function loadFonts() {",
+      "  await Font.loadAsync({",
+      "    'Inter-Regular': require('../../assets/fonts/Inter-Regular.ttf'),",
+      "    'Noto-Baybayin': require('../../assets/fonts/NotoSansTagalog-Regular.ttf'),",
+      "  });",
+      "}",
+    ],
+    main: [
+      "import * as Font from 'expo-font';",
+      "import { FONT_MANIFEST } from './manifest';",
+      "",
+      "export async function loadFonts() {",
+      "  await Promise.all(",
+      "    FONT_MANIFEST.map(({ family, source }) => Font.loadAsync({ [family]: source })),",
+      "  );",
+      "}",
+    ],
+  },
+  {
+    dir: 'src/components/', base: 'GrammarNote.tsx', start: 7, after: 24,
+    why: "Took both: main's new <code class=\"gp-icode\">lessonId</code> prop and the branch's <code class=\"gp-icode\">script</code> prop.",
+    rows: [
+      ['c', 'main', "import { useEffect } from 'react';"],
+      ['c', 'both', "import { Text, View } from 'react-native';"],
+      ['c', 'main', "import { trackNoteViewed } from '../analytics';"],
+      ['a', 'agent', "import { BAYBAYIN_FAMILY } from '../fonts/loadFonts';"],
+      ['c', 'both', ""],
+      ['c', 'both', "type GrammarNoteProps = {"],
+      ['c', 'both', "  title: string;"],
+      ['c', 'both', "  body: string;"],
+      ['c', 'main', "  lessonId: string;"],
+      ['c', 'branch', "  script?: 'latin' | 'baybayin';"],
+      ['c', 'both', "};"],
+      ['c', 'both', ""],
+      ['d', 'branch', "export function GrammarNote({ title, body, script = 'latin' }: GrammarNoteProps) {"],
+      ['d', 'main', "export function GrammarNote({ title, body, lessonId }: GrammarNoteProps) {"],
+      ['a', 'agent', "export function GrammarNote({ title, body, lessonId, script = 'latin' }: GrammarNoteProps) {"],
+      ['c', 'main', "  useEffect(() => { trackNoteViewed(lessonId); }, [lessonId]);"],
+      ['c', 'both', "  return ("],
+      ['c', 'both', "    <View style={styles.note}>"],
+      ['c', 'both', "      <Text style={styles.title}>{title}</Text>"],
+      ['d', 'branch', "      <Text style={[styles.body, script === 'baybayin' && { fontFamily: ⟦'Noto-Baybayin'⟧ }]}>{body}</Text>"],
+      ['a', 'agent', "      <Text style={[styles.body, script === 'baybayin' && { fontFamily: ⟦BAYBAYIN_FAMILY⟧ }]}>{body}</Text>"],
+      ['c', 'both', "    </View>"],
+      ['c', 'both', "  );"],
+      ['c', 'both', "}"],
+    ],
+    branch: [
+      "import { Text, View } from 'react-native';",
+      "",
+      "type GrammarNoteProps = {",
+      "  title: string;",
+      "  body: string;",
+      "  script?: 'latin' | 'baybayin';",
+      "};",
+      "",
+      "export function GrammarNote({ title, body, script = 'latin' }: GrammarNoteProps) {",
+      "  return (",
+      "    <View style={styles.note}>",
+      "      <Text style={styles.title}>{title}</Text>",
+      "      <Text style={[styles.body, script === 'baybayin' && { fontFamily: 'Noto-Baybayin' }]}>{body}</Text>",
+      "    </View>",
+      "  );",
+      "}",
+    ],
+    main: [
+      "import { useEffect } from 'react';",
+      "import { Text, View } from 'react-native';",
+      "import { trackNoteViewed } from '../analytics';",
+      "",
+      "type GrammarNoteProps = {",
+      "  title: string;",
+      "  body: string;",
+      "  lessonId: string;",
+      "};",
+      "",
+      "export function GrammarNote({ title, body, lessonId }: GrammarNoteProps) {",
+      "  useEffect(() => { trackNoteViewed(lessonId); }, [lessonId]);",
+      "  return (",
+      "    <View style={styles.note}>",
+      "      <Text style={styles.title}>{title}</Text>",
+      "      <Text style={styles.body}>{body}</Text>",
+      "    </View>",
+      "  );",
+      "}",
+    ],
+  },
+];
+const N = CONFLICTS.length;
+const FROM = { main: 'main', branch: 'Your branch', agent: 'Agent' };
+
+/* a small TypeScript highlighter: Tern colors the real thing */
+const KW = new Set(['import', 'from', 'export', 'const', 'async', 'function', 'await', 'return', 'type', 'as']);
+const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+function hl(s) {
+  const re = /(\/\/.*)|('(?:[^'\\]|\\.)*')|(\b0x[0-9a-f]+\b|\b\d+\b)|([A-Za-z_$][\w$]*)/gi;
+  let out = '', last = 0, m;
+  while ((m = re.exec(s))) {
+    out += esc(s.slice(last, m.index));
+    last = re.lastIndex;
+    const t = m[0];
+    if (m[1]) out += `<span class="gp-tk-com">${esc(t)}</span>`;
+    else if (m[2]) out += `<span class="gp-tk-str">${esc(t)}</span>`;
+    else if (m[3]) out += `<span class="gp-tk-num">${t}</span>`;
+    else if (KW.has(t)) out += `<span class="gp-tk-kw">${t}</span>`;
+    else if (s[last] === '(') out += `<span class="gp-tk-fn">${t}</span>`;
+    else if (/^[A-Z]/.test(t)) out += `<span class="gp-tk-type">${t}</span>`;
+    else out += t;
+  }
+  return out + esc(s.slice(last));
+}
+/* ⟦ ⟧ marks the words that changed inside a line */
+const lineHtml = s => s.split(/⟦|⟧/).map((p, i) => i % 2 ? `<span class="gp-chg">${hl(p)}</span>` : hl(p)).join('');
+const plain = s => s.replace(/⟦|⟧/g, '');
+
+const S = { cur: 0, rev: Array(N).fill(false), orig: false, ask: false, done: null, open: { resolved: false }, mouse: true, enter: false };
+const q = new URLSearchParams(location.search);
+if (q.get('t')) document.documentElement.style.colorScheme = q.get('t');
+function initial() {
+  Object.assign(S, { cur: +(q.get('cur') || 0), rev: Array(N).fill(!!q.get('rv')), orig: !!q.get('orig'), ask: !!q.get('ask'), done: null, open: { resolved: !!q.get('open') }, mouse: true, enter: false });
+}
+initial();
+
+const kbd = k => `<span class="kbd">${k}</span>`;
+const counts = c => ({ a: c.rows.filter(r => r[0] === 'a').length, d: c.rows.filter(r => r[0] === 'd').length });
+
+function diffBody(c) {
+  let o = c.start, n = c.start;
+  const rows = c.rows.map(([k, from, text]) => {
+    const go = k !== 'a' ? o++ : '', gn = k !== 'd' ? n++ : '';
+    const cls = k === 'a' ? 'gp-add gp-on' : k === 'd' ? 'gp-del gp-on' : 'gp-ctx';
+    const sign = k === 'a' ? '+' : k === 'd' ? '−' : ' ';
+    const tag = from === 'both' ? '' : `<span class="fx-from ${from === 'agent' ? 'fx-from-agent' : ''}">${FROM[from]}</span>`;
+    return `<div class="gp-row ${cls}"><span class="gp-plus-none"></span><span class="gp-gut">${go}</span><span class="gp-gut">${gn}</span><span class="gp-sign">${sign}</span><span class="gp-code">${lineHtml(text)}</span>${tag}</div>`;
+  }).join('');
+  const gap = (arrow, n) => `<div class="gp-gap"><span class="gp-gap-gut">${arrow}</span><span class="gp-gap-count">${n} unchanged lines</span></div>`;
+  const top = c.start > 1 ? gap('↑', c.start - 1) : '';
+  return `<div class="gp-body">${top}<div class="gp-hscroll"><div class="gp-hlines">${rows}</div></div>${gap('↓', c.after)}</div>`;
+}
+
+function sideBlock(c, label, branchName, lines, other) {
+  const shared = new Set(other);
+  const rows = lines.map((t, i) => `<div class="gp-row ${t === '' || shared.has(t) ? 'fx-shared' : ''}"><span class="gp-plus-none"></span><span class="gp-gut">${c.start + i}</span><span class="gp-sign"></span><span class="gp-code">${lineHtml(t)}</span></div>`).join('');
+  return `<div class="fx-side"><div class="fx-side-h"><span class="fx-side-n">${label}</span><span class="fx-side-b">${branchName}</span></div><div class="gp-hscroll"><div class="gp-hlines">${rows}<div class="fx-pad"></div></div></div></div>`;
+}
+
+function excerpt(c, i) {
+  const { a, d } = counts(c);
+  const end = c.start + c.rows.filter(r => r[0] !== 'd').length - 1;
+  const tag = S.orig ? `<span class="fx-tag fx-tag-n">Before the agent</span>` : `<span class="fx-tag">Agent's resolution</span>`;
+  const stats = S.orig ? '' : `<span class="gp-adds">+${a}</span><span class="gp-dels">−${d}</span>`;
+  const body = S.orig
+    ? `<div class="gp-body">${sideBlock(c, 'Your branch', PR.branch, c.branch, c.main)}${sideBlock(c, 'main', 'origin/main', c.main, c.branch)}</div>`
+    : diffBody(c);
+  return `<div class="gp-excerpt gp-current">
+    <div class="gp-fhead">
+      <span class="fx-path"><span class="gp-fcaret">▾</span><span class="gp-fdir">${c.dir}</span><span class="gp-fbase">${c.base}</span></span>
+      <span class="gp-frange">lines ${c.start}–${end}</span>${tag}
+      <span class="gp-fspacer"></span>${stats}
+      <button class="gp-wholefile ${S.orig ? 'fx-on' : ''}" data-act="orig">Original conflict ${kbd('B')}</button>
+      ${check(i, true)}
+    </div>${body}</div>`;
+}
+
+function check(i, key) {
+  const on = S.rev[i];
+  return `<span class="gp-check ${on ? 'gp-check-on' : ''}" data-rev="${i}"><span class="gp-check-box">${on ? '✓' : ''}</span><span class="gp-check-label">Reviewed</span>${key ? kbd('⏎') : ''}</span>`;
+}
+
+function step(c, i) {
+  const here = i === S.cur, rv = S.rev[i], { a, d } = counts(c);
+  return `<div class="fx-step ${here ? 'gp-ol-herebox' : ''}" data-step="${i}">
+    <div class="gp-ol-step ${here ? 'gp-ol-here' : ''}"><span class="gp-ol-dot ${rv ? 'fx-dot-done' : ''}" data-rev="${i}">${rv ? '✓' : '○'}</span><span class="gp-ol-steptitle fx-st-t"><span>Conflict ${i + 1} of ${N}</span><span class="fx-st-f">${c.dir}${c.base}</span></span></div>
+    <div class="gp-ol-stepbody"><div class="fx-why"><span class="fx-tag">Agent</span>${c.why}</div>
+      <div class="fx-sfoot">${check(i, here)}<span class="fx-delta"><span class="gp-adds">+${a}</span><span class="gp-dels">−${d}</span></span></div></div>
+  </div>`;
+}
+
+function groups() {
+  const open = S.open.resolved;
+  return `<div class="gp-ccard-h">Other changes</div>
+  <div class="gp-ccard-steps">
+    <div class="fx-g">
+      <div class="fx-gh" data-act="resolved"><span class="gp-ol-dot">${open ? '▾' : '▸'}</span><span class="fx-gt">Resolved without the agent<span class="fx-gn"> · 1</span></span>${kbd('R')}</div>
+      ${open ? `<div class="fx-gbody"><div class="gp-cfile"><span class="gp-cfile-name">package-lock.json</span><span class="gp-cfile-dir">regenerated</span></div></div>` : ''}
+    </div>
+    <div class="fx-g">
+      <div class="fx-gh fx-gh-static"><span class="gp-ol-dot"></span><span class="fx-gt">Came in from main without conflicts<span class="fx-gn"> · 14 files</span></span></div>
+      <div class="fx-muted">Not shown. These changes were already reviewed on main.</div>
+    </div>
+  </div>`;
+}
+
+function header() {
+  const n = S.rev.filter(Boolean).length, all = n === N, d = S.done;
+  const push = d === 'pushed'
+    ? `<span class="gp-rv-button fx-push-off"><span class="gp-rv-button-label">Pushed</span></span>`
+    : `<button class="gp-rv-button ${all ? '' : 'fx-push-off'}" data-act="push" aria-disabled="${!all}"><span class="gp-rv-button-label">Push to branch</span>${kbd('P')}</button>`;
+  const discard = d ? '' : `<button class="gp-btn ${S.ask ? 'fx-open' : ''}" data-act="discard">Discard fix ${kbd('D')}</button>`;
+  const meter = `<span class="gp-meter fx-meter">${S.rev.map(r => `<span class="gp-cell ${r ? 'gp-cell-on' : ''}"></span>`).join('')}</span>`;
+  const agentLine = `<span class="gp-status-text"><span class="fx-agent">Fix by agent</span> · Merged main, resolved ${N} conflicts · 1.8k tokens · claude-sonnet-4.5</span>`;
+  let status;
+  if (S.ask && !d) {
+    status = `<div class="fx-ask-row ${S.enter ? 'gp-enter-panel' : ''}"><span class="fx-ask">Discard the fix? The agent's changes are deleted and nothing is pushed.</span>
+      <button class="gp-btn fx-danger" data-act="discardOk">Discard fix ${kbd('⌘⏎')}</button>
+      <button class="gp-btn gp-btn-ghost" data-act="cancel">Cancel ${kbd('Esc')}</button></div>`;
+  } else if (d === 'discarded') {
+    status = `<div class="gp-status fx-status"><span class="gp-status-text">Fix discarded · nothing was pushed</span></div>`;
+  } else {
+    status = `<div class="gp-status fx-status">${meter}<span class="gp-status-text">${d === 'pushed' ? `Pushed to ${PR.branch} · ` : ''}${n} of ${N} conflicts reviewed</span><span class="gp-status-sep">·</span>${agentLine}</div>`;
+  }
+  return `<div class="gp-header"><div class="gp-title"><span class="gp-title-num">#${PR.num}</span><span class="gp-title-text">${PR.title}</span><span class="gp-fspacer"></span><div class="fx-hdr">${discard}${push}</div></div>${status}</div>`;
+}
+
+function hintbar() {
+  const item = (k, l, off) => `<span class="gp-hb-item ${off ? 'fx-off' : ''}">${kbd(k)}<span class="gp-hb-label">${l}</span></span>`;
+  const all = S.rev.every(Boolean);
+  if (S.done === 'discarded') return `<div class="gp-hintbar"><span class="gp-hb-mode">Discarded the fix for #${PR.num}</span></div>`;
+  if (S.done === 'pushed') return `<div class="gp-hintbar"><span class="gp-hb-mode">Pushed the fix to #${PR.num}</span></div>`;
+  if (S.ask) return `<div class="gp-hintbar"><span class="gp-hb-mode">Discard the fix?</span>${item('⌘⏎', 'discard fix')}${item('Esc', 'cancel')}</div>`;
+  const c = CONFLICTS[S.cur];
+  return `<div class="gp-hintbar"><span class="gp-hb-mode">Conflict ${S.cur + 1} of ${N} · ${c.base}</span>
+    ${item('j k', 'next / previous conflict')}${item('⏎', S.rev[S.cur] ? 'mark unreviewed' : 'mark reviewed')}${item('B', S.orig ? 'show resolution' : 'show original conflict')}${item('R', 'resolved without the agent')}${item('P', 'push to branch', !all)}${item('D', 'discard fix')}</div>`;
+}
+
+function render() {
+  const page = document.getElementById('page'), top = page.scrollTop;
+  document.getElementById('root').classList.toggle('gp-soft', S.mouse);
+  const guide = S.done === 'discarded'
+    ? `<div class="fx-guide"><div class="gp-notice"><span class="gp-notice-title">Discarded the fix</span><span class="gp-notice-text">The agent's changes were deleted. Nothing was pushed to ${PR.branch}.</span></div></div>`
+    : `<div class="fx-guide"><div class="gp-guide">
+        <div class="gp-outline gp-ccard gp-sticky">
+          <div class="gp-ccard-h fx-first">Conflicts</div>
+          <div class="gp-ccard-steps">${CONFLICTS.map(step).join('')}</div>
+          ${groups()}
+        </div>
+        <div class="gp-code-col">${excerpt(CONFLICTS[S.cur], S.cur)}</div>
+      </div></div>`;
+  page.innerHTML = header() + guide + hintbar();
+  page.scrollTop = top;
+  document.getElementById('theme').textContent = (document.documentElement.style.colorScheme || 'dark') === 'light' ? 'Dark' : 'Light';
+  S.enter = false;
+}
+
+let toastTimer;
+function toast(t, ok = true) {
+  const el = document.getElementById('toast');
+  el.innerHTML = `<span class="${ok ? 'ok' : 'no'}">${ok ? '✓' : '×'}</span>${t}`;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2400);
+}
+
+/* every action runs the same way from its button and from its key */
+const A = {
+  select: i => { S.cur = Math.max(0, Math.min(N - 1, i)); render(); },
+  toggleReviewed: i => { S.rev[i] = !S.rev[i]; render(); },
+  orig: () => { S.orig = !S.orig; render(); },
+  resolved: () => { S.open.resolved = !S.open.resolved; render(); },
+  push: () => {
+    const left = S.rev.filter(r => !r).length;
+    if (left) { toast(`Couldn't push the fix: ${left} of ${N} conflicts not reviewed`, false); return; }
+    S.done = 'pushed'; S.ask = false; render(); toast(`Pushed the fix to #${PR.num}`);
+  },
+  discard: () => { S.ask = true; S.enter = S.mouse; render(); },
+  cancel: () => { S.ask = false; render(); },
+  discardOk: () => { S.done = 'discarded'; S.ask = false; render(); toast(`Discarded the fix for #${PR.num}`); },
+};
+
+document.addEventListener('click', e => {
+  S.mouse = true;
+  if (e.target.id === 'theme') { const r = document.documentElement; r.style.colorScheme = (r.style.colorScheme || 'dark') === 'light' ? 'dark' : 'light'; render(); return; }
+  if (e.target.id === 'reset') { initial(); render(); return; }
+  if (S.done === 'discarded') return;
+  const rv = e.target.closest('[data-rev]'); if (rv) { A.toggleReviewed(+rv.dataset.rev); return; }
+  const ab = e.target.closest('[data-act]'); if (ab) { A[ab.dataset.act](); return; }
+  const st = e.target.closest('[data-step]'); if (st) A.select(+st.dataset.step);
+});
+
+document.addEventListener('keydown', e => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { if (S.ask && !S.done) { e.preventDefault(); S.mouse = false; A.discardOk(); } return; }
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  S.mouse = false;
+  if (S.done === 'discarded') return;
+  if (e.key === 'Escape') { if (S.ask) A.cancel(); return; }
+  if (S.ask || S.done) return;
+  const k = e.key.toLowerCase();
+  const run = {
+    j: () => A.select(S.cur + 1), arrowdown: () => A.select(S.cur + 1),
+    k: () => A.select(S.cur - 1), arrowup: () => A.select(S.cur - 1),
+    enter: () => A.toggleReviewed(S.cur),
+    b: A.orig, r: A.resolved, p: A.push, d: A.discard,
+  }[k];
+  if (run) { e.preventDefault(); document.activeElement?.blur?.(); run(); }
+});
+render();
+</script>
+</body>
+</html>

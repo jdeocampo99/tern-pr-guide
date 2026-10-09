@@ -1,0 +1,1204 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PR hub mockups</title>
+<link rel="stylesheet" href="../../tern-tokens.css">
+<link rel="stylesheet" href="../../../guide.css">
+<style>
+/* Tern window (mockup frame; Tern draws this) */
+html, body { margin: 0; height: 100%; }
+body { font: 400 14px/1.5 var(--sans); color: var(--t1); background: var(--page); -webkit-font-smoothing: antialiased; overflow: hidden; }
+button { font: inherit; color: inherit; }
+.app { height: 100%; gap: 0; }
+.tabbar { flex-shrink: 0; height: 40px; display: flex; align-items: center; gap: 2px; padding: 0 12px 0 84px; font-size: 13px; color: var(--t2); }
+.tab { padding: 5px 12px; border-radius: var(--r-ctl); white-space: nowrap; }
+.tab-on { background: var(--l2); color: var(--t1); }
+.win { flex-grow: 1; min-height: 0; display: flex; gap: 6px; padding: 0 6px; }
+.pane { min-width: 0; border-radius: 11px; background: var(--panel); overflow: hidden; display: flex; flex-direction: column; }
+.pane-hub { flex-grow: 1; }
+.pane-term { flex-grow: 1; background: var(--tv-bg); color: var(--tv-fg); font: 13px/1.6 var(--tv-font); padding: 18px 20px; }
+.pane-term .dim { color: var(--t3); }
+body:not(.split) .pane-term { display: none; }
+body.split .pane-hub { flex-grow: 0; width: 720px; flex-shrink: 0; }
+.statusline { flex-shrink: 0; height: 28px; display: flex; align-items: center; gap: 4px; padding: 0 12px; font-size: 12px; color: var(--t3); }
+.sl-seg { padding: 2px 8px; border-radius: var(--r-chip); white-space: nowrap; }
+.sl-pr { color: var(--t1); background: var(--chip-bg); display: flex; gap: 6px; align-items: center; }
+.sl-pr i { width: 6px; height: 6px; border-radius: 3px; background: var(--gp-blue); }
+/* the hub's segment flashes red when a PR newly needs fixes, then settles */
+.sl-pr.bump { animation: sl-bump 1600ms ease; }
+@keyframes sl-bump { from { background: var(--gp-danger-wash); box-shadow: inset 0 0 0 1px var(--gp-danger-wash-line); } to { background: var(--chip-bg); box-shadow: none; } }
+/* a PR arriving in Needs fixes: a red ring that fades, instead of the green wash good news gets */
+.f-arrive.f-arrive-bad { animation: f-arrive var(--gp-dur-unroll) var(--gp-ease-out), f-ring 1600ms ease; }
+@keyframes f-ring { from { box-shadow: 0 0 0 3px rgb(from var(--gp-removed) r g b / 45%); } to { box-shadow: 0 0 0 0 rgb(from var(--gp-removed) r g b / 0%); } }
+@media (prefers-reduced-motion: reduce) { .f-arrive.f-arrive-bad { animation: gp-fade-in var(--gp-dur-in) ease, f-ring 1600ms ease; } }
+.f-toast .bad { font-size: 9px; color: var(--gp-removed); }
+.sl-sp { flex-grow: 1; }
+
+/* mockup controls (not product) */
+.mock { position: fixed; top: 6px; right: 10px; z-index: 50; display: flex; gap: 6px; align-items: center; padding: 3px 4px 3px 10px; border-radius: var(--r-ctl); border: 1px dashed var(--l4); background: var(--pop-bg); font-size: 12px; color: var(--t3); }
+.mseg { display: flex; gap: 2px; padding: 2px; border-radius: var(--r-ctl); background: var(--chip-bg); }
+.mseg button { border: 0; background: transparent; padding: 2px 9px; border-radius: var(--r-chip); cursor: pointer; font-size: 12px; font-weight: 600; color: var(--t3); }
+.mseg .on { background: var(--card); color: var(--t1); box-shadow: 0 1px 2px light-dark(rgba(16,24,40,0.12), rgba(0,0,0,0.4)); }
+
+/* hub page */
+.hub { flex-grow: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; scroll-padding: 150px 0 60px; }
+.hub > * { flex-shrink: 0; }
+.hb-head { padding: 14px 20px 12px; }
+.hb-head.has-tabs { padding-bottom: 0; border-bottom: 0; gap: 12px; }
+.hb-top { display: flex; align-items: center; gap: 16px; }
+.hb-tabs { display: flex; align-items: flex-end; gap: 12px; margin: 0 -20px; padding: 0 20px; box-shadow: inset 0 -1px 0 var(--l2); }
+.hb-tabs .sf-tabs { box-shadow: none; flex-shrink: 0; }
+.hb-tabs .sf-tab { height: 34px; font-size: 13px; }
+body.split .gp-hb-mode { display: none; }
+.gp-hintbar { overflow: hidden; }
+.gp-hb-mode { white-space: nowrap; }
+.t-pill { margin-left: 7px; padding: 0 6px; border-radius: 9px; font-size: 11px; font-weight: 650; line-height: 16px; color: #fff; font-variant-numeric: tabular-nums; }
+.t-pill-blue { background: var(--gp-blue-fill); }
+.hb-title { font-size: 21px; font-weight: 650; white-space: nowrap; }
+.hb-top .gp-sr-box { flex-grow: 1; max-width: 560px; border-color: var(--l3); padding: 5px 10px; }
+.hb-top input { flex-grow: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--t1); caret-color: var(--gp-blue); }
+.hb-top input::placeholder { color: var(--t3); }
+.hb-top .gp-sr-box:focus-within { border-color: var(--gp-blue-line); }
+.hb-fresh { margin-left: auto; display: flex; gap: 8px; align-items: center; font-size: 12.5px; color: var(--t3); white-space: nowrap; }
+/* view controls (filter, sort) sit at the right of the tabs; the agent model is a setting, so it sits in the header */
+.hb-tabs .hb-ctls { margin-left: auto; }
+.hb-fresh .hb-ctls { margin-left: 4px; }
+.hb-fresh .hb-ctl { color: var(--t3); }
+.hb-body { flex-grow: 1; padding: 16px 20px 8px; display: flex; flex-direction: column; gap: 24px; }
+.hb-body > * { flex-shrink: 0; }
+.gp-hintbar { margin-top: 0; }
+::selection { background: light-dark(rgba(47,111,224,0.18), rgba(138,180,255,0.28)); }
+
+/* section heading: label, count, optional note */
+.hb-h { display: flex; gap: 8px; align-items: baseline; padding: 0 10px 6px; }
+.hb-h .gp-panel-h { color: var(--t2); }
+.hb-n { font-size: 12px; color: var(--t3); font-variant-numeric: tabular-nums; }
+.hb-note { font-size: 12.5px; color: var(--t3); }
+
+/* rows: hover and selected come from the existing search row (gp-sr-row, gp-sr-row-on) */
+.hb-row { display: flex; gap: 12px; align-items: baseline; padding: 7px 10px; border-radius: var(--r-ctl); cursor: pointer; }
+.hb-row.gp-sr-row-on .hb-title-t { color: var(--gp-blue-ink); }
+.hb-verb { font-size: 13px; font-weight: 650; white-space: nowrap; }
+.v-blue { color: var(--gp-blue); }
+.hb-top .gp-sr-box .kbd { font-size: 10.5px; }
+.hb-top .gp-sr-slash { font-size: 17px; line-height: 1; }
+.v-red { color: var(--gp-removed); }
+.v-green { color: var(--gp-added); }
+.v-wait { color: var(--t2); font-weight: 500; }
+.v-idle { color: var(--t3); font-weight: 500; }
+.hb-why { font-size: 13px; color: var(--t2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.hb-title-t { font-size: 14px; color: var(--t1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.hb-meta { font: 12px/1.4 var(--tv-font); color: var(--t3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.hb-num { font: 12.5px var(--tv-font); color: var(--t3); flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.hb-ci { flex-shrink: 0; font: 12px var(--tv-font); color: var(--t3); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ci-ok { color: var(--gp-added); } .ci-bad { color: var(--gp-removed); }
+.hb-age { flex-shrink: 0; width: 34px; text-align: right; font: 12px var(--tv-font); color: var(--t3); font-variant-numeric: tabular-nums; }
+
+/* stacked row: what to do, which PR, where */
+.hb-stack { flex-direction: column; gap: 1px; align-items: stretch; }
+.hb-stack .hb-l1 { display: flex; gap: 8px; align-items: baseline; min-width: 0; }
+.hb-stack .hb-l3 { display: flex; gap: 10px; align-items: baseline; }
+.hb-stack .hb-l3 .hb-meta { flex-grow: 1; }
+
+/* inactive fold */
+.hb-fold { display: flex; gap: 10px; align-items: baseline; padding: 8px 10px; border-radius: var(--r-ctl); cursor: pointer; border: 1px dashed var(--l3); }
+.hb-fold .gp-panel-h { color: var(--t2); }
+.hb-fold .chev { font-size: 11px; color: var(--t3); width: 10px; display: inline-block; transition: transform var(--gp-dur-in) var(--gp-ease-out); }
+.hb-fold.open .chev { transform: rotate(90deg); }
+.hb-fold-rows { display: flex; flex-direction: column; gap: 1px; padding-top: 4px; animation: hb-in var(--gp-dur-in) var(--gp-ease-out); }
+@keyframes hb-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.hb-quiet .hb-title-t { color: var(--t2); }
+
+/* line row with fixed columns (G's Created lane, H) */
+.hb-line .hb-num { width: 44px; }
+.hb-line .hb-title-t { flex: 1 1 auto; }
+.hb-line .hb-state { flex: 0 0 270px; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hb-line .hb-ci { width: 52px; }
+.hb-line .hb-verbcol { flex: 0 0 132px; }
+.hb-line .hb-repo { flex: 0 0 120px; font: 12px var(--tv-font); color: var(--t3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hb-sub { display: flex; gap: 8px; align-items: baseline; padding: 10px 10px 2px; font: 12.5px var(--tv-font); color: var(--t2); }
+.hb-sub span { color: var(--t3); }
+
+/* F: one board per process behind tabs (Your pull requests, Reviewing). Each runs left to right: your turn
+   (colored), their turn (neutral), done (green). Your-turn cards carry their meaning as a wash (blue: a review
+   is owed, red: your PR needs work) and Waiting stays quieter in type. */
+.f-board { display: flex; gap: 24px; align-items: flex-start; }
+.f-col { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.f-col.f-act { flex-grow: 1.35; }
+.f-h { display: flex; gap: 8px; align-items: center; padding: 0 2px 10px; margin-bottom: 4px; border-bottom: 1px solid var(--l2); }
+.f-h-t { font-size: 15px; font-weight: 650; color: var(--t1); }
+.f-pill { padding: 0 7px; border-radius: 10px; font-size: 12px; font-weight: 650; line-height: 18px; font-variant-numeric: tabular-nums; color: var(--t2); background: var(--chip-bg); }
+.f-act .f-h { border-bottom-color: var(--gp-blue-wash-line); }
+.f-act .f-pill { color: #fff; background: var(--gp-blue-fill); }
+.f-ready .f-h { border-bottom-color: var(--gp-success-wash-line); }
+.f-ready .f-pill { color: var(--gp-added); background: var(--gp-success-wash); }
+.f-wait .f-h-t { color: var(--t2); }
+.f-chip { flex-shrink: 0; padding: 0 7px; border-radius: var(--r-chip); font-size: 12px; font-weight: 650; line-height: 19px; white-space: nowrap; }
+
+/* every PR is a box: neutral by default, washed by meaning in the your-turn column, green-edged when done */
+.f-col .hb-stack, .f-col .f-rrow { border: 1px solid var(--l2); border-radius: var(--r-ctl); background: var(--sf-shade); transition: border-color 140ms ease, box-shadow 140ms ease, background-color 140ms ease; }
+.f-col .hb-row.gp-sr-row-on, .f-col .hb-row.gp-sr-row-on:hover { border-color: var(--gp-blue-line); box-shadow: 0 0 0 1px var(--gp-blue-line); }
+@media (hover: hover) and (pointer: fine) {
+  .f-wait .hb-stack:hover { background: var(--l1); border-color: var(--l3); }
+  .f-ready .f-rrow:hover { background: var(--l1); }
+}
+
+/* Needs action: one washed card per PR */
+.f-act .hb-stack { gap: 5px; padding: 12px 16px 11px; border: 1px solid; border-radius: var(--r-ctl); transition: border-color 140ms ease, box-shadow 140ms ease; }
+.f-act .t-blue { background: var(--gp-blue-wash); border-color: var(--gp-blue-wash-line); }
+.f-act .t-red { background: var(--gp-danger-wash); border-color: var(--gp-danger-wash-line); }
+.f-act .t-blue .f-chip { color: #fff; background: var(--gp-blue-fill); }
+.f-act .t-red .f-chip { color: #fff; background: var(--gp-danger-fill); }
+.f-act .hb-why { font-size: 13px; font-weight: 500; }
+.f-act .t-blue .hb-why { color: var(--gp-blue-ink); }
+.f-act .t-red .hb-why { color: var(--gp-danger-text); }
+.f-act .hb-title-t { font-size: 15px; font-weight: 600; line-height: 1.35; white-space: normal; }
+.f-act .hb-meta, .f-act .hb-age, .f-act .hb-ci:not(.ci-ok):not(.ci-bad) { color: var(--t2); }
+.f-act .t-blue.gp-sr-row-on, .f-act .t-blue.gp-sr-row-on:hover { background: var(--gp-blue-wash); box-shadow: 0 0 0 1px var(--gp-blue-line); border-color: var(--gp-blue-line); }
+.f-act .t-red.gp-sr-row-on, .f-act .t-red.gp-sr-row-on:hover { background: var(--gp-danger-wash); box-shadow: 0 0 0 1px var(--gp-blue-line); border-color: var(--gp-blue-line); }
+.f-act .gp-sr-row-on .hb-title-t { color: var(--t1); }
+@media (hover: hover) and (pointer: fine) {
+  .f-act .t-blue:hover { background: var(--gp-blue-wash); border-color: var(--gp-blue-line); }
+  .f-act .t-red:hover { background: var(--gp-danger-wash); border-color: rgb(from var(--gp-removed) r g b / 55%); }
+}
+
+/* Ready to merge: a green check in the gutter; the column heading already says Merge */
+.f-rrow { display: flex; gap: 10px; align-items: flex-start; padding: 11px 16px 10px 14px; }
+.f-ready .f-rrow { border-color: var(--gp-success-wash-line); }
+.f-ok { flex-shrink: 0; width: 14px; font-size: 13px; font-weight: 700; line-height: 20px; color: var(--gp-added); }
+.f-rmain { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.f-rmain .hb-l3 { display: flex; gap: 10px; align-items: baseline; }
+.f-rmain .hb-meta { flex-grow: 1; }
+.f-ready .hb-title-t { font-size: 14px; font-weight: 500; }
+
+/* Waiting: the reason only, in quieter type */
+.f-wait .hb-stack { gap: 4px; padding: 11px 16px 10px; }
+.f-wait .hb-title-t { font-size: 13.5px; color: var(--t2); }
+.f-mine .f-act .f-h { border-bottom-color: var(--gp-danger-wash-line); }
+.f-mine .f-act .f-pill { background: var(--gp-danger-fill); }
+.f-av { flex-shrink: 0; width: 22px; height: 22px; border-radius: 11px; display: inline-flex; align-items: center; justify-content: center; font: 650 10px/1 var(--sans); color: var(--t1); background: var(--raise); box-shadow: inset 0 0 0 1px var(--l3); }
+.f-av-sm { width: 16px; height: 16px; font-size: 8px; }
+.hb-l3 .f-av-sm { align-self: center; margin-right: -4px; }
+body.split .f-board { flex-direction: column; gap: 20px; align-items: stretch; }
+
+/* checks: one mark and a muted count, as GitHub shows them. Passed is a green check, failed a red cross,
+   running an amber spinner: the board's one moving thing, the plugin's loading spinner (gp-st-spin) in amber. */
+.ci-m { flex-shrink: 0; display: inline-flex; gap: 5px; align-items: center; font: 11.5px var(--tv-font); color: var(--t3); font-variant-numeric: tabular-nums; }
+.ci-g { font-family: var(--sans); font-size: 12px; font-weight: 700; line-height: 1; }
+.ci-m.ok .ci-g { color: var(--gp-added); }
+.ci-m.bad, .ci-m.bad .ci-g { color: var(--gp-removed); }
+.ci-spin { flex-shrink: 0; width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid var(--l3); border-top-color: var(--gp-changed); animation: gp-spin 800ms linear infinite; }
+.ci-spin.out { opacity: 0; transform: scale(0.6); filter: blur(2px); animation-play-state: paused; transition: opacity var(--gp-dur-out) var(--gp-ease-out), transform var(--gp-dur-out) var(--gp-ease-out), filter var(--gp-dur-out) var(--gp-ease-out); }
+.ci-pop .ci-g { display: inline-block; animation: ci-pop var(--gp-dur-in) var(--gp-ease-out); }
+@keyframes ci-pop { from { opacity: 0; transform: scale(0.6); filter: blur(2px); } to { opacity: 1; transform: none; filter: none; } }
+
+/* status chips for the waiting columns: who or what the PR waits on, in one or two words */
+.st { flex-shrink: 0; display: inline-flex; gap: 6px; align-items: center; padding: 0 7px; border-radius: var(--r-chip); font-size: 12px; font-weight: 600; line-height: 20px; white-space: nowrap; }
+.st-run .ci-spin { width: 9px; height: 9px; }
+.st-purple { color: var(--gp-suggestion); background: rgb(from var(--gp-suggestion) r g b / 12%); }
+.st-purple b { font-weight: 500; opacity: 0.85; }
+.st-red { color: var(--gp-danger-text); background: var(--gp-danger-wash); }
+.st-neutral { color: var(--t2); background: var(--chip-bg); }
+.f-h-note { margin-left: auto; font-size: 12px; }
+
+/* filter and sort: quiet buttons in the tab row; a menu opens under its button, in Tern's popover look */
+.hb-ctls { position: relative; align-self: center; display: flex; gap: 4px; align-items: center; margin-left: 12px; }
+.hb-ctl { display: flex; gap: 6px; align-items: center; padding: 3px 6px 3px 9px; border: 1px solid transparent; border-radius: var(--r-ctl); background: transparent; font-size: 12.5px; color: var(--t2); cursor: pointer; white-space: nowrap; transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease, transform var(--gp-dur-press) var(--gp-ease-out); }
+.hb-ctl b { font-weight: 600; color: var(--t1); }
+.hb-ctl .chev { font-size: 9px; color: var(--t3); }
+.hb-ctl .kbd { margin-left: 2px; }
+.hb-ctl:active { transform: scale(0.97); }
+.hb-ctl.open { background: var(--l1); border-color: var(--l3); color: var(--t1); }
+.hb-ctl.act { background: var(--gp-blue-wash); border-color: var(--gp-blue-wash-line); color: var(--gp-blue-ink); }
+.hb-ctl.act b { color: var(--gp-blue-ink); }
+@media (hover: hover) and (pointer: fine) { .hb-ctl:hover { background: var(--l1); color: var(--t1); } .hb-ctl.act:hover { background: var(--gp-blue-wash); } }
+.hb-pop { position: absolute; top: calc(100% + 6px); right: 0; z-index: 20; min-width: 300px; padding: 6px; display: flex; flex-direction: column; gap: 1px; border-radius: var(--r-card); background: var(--card); box-shadow: inset 0 0 0 1px var(--l3), 0 1px 2px light-dark(rgba(20, 30, 60, 0.06), rgba(0, 0, 0, 0.5)), 0 16px 40px -18px light-dark(rgba(30, 42, 90, 0.3), rgba(0, 0, 0, 0.7)); transform-origin: top right; }
+.hb-pop.anim { animation: hb-pop-in var(--gp-dur-in) var(--gp-ease-out); }
+@keyframes hb-pop-in { from { opacity: 0; transform: scale(0.97) translateY(-2px); } to { opacity: 1; transform: none; } }
+.hb-pop-h { padding: 6px 8px 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--t3); }
+.hb-opt { display: flex; gap: 10px; align-items: center; padding: 6px 8px; border-radius: var(--r-ctl); font-size: 13px; color: var(--t1); cursor: pointer; white-space: nowrap; }
+.hb-opt.hl { background: var(--l1); }
+@media (hover: hover) and (pointer: fine) { .hb-opt:hover { background: var(--l1); } }
+.hb-opt .box { flex-shrink: 0; width: 14px; height: 14px; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; color: transparent; box-shadow: inset 0 0 0 1.5px var(--t4); }
+.hb-opt.on .box { color: #fff; background: var(--gp-blue-fill); box-shadow: none; }
+.hb-opt .tick { flex-shrink: 0; width: 14px; font-size: 12px; font-weight: 700; color: var(--gp-blue); text-align: center; }
+.hb-opt .cnt { margin-left: auto; font: 11.5px var(--tv-font); color: var(--t3); font-variant-numeric: tabular-nums; }
+.hb-opt .sub { margin-left: auto; padding-left: 16px; font-size: 12px; color: var(--t3); }
+.hb-opt.clear { color: var(--t2); }
+.hb-pop hr { height: 1px; margin: 4px 2px; border: 0; background: var(--l2); }
+/* sorted by repository: each column's PRs sit under their repository */
+.f-repo { display: flex; gap: 8px; align-items: baseline; padding: 10px 2px 2px; font: 12px var(--tv-font); color: var(--t2); }
+.f-repo:first-of-type { padding-top: 2px; }
+.f-repo span { color: var(--t3); }
+
+/* a PR changing columns: the old row fades out fast, the new one arrives with a green wash that fades */
+.f-leave { opacity: 0; transform: translateX(6px); transition: opacity var(--gp-dur-out) var(--gp-ease-out), transform var(--gp-dur-out) var(--gp-ease-out); }
+.f-arrive { animation: f-arrive var(--gp-dur-unroll) var(--gp-ease-out), f-flash 1600ms ease; }
+@keyframes f-arrive { from { opacity: 0; transform: translateY(-6px) scale(0.98); } to { opacity: 1; transform: none; } }
+@keyframes f-flash { from { background-color: var(--gp-success-wash); } to { background-color: transparent; } }
+
+/* G: two lanes by role */
+.g-lanes { display: flex; gap: 24px; align-items: flex-start; }
+.g-rev { flex: 0 0 360px; display: flex; flex-direction: column; gap: 2px; padding: 12px 8px 8px; border: 1px solid var(--l2); border-radius: var(--r-card); background: var(--sf-shade); }
+.g-mine { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.g-mine .hb-h { padding-bottom: 4px; }
+body.split .g-lanes { flex-direction: column; align-items: stretch; }
+body.split .g-rev { flex-basis: auto; }
+body.split .hb-line .hb-state { flex-basis: 170px; }
+body.split .h-main .hb-state { display: none; }
+body.split .hb-line .hb-verbcol { flex-basis: 120px; }
+
+/* H: repo rail */
+.h-split { display: flex; gap: 24px; align-items: flex-start; }
+.h-rail { flex: 0 0 210px; position: sticky; top: 0; display: flex; flex-direction: column; gap: 1px; }
+.h-rail .gp-panel-h { padding: 12px 10px 4px; }
+.h-item { display: flex; gap: 8px; align-items: baseline; padding: 5px 10px; border-radius: var(--r-ctl); cursor: pointer; font-size: 13.5px; color: var(--t2); }
+.h-item:hover { background: var(--l1); }
+.h-item.on { background: var(--gp-blue-wash); color: var(--gp-blue-ink); font-weight: 600; }
+.h-item .lbl { flex-grow: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.h-item .act { font-size: 12px; font-weight: 650; color: var(--gp-blue); font-variant-numeric: tabular-nums; }
+.h-item .tot { width: 22px; text-align: right; font-size: 12px; color: var(--t3); font-variant-numeric: tabular-nums; }
+.h-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 20px; }
+.h-main > section { display: flex; flex-direction: column; gap: 1px; }
+.h-head { display: flex; gap: 10px; align-items: baseline; padding: 0 10px; }
+.h-head b { font-size: 15px; font-weight: 650; }
+body.split .h-split { flex-direction: column; gap: 12px; align-items: stretch; }
+body.split .h-rail { flex: none; position: static; flex-direction: row; flex-wrap: nowrap; align-items: baseline; overflow-x: auto; gap: 4px; padding-bottom: 6px; border-bottom: 1px solid var(--l2); }
+body.split .h-rail .gp-panel-h { display: none; }
+body.split .h-item { flex-shrink: 0; }
+body.split .h-item .lbl { overflow: visible; }
+body.split .hb-line .hb-repo { display: none; }
+
+/* card actions: the selected card's buttons, each showing its key. Keys never animate, so neither does this row. */
+.f-acts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding-top: 6px; }
+.f-acts .gp-btn { display: flex; gap: 8px; align-items: center; padding: 2px 5px 2px 10px; background: var(--card); border-color: var(--l3); color: var(--t1); white-space: nowrap; }
+.f-acts .gp-btn-ghost { background: transparent; border-color: transparent; color: var(--t2); }
+.f-acts .gp-btn.f-merge { background: var(--gp-merge); border-color: light-dark(rgba(31,35,40,0.15), rgba(240,246,252,0.1)); color: #fff; }
+.f-acts .gp-btn.f-confirm { background: var(--gp-confirm); border-color: transparent; color: #fff; }
+.f-acts .gp-btn.f-danger { background: var(--gp-danger-fill); border-color: transparent; color: #fff; }
+.f-acts .f-merge .kbd, .f-acts .f-confirm .kbd, .f-acts .f-danger .kbd { background: transparent; border: 1px solid rgba(255,255,255,0.35); box-shadow: none; color: rgba(255,255,255,0.85); }
+@media (hover: hover) and (pointer: fine) { .f-acts .gp-btn:hover { background: var(--l1); } .f-acts .gp-btn.f-merge:hover { background: var(--gp-merge-hover); } .f-acts .gp-btn.f-confirm:hover { background: var(--gp-confirm); filter: brightness(1.08); } }
+.f-ask { flex-basis: 100%; padding-bottom: 2px; font-size: 13px; font-weight: 600; color: var(--t1); }
+.f-acts:has(.f-ask) { flex-wrap: wrap; }
+.f-acts .sp { flex-grow: 1; }
+.f-src { flex-basis: 100%; font-size: 12px; color: var(--t3); }
+/* merge method chooser: inside the card under a rule, not a box in a box */
+.f-method { flex-basis: 100%; display: flex; flex-direction: column; gap: 1px; margin-top: 2px; padding-top: 8px; border-top: 1px solid var(--l2); }
+.f-method-h { padding: 0 8px 4px; font-size: 12.5px; font-weight: 600; color: var(--t2); }
+.f-method .hb-opt { padding: 5px 8px; }
+.f-method .f-src { padding: 6px 8px 0; }
+.f-method-b { display: flex; gap: 6px; padding: 8px 0 0; }
+.f-in { display: flex; gap: 10px; align-items: center; padding: 4px 8px 0 32px; font-size: 12.5px; color: var(--t2); }
+.f-in input { flex: 1 1 auto; min-width: 0; padding: 3px 7px; border: 1px solid var(--l3); border-radius: var(--r-ctl); background: var(--card); font: 12.5px var(--tv-font); color: var(--t1); outline: none; }
+.f-in input:focus { border-color: var(--gp-blue-line); box-shadow: 0 0 0 1px var(--gp-blue-line); }
+.f-in input::placeholder { color: var(--t3); }
+/* A card's action replaces the checks and age at the end of its repo line while the card is hovered or selected
+   (as Gmail swaps a row's date for its actions). Resting cards show none: the chip already names the job. */
+.f-corner { position: relative; margin: -3px 0 -3px auto; align-self: center; display: none; gap: 2px; align-items: center; flex-shrink: 0; }
+.f-info { display: inline-flex; gap: 10px; align-items: baseline; flex-shrink: 0; }
+.gp-sr-row-on .f-corner { display: inline-flex; }
+.gp-sr-row-on .f-info { display: none; }
+@media (hover: hover) and (pointer: fine) { .hb-row:hover .f-corner { display: inline-flex; } .hb-row:hover .f-info { display: none; } }
+.f-cbtn { display: inline-flex; gap: 6px; align-items: center; height: 22px; padding: 0 8px; border: 1px solid var(--l3); border-radius: var(--r-ctl); background: var(--card); font: 600 12px var(--sans); color: var(--t1); white-space: nowrap; cursor: pointer; transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease, transform var(--gp-dur-press) var(--gp-ease-out); }
+.f-cbtn:active { transform: scale(0.97); }
+.f-cbtn .kbd { margin-right: -3px; }
+.f-cbtn-primary.on { background: var(--gp-blue-fill); border-color: transparent; color: #fff; }
+.f-cbtn-merge { color: var(--gp-added); border-color: var(--gp-success-wash-line); }
+.f-cbtn-merge.on { background: var(--gp-merge); border-color: transparent; color: #fff; }
+.f-cbtn-ghost { background: transparent; border-color: transparent; color: var(--t2); }
+.f-cbtn-primary.on .kbd, .f-cbtn-merge.on .kbd { background: transparent; border: 1px solid rgba(255,255,255,0.35); box-shadow: none; color: rgba(255,255,255,0.85); }
+/* hovered but not selected: a quiet button; selected: filled, with its key */
+.f-cbtn:not(.on) { color: var(--t1); }
+@media (hover: hover) and (pointer: fine) { .f-cbtn:hover { border-color: var(--t4); } .f-cbtn-primary.on:hover, .f-cbtn-merge.on:hover { filter: brightness(1.08); } }
+/* split button, as GitHub's merge button: the action on the left, its alternatives behind the attached ▾ */
+.f-split { display: inline-flex; gap: 1px; }
+.f-split.has > .f-cbtn:first-child { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.f-cbtn.f-chev { padding: 0 5px; border-top-left-radius: 0; border-bottom-left-radius: 0; font-size: 12px; line-height: 1; }
+.f-cbtn-plain.on.f-chev, .f-cbtn-ghost.on.f-chev { border-color: var(--l3); }
+.f-moremenu { position: absolute; top: calc(100% + 4px); right: 0; z-index: 25; min-width: 230px; padding: 4px; display: flex; flex-direction: column; gap: 1px; border-radius: var(--r-card); background: var(--card); box-shadow: inset 0 0 0 1px var(--l3), 0 1px 2px light-dark(rgba(20, 30, 60, 0.06), rgba(0, 0, 0, 0.5)), 0 16px 40px -18px light-dark(rgba(30, 42, 90, 0.3), rgba(0, 0, 0, 0.7)); }
+.f-moremenu .hb-pop-h { padding: 4px 8px 2px; }
+/* bar placement: the hint bar carries the selected PR and its actions */
+.f-barmode { gap: 10px; }
+.f-bar-t { flex-shrink: 1; min-width: 0; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; color: var(--t1); }
+.f-bar-t span { color: var(--t3); font-weight: 500; }
+.f-acts-bar { padding-top: 0; flex-wrap: nowrap; }
+.f-bar-sep { width: 1px; height: 16px; margin: 0 4px; background: var(--l3); flex-shrink: 0; }
+body.split .hb-ctl .wide-only { display: none; }
+body.split .hb-ctls { gap: 0; margin-left: 4px; }
+/* a line under the title for what the agent found or did */
+.f-note { font-size: 13px; line-height: 1.45; color: var(--t2); }
+.f-bad { color: var(--gp-danger-text); font-weight: 500; }
+.f-sum p { margin: 0; }
+.f-sum p + p { margin-top: 3px; }
+.f-sumrun { display: inline-flex; gap: 7px; align-items: center; }
+.f-sumrun .ci-spin, .ci-spin.ag { border-top-color: var(--gp-suggestion); }
+.f-tick { margin-left: auto; font: 11.5px var(--tv-font); color: var(--t3); font-variant-numeric: tabular-nums; }
+/* the agent working: the card quiets to a waiting box; omp reports nothing until it ends, so an eased bar creeps along the bottom edge */
+.f-act .hb-stack.t-agent { position: relative; overflow: hidden; background: var(--sf-shade); border-color: var(--l2); }
+.f-act .t-agent .hb-title-t { color: var(--t2); }
+.f-act .t-agent.gp-sr-row-on { border-color: var(--gp-blue-line); box-shadow: 0 0 0 1px var(--gp-blue-line); }
+.f-prog { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--gp-suggestion); transform-origin: left; animation-name: f-prog; animation-fill-mode: forwards; animation-timing-function: cubic-bezier(0.1, 0.7, 0.2, 1); }
+@keyframes f-prog { from { transform: scaleX(0.02); } to { transform: scaleX(0.92); } }
+/* agent model menu: models, then the effort as one segmented control */
+.f-eff { display: flex; gap: 2px; margin: 4px 2px 2px; padding: 2px; border-radius: var(--r-ctl); background: var(--chip-bg); }
+.f-eff span { flex: 1 1 0; padding: 3px 0; border-radius: calc(var(--r-ctl) - 2px); font-size: 12px; text-align: center; color: var(--t2); cursor: pointer; }
+.f-eff span.on { background: var(--card); color: var(--t1); font-weight: 600; box-shadow: 0 1px 2px light-dark(rgba(20, 30, 60, 0.12), rgba(0, 0, 0, 0.5)); }
+.hb-pop-foot { padding: 6px 8px 2px; font-size: 12px; color: var(--t3); white-space: nowrap; }
+/* toast: Tern's, drawn here at the bottom of the block */
+.pane-hub { position: relative; }
+.f-toast { position: absolute; left: 50%; bottom: 56px; z-index: 30; display: flex; gap: 8px; align-items: center; padding: 7px 12px; border-radius: var(--r-ctl); background: var(--card); box-shadow: inset 0 0 0 1px var(--l3), 0 8px 24px -10px light-dark(rgba(30, 42, 90, 0.3), rgba(0, 0, 0, 0.7)); font-size: 13px; color: var(--t1); white-space: nowrap; pointer-events: none; opacity: 0; transform: translate(-50%, 6px); transition: opacity var(--gp-dur-out) var(--gp-ease-out), transform var(--gp-dur-in) var(--gp-ease-out); }
+.f-toast.show { opacity: 1; transform: translate(-50%, 0); }
+.f-toast .ok { font-weight: 700; color: var(--gp-added); }
+
+/* To review's own field for adding a PR by link; the PR it finds shows under it before anything is added */
+.f-add { display: flex; gap: 10px; align-items: center; padding: 8px 12px 8px 14px; border: 1px dashed var(--l3); border-radius: var(--r-ctl); color: var(--t3); cursor: text; transition: border-color 140ms ease, background-color 140ms ease; }
+.f-add:focus-within { border-style: solid; border-color: var(--gp-blue-line); background: var(--card); }
+.f-add-plus { font-size: 15px; line-height: 1; color: var(--t3); }
+.f-add input { flex: 1 1 auto; min-width: 0; padding: 0; border: 0; outline: none; background: transparent; font: 13px var(--sans); color: var(--t1); }
+.f-add input::placeholder { color: var(--t3); }
+@media (hover: hover) and (pointer: fine) { .f-add:hover { border-color: var(--t4); } }
+.f-add-msg { padding: 0 2px; font-size: 12.5px; color: var(--t3); }
+.f-link { display: flex; flex-direction: column; gap: 3px; padding: 11px 16px 12px; border: 1px solid var(--gp-blue-wash-line); border-radius: var(--r-ctl); background: var(--gp-blue-wash); }
+.f-link-t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; font-weight: 600; color: var(--t1); }
+.f-link .hb-meta { color: var(--t2); }
+.f-link .f-acts { padding-top: 7px; }
+/* a bot's review, shown so it isn't mistaken for missed feedback; on waiting cards it sits on the free chip line */
+.f-botnote { font-size: 12px; color: var(--t3); white-space: nowrap; }
+/* selecting several: a blue box takes the gutter's place; the selection bar sits at the top of its column */
+.f-marked, .f-marked.gp-sr-row-on { background: var(--gp-blue-wash) !important; }
+.f-box { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; border-radius: 4px; font-size: 10px; font-weight: 700; line-height: 1; color: #fff; background: var(--gp-blue-fill); flex-shrink: 0; align-self: center; }
+.f-batch { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; padding: 8px 12px 8px 14px; border: 1px solid var(--gp-blue-wash-line); border-radius: var(--r-ctl); background: var(--gp-blue-wash); }
+.f-batch .f-acts { padding-top: 0; margin-left: auto; }
+.f-batch-n { font-size: 13px; font-weight: 600; color: var(--gp-blue-ink); }
+.f-batch .f-ask { padding: 0; }
+.f-batch-list { flex-basis: 100%; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.f-batch-row { display: flex; gap: 8px; align-items: baseline; min-width: 0; }
+.f-batch-row .hb-title-t { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.f-batch-row .hb-num { flex-shrink: 0; }
+.hb-fold .sp { flex-grow: 1; }
+.hb-fold .f-foldbtn { display: flex; gap: 8px; align-items: center; padding: 1px 5px 1px 10px; font-size: 12px; color: var(--t2); }
+/* Next up, three neutral placements to compare (nextv=strip|header|title) */
+.f-up { align-self: flex-start; max-width: 100%; display: flex; gap: 10px; align-items: center; min-width: 0; padding: 7px 7px 7px 14px; border: 1px solid var(--l2); border-radius: var(--r-ctl); background: var(--sf-shade); cursor: pointer; transition: border-color 140ms ease; }
+@media (hover: hover) and (pointer: fine) { .f-up:hover { border-color: var(--l3); } }
+.f-up-l { flex-shrink: 0; font-size: 12.5px; color: var(--t3); }
+.f-up .f-chip { color: #fff; }
+.f-up .f-chip.red { background: var(--gp-danger-fill); }
+.f-up .f-chip.blue { background: var(--gp-blue-fill); }
+.f-up-t { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; font-weight: 500; color: var(--t1); }
+.f-up-m { flex-shrink: 0; font: 12px var(--tv-font); color: var(--t3); }
+.f-up .gp-btn { flex-shrink: 0; display: flex; gap: 8px; align-items: center; padding: 2px 5px 2px 10px; background: var(--card); border-color: var(--l3); color: var(--t1); }
+.hb-up { display: inline-flex; gap: 7px; align-items: center; margin-right: 6px; padding: 2px 5px 2px 8px; border: 1px solid transparent; border-radius: var(--r-ctl); background: transparent; font-size: 12.5px; color: var(--t2); white-space: nowrap; cursor: pointer; }
+.hb-up b { font-weight: 600; color: var(--t1); }
+@media (hover: hover) and (pointer: fine) { .hb-up:hover { background: var(--l1); border-color: var(--l3); } }
+.hb-up-title { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; color: var(--t3); white-space: nowrap; cursor: pointer; }
+.hb-up-title b { font-weight: 600; color: var(--t2); }
+body.split .f-up-m, body.split .hb-up .wide-only { display: none; }
+/* ? shows every key, grouped; the hint bar keeps only what applies to the selected card */
+.f-help { position: absolute; inset: 0; z-index: 40; display: none; align-items: center; justify-content: center; background: light-dark(rgba(20, 30, 60, 0.12), rgba(0, 0, 0, 0.45)); }
+.f-help.show { display: flex; }
+.f-help-card { display: flex; gap: 28px; padding: 18px 22px 16px; border-radius: var(--r-card); background: var(--card); box-shadow: inset 0 0 0 1px var(--l3), 0 24px 60px -24px light-dark(rgba(30, 42, 90, 0.35), rgba(0, 0, 0, 0.8)); }
+.f-help-col { display: flex; flex-direction: column; gap: 5px; min-width: 190px; }
+.f-help-h { padding-bottom: 4px; font-size: 12.5px; font-weight: 600; color: var(--t2); }
+.f-help-row { display: flex; gap: 10px; align-items: center; font-size: 13px; color: var(--t1); }
+.f-help-row .kbd { min-width: 28px; justify-content: center; }
+body.split .f-help-card { flex-direction: column; gap: 14px; }
+.hb-empty { padding: 14px 10px; font-size: 13.5px; color: var(--t3); }
+
+@media (hover: hover) and (pointer: fine) { .hb-fold:hover { background: var(--l1); } }
+@media (prefers-reduced-motion: reduce) {
+  .hb-fold-rows { animation: gp-fade-in var(--gp-dur-out) ease; }
+  .hb-fold .chev { transition: none; }
+  .ci-spin { animation: none; border-color: var(--gp-changed); }
+  .ci-spin.ag { border-color: var(--gp-suggestion); }
+  .ci-pop .ci-g { animation: gp-fade-in var(--gp-dur-in) ease; }
+  .ci-spin.out { transform: none; filter: none; }
+  .f-leave { transform: none; }
+  .f-arrive { animation: gp-fade-in var(--gp-dur-in) ease, f-flash 1600ms ease; }
+  .hb-pop.anim { animation: gp-fade-in var(--gp-dur-in) ease; }
+  .f-prog { animation: none; transform: scaleX(0.5); opacity: 0.6; }
+  .f-toast, .f-toast.show { transform: translate(-50%, 0); }
+}
+</style>
+</head>
+<body>
+<div class="gp-root app">
+  <div class="tabbar"><span class="tab">Default</span><span class="tab">Review · #350</span><span class="tab tab-on">Pull requests</span></div>
+  <div class="win">
+    <div class="pane pane-term"><div class="dim">~/Coding_Projects/tandem (main)</div><div>$ pnpm test --filter scheduler</div><div style="color:var(--ok)">✓ 214 passed</div><div class="dim">~/Coding_Projects/tandem (main)</div><div>$ ▍</div></div>
+    <div class="pane pane-hub"><div class="hub" id="hub"></div><div class="f-toast" id="toast"></div><div class="f-help" id="help"></div></div>
+  </div>
+  <div class="statusline"><span class="sl-seg">⎇ main</span><span class="sl-seg">tandem · 2 tasks running</span><span class="sl-sp"></span><span class="sl-seg sl-pr" id="slpr"></span><span class="sl-seg">UTF-8</span></div>
+</div>
+<div class="mock">
+  <span id="vlabel"></span>
+  <div class="mseg" id="vseg"></div>
+  <div class="mseg" id="wseg"><button data-w="wide">Wide</button><button data-w="split">Split</button></div>
+  <div class="mseg">Demo<button data-demo="ci">Checks pass</button><button data-demo="approve">Approval</button><button data-demo="agent">Agent fix</button><button data-demo="mergefail">Merge fails</button></div>
+  <div class="mseg" id="aseg"><button data-actv="corner">Corner</button><button data-actv="below">Below</button><button data-actv="bar">Bar</button></div>
+  <div class="mseg" id="nseg">Next<button data-nextv="strip">Strip</button><button data-nextv="header">Header</button><button data-nextv="title">Title</button></div>
+  <div class="mseg"><button data-go="review-fix.html">Review fix</button></div>
+  <div class="mseg"><button id="theme"></button></div>
+</div>
+<script>
+const MIN = 1, H = 60, D = 1440, ME = 'jdeocampo99';
+const R = { tg: 'tagalog-learning-app/Tagalingo-App', api: 'tagalog-learning-app/tagalingo-api', td: 'jdeocampo99/tandem', pg: 'jdeocampo99/tern-pr-guide', tn: 'jdeocampo99/tern', df: 'jdeocampo99/dotfiles', aw: 'acme/web' };
+const short = r => r.split('/')[1];
+// Authored. [repo, num, title, +, -, updatedAgo, ci, ciPass, ciTotal, review, conflict, threads, tandem, draft]
+const MINE = [
+  ['tg',188,'Lessons: replay the audio clip on tap without restarting the card',212,40,2*H,'pass',4,4,'none',false,0,'',false],
+  ['tg',186,'Spaced repetition: schedule reviews by the learner\'s local midnight',96,31,9*H,'pass',4,4,'1of2',true,0,'resolving conflicts',false],
+  ['tg',183,'Onboarding: pick a dialect before the placement quiz',340,122,1*D,'none',0,0,'none',true,0,'',true],
+  ['tg',181,'Flashcards: keep the flipped state when the deck reshuffles',58,19,2*D,'pass',4,4,'ok',false,0,'',false],
+  ['tg',179,'Streaks: grace day for travelers crossing time zones',145,22,3*D,'none',0,0,'none',true,0,'',false],
+  ['tg',177,'Grammar notes: render baybayin glyphs with the bundled font',410,12,4*D,'pass',4,4,'none',true,0,'',false],
+  ['tg',174,'Pronunciation: show the stress mark on the syllable it falls on',188,64,5*D,'none',0,0,'none',true,0,'',false],
+  ['tg',171,'Sync: retry progress uploads with backoff when offline',122,48,12*D,'fail',3,4,'none',true,0,'',false],
+  ['tg',169,'Quiz: accept both "po" and "ho" in polite answers',34,6,6*D,'none',0,0,'none',true,0,'',false],
+  ['tg',167,'Settings: daily reminder time picker respects 24h locale',71,30,7*D,'pass',4,4,'none',false,0,'',false],
+  ['tg',165,'Vocab: group words by root (salita, magsalita, pagsasalita)',520,88,8*D,'none',0,0,'none',true,0,'',true],
+  ['tg',162,'Accessibility: larger tap targets on the answer chips',44,40,9*D,'pass',4,4,'ok',false,0,'',false],
+  ['tg',160,'Stories: audio-synced highlighting for read-along',760,140,10*D,'none',0,0,'none',true,0,'',true],
+  ['tg',158,'Leaderboard: hide learners who opted out of rankings',39,11,11*D,'pass',4,4,'none',true,0,'',false],
+  ['tg',155,'Analytics: drop the duplicate lesson_complete event',12,30,13*D,'none',0,0,'none',true,0,'',false],
+  ['tg',152,'Offline packs: download a unit in the background',610,95,14*D,'none',0,0,'none',true,0,'',true],
+  ['tg',149,'Dark mode: fix the low-contrast hint text on cards',18,9,15*D,'pass',4,4,'ok',false,0,'',false],
+  ['tg',147,'Tests: snapshot the lesson summary screen',230,0,16*D,'none',0,0,'none',false,0,'',false],
+  ['tg',144,'Paywall: restore purchases on a fresh install',66,21,18*D,'pass',4,4,'none',false,0,'',false],
+  ['tg',141,'Chore: bump Expo SDK and fix the deprecated imports',890,860,21*D,'none',0,0,'none',false,0,'',false],
+  ['td',421,'feat(scheduler): retry a stalled worker from its last checkpoint',412,88,40*MIN,'pend',4,5,'1of2',false,0,'rerunning CI',false],
+  ['td',418,'fix(session): drop duplicate receipts when a coordinator restarts',96,41,5*H,'fail',4,5,'none',true,0,'',false],
+  ['td',409,'refactor(router): one table owns route confidence thresholds',230,310,1*D,'pass',5,5,'none',false,0,'drafting',true],
+  ['td',402,'feat(cli): tandem logs follows a task across restarts',180,26,4*D,'pass',5,5,'ok',true,0,'',false],
+  ['td',397,'docs: the coordinator lifecycle, with a diagram',140,8,9*D,'pass',5,5,'none',false,0,'',false],
+  ['td',391,'fix(worktree): prune stale locks on startup',52,14,16*D,'pass',5,5,'none',true,0,'',false],
+  ['pg',58,'Guided view: steps point at removed lines too',188,52,3*H,'pass',3,3,'changes',false,0,'',false],
+  ['pg',55,'Picker: recently opened PRs from any repo',140,22,3*H,'pass',3,3,'ok',true,0,'',false],
+  ['pg',52,'Files: counts in fixed right-aligned columns',64,30,3*D,'pass',3,3,'ok',false,0,'',false],
+  ['pg',49,'Code scrolls sideways per run of lines',210,96,6*D,'pass',3,3,'none',false,0,'',false],
+  ['tn',233,'Status line: plugins can contribute a clickable segment',320,40,2*D,'pend',2,6,'none',false,0,'',false],
+  ['tn',229,'Toasts: plugin API with action buttons',260,18,8*D,'none',0,0,'none',true,0,'',false],
+  ['aw',404,'Checkout: keep the promo code when the cart re-prices',64,18,6*H,'pass',12,12,'1of2',false,2,'',false],
+  ['aw',396,'Search: highlight the matched part of each suggestion',75,12,10*D,'pass',12,12,'ok',false,0,'',false],
+  ['api',77,'Lessons API: paginate the unit list',150,44,5*D,'none',0,0,'none',true,0,'',false],
+  ['df',31,'zsh: lazy-load nvm',22,9,30*D,'none',0,0,'none',false,0,'',false],
+];
+// Others'. [repo, num, title, author, +, -, updatedAgo, state, external, newCommits, ci, ciPass, ciTotal]
+const OTHERS = [
+  ['aw',415,'Settings: move notification prefs into their own page','maria-k',540,320,4*H,'requested',false,0,'pend',9,12],
+  ['aw',412,'Search: debounce the typeahead and cancel stale requests','maria-k',210,95,25*MIN,'approved',false,3,'pass',12,12],
+  ['aw',399,'Images: serve AVIF with a WebP fallback','devon',180,40,2*D,'waiting',false,0,'fail',11,12],
+  ['td',426,'docs: fix the onboarding command for fish shell','lchen-oss',12,4,3*D,'commented',true,0,'none',0,0],
+  ['aw',407,'Cart: show the delivery estimate under each item','devon',96,20,1*D,'approved',false,0,'pass',12,12],
+];
+/* bot reviews and comments on a PR: shown, never counted as feedback to answer */
+const BOTS = { 188: 'coderabbitai[bot]', 58: 'github-actions[bot]' };
+const prs = [
+  ...MINE.map(m => ({ role: 'mine', repo: R[m[0]], num: m[1], title: m[2], author: ME, adds: m[3], dels: m[4], age: m[5], ci: m[6], ciPass: m[7], ciTotal: m[8], review: m[9], conflict: m[10], threads: m[11], tandem: m[12], draft: m[13], bot: BOTS[m[1]] })),
+  ...OTHERS.map(o => ({ role: 'rev', repo: R[o[0]], num: o[1], title: o[2], author: o[3], adds: o[4], dels: o[5], age: o[6], state: o[7], external: o[8], newCommits: o[9], ci: o[10], ciPass: o[11], ciTotal: o[12] })),
+];
+const STALE = 7 * D;
+const ago = m => m < H ? `${m}m` : m < D ? `${Math.round(m / H)}h` : `${Math.round(m / D)}d`;
+const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+
+/* One bucket per PR, so each PR shows once. Your move comes from someone waiting on you or a fresh
+   problem on your own PR; old conflicts and failures stay in Inactive so 16 conflicts don't flood it. */
+function sort(p) {
+  const B = (b, verb, tone, why, rank = 9) => ({ b, verb, tone, why, rank });
+  if (p.role === 'rev') {
+    if (p.state === 'approved' && p.newCommits) return B('act', 'Re-review', 'blue', `${p.newCommits} new commits since you approved`, 0);
+    if (p.state === 'requested') return B('act', 'Review', 'blue', `@${p.author} asked ${ago(p.age)} ago`, 1);
+    if (p.state === 'added') return B('act', 'Review', 'blue', 'Added by you', 1);
+    if (p.state === 'approved') return B('ready', 'Approved', 'green', 'Approved · up to date');
+    if (p.state === 'waiting') return B('wait', 'Changes requested', 'wait', 'Changes requested · awaiting a push');
+    return B('wait', 'Commented', 'wait', `Commented · awaiting a reply${p.external ? ' · external' : ''}`);
+  }
+  if (p.tandem) return B('wait', 'Tandem', 'wait', `Tandem is ${p.tandem}`);
+  if (p.draft) return B('idle', 'Draft', 'idle', 'Draft');
+  /* Needs fixes: a failing check, feedback from a person (bots excluded), or a merge conflict, on a PR
+     with activity in the last 7 days. Every reason shows; the first sets its place in Priority order. */
+  const why = [];
+  /* the merge queue rejected it: one step from done, so it comes first */
+  if (p.mergeFail) why.push(['Merge failed', p.mergeFail, 'Merge failed', 1]);
+  if (p.review === 'changes') why.push(['Address changes', 'Changes requested by @maria-k', 'Changes requested', 2]);
+  if (p.threads) why.push(['Reply', `${p.threads} unresolved comments`, 'Unresolved comments', 3]);
+  if (p.ci === 'fail') why.push(['Fix checks', `typecheck failing · ${p.ciPass}/${p.ciTotal}`, 'Checks failing', 4]);
+  if (p.conflict) why.push(['Resolve conflicts', 'Conflicts with main', 'Conflicts', 5]);
+  if (why.length && p.age <= STALE) return { ...B('act', why[0][0], 'red', why[0][1], why[0][3]), reasons: why };
+  if (!why.length && p.review === 'ok') return B('ready', 'Merge', 'green', 'Approved · checks pass');
+  const idleDays = `no activity for ${Math.round(p.age / D)} days`;
+  if (why.length) return B('idle', why[0][2], 'idle', `${why.map(w => w[2]).join(' · ')} · ${idleDays}`);
+  if (p.age > STALE) return B('idle', 'Stale', 'idle', `No activity for ${Math.round(p.age / D)} days`);
+  if (p.ci === 'pend') return B('wait', 'Checks running', 'wait', `Checks running ${p.ciPass}/${p.ciTotal}`);
+  if (p.review === '1of2') return B('wait', 'In review', 'wait', '1 of 2 approvals');
+  return B('wait', 'In review', 'wait', 'Awaiting review');
+}
+prs.forEach(p => p.s = sort(p));
+
+/* Card actions. Agent fixes run the reader's omp in a treehouse worktree and never push; a PR Tandem watches
+   is handed to Tandem. Summaries are read-only and run on click. */
+const CLONED = new Set(Object.values(R).filter(r => r !== R.api));
+const MODELS = [['anthropic', 'claude-sonnet-4.5', ['low', 'medium', 'high']], ['anthropic', 'claude-opus-4.1', ['low', 'medium', 'high']], ['openai', 'gpt-5-codex', ['low', 'medium', 'high']], ['google', 'gemini-2.5-pro', []]];
+const SUMS = { 404: { verdict: 'Reply to @maria-k', lines: ['@maria-k asks whether the promo code should still apply after the currency changes.', '@devon suggests a clearer name for the reprice test. No reply needed.'] } };
+/* How each repo merges. Precedence: the reader's own choice, then what the repo declares (.aviator/config.yml,
+   a GitHub merge queue), then a habit learned from its last merges (a bot merged right after a "/…" comment;
+   shown as a suggestion until confirmed), then GitHub's default method for the reader. Kept per repo in kv. */
+const KINDS = [['squash', 'Squash and merge', 'GitHub'], ['merge', 'Create a merge commit', 'GitHub'], ['rebase', 'Rebase and merge', 'GitHub'], ['queue', 'Merge when ready', 'GitHub merge queue'], ['comment', 'Comment a command', 'e.g. /merge'], ['label', 'Add a label', 'e.g. ready-to-merge']];
+const HOW = {
+  [R.aw]: { kind: 'comment', text: '/aviator merge', cancel: '/aviator cancel', src: 'Detected from .aviator/config.yml' },
+  [R.tg]: { kind: 'comment', text: '/merge', cancel: '', src: 'Learned from the last 8 merges: each was merged by @merge-bot after a /merge comment', suggested: true },
+  [R.pg]: { kind: 'rebase', src: 'Your default on GitHub' },
+};
+const how = p => HOW[p.repo] || (HOW[p.repo] = { kind: 'squash', src: 'Your default on GitHub' });
+const direct = m => ['squash', 'merge', 'rebase'].includes(m.kind);
+const mergeLabel = p => { const m = how(p); return direct(m) ? KINDS.find(k => k[0] === m.kind)[1] : m.kind === 'queue' ? 'Merge when ready' : 'Merge'; };
+const mergeNote = p => { const m = how(p); return m.kind === 'comment' ? `Comments ${m.text}` : m.kind === 'label' ? `Adds the ${m.text} label` : m.kind === 'queue' ? 'Adds to the merge queue' : ''; };
+const fixable = p => (p.s.reasons || []).filter(r => r[0] !== 'Reply');
+const hasReply = p => (p.s.reasons || []).some(r => r[0] === 'Reply');
+const agentLabel = p => !fixable(p).length ? 'Summarize' : p.repo === R.td ? 'Hand off to Tandem' : 'Fix with agent';
+const clock = t0 => { const s = Math.max(0, Math.round((Date.now() - t0) / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+const mineN = n => prs.find(p => p.role === 'mine' && p.num === n);
+
+/* a branch behind main with no conflicts: strict branch protection blocks the merge until it's updated */
+const BEHIND = new Set([181]);
+prs.forEach(p => { if (p.role === 'mine' && BEHIND.has(p.num)) p.behind = true; });
+
+const S = { v: 'F', w: 'wide', sel: null, q: '', idleOpen: false, rail: 'next', tab: 'mine', repos: new Set(), sort: 'repo', menu: null, model: 0, effort: 'high', confirm: null, act: 'corner', more: null, marked: new Set(), batch: null };
+const q = new URLSearchParams(location.search);
+S.v = q.get('v') || 'F'; S.w = q.get('w') || 'wide'; if (q.get('t')) document.documentElement.style.colorScheme = q.get('t'); if (q.get('idle')) S.idleOpen = true; if (q.get('rail')) S.rail = q.get('rail'); if (q.get('tab')) S.tab = q.get('tab');
+if (q.get('sort')) S.sort = q.get('sort'); if (q.get('repos')) q.get('repos').split(',').forEach(r => S.repos.add(Object.values(R).find(x => short(x) === r))); if (q.get('menu')) S.menu = { kind: q.get('menu'), hl: -1, anim: false };
+/* agent=1 seeds one card in every agent state, for review side by side */
+if (q.get('agent')) {
+  mineN(169).agent = { st: 'run', id: 0, t0: Date.now() - 42000, dur: 90000, stage: 'resolving 2 conflicts', note: 'Merged main · 1 file resolved automatically · 2 conflicts left for the agent' };
+  mineN(177).agent = { st: 'ready', done: 'Merged main, resolved 2 conflicts', tokens: '1.8k' };
+  mineN(174).agent = { st: 'fail', why: 'typecheck fails after the merge' };
+  mineN(77).agent = { st: 'clone' };
+  mineN(404).summary = { st: 'done', ...SUMS[404] };
+}
+if (q.get('sel')) { const [repo, n] = q.get('sel').split('#'); const p = prs.find(x => short(x.repo) === repo && x.num === +n); if (p) S.sel = `${p.repo}#${p.num}`; }
+if (q.get('confirm')) S.confirm = S.sel;
+if (q.get('act')) S.act = q.get('act');
+S.nextv = q.get('nextv') || 'strip';
+/* Next up: everything that needs you across both tabs, most urgent first. . walks it; the hub never jumps on open. */
+function nextList() {
+  const r = p => p.agent?.st === 'ready' || p.agent?.st === 'reviewed' ? 0.5 : p.s.rank;
+  return prs.filter(p => !p.merged && !p.closed && p.s.b === 'act' && p.agent?.st !== 'run').sort((x, y) => r(x) - r(y) || y.age - x.age);
+}
+/* the hub opens without moving the cursor; Next up in the tab row is the way into the queue */
+
+/* A GitHub PR link or owner/repo#123 in the search field is a PR to open or keep, not a filter */
+const LINK = /github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)|^([\w.-]+\/[\w.-]+)#(\d+)$/;
+function linked() {
+  const m = (S.addq || '').trim().match(LINK);
+  if (!m) return null;
+  const repo = m[1] || m[3], num = +(m[2] || m[4]), p = prs.find(x => x.repo.toLowerCase() === repo.toLowerCase() && x.num === num && !x.merged);
+  return { repo: p?.repo || repo, num, p, title: p?.title || 'Profile: show the learner\'s streak on their avatar', author: p?.author || 'lchen-oss' };
+}
+function addBox() {
+  const t = (S.addq || '').trim(), L = linked();
+  const field = `<label class="f-add"><span class="f-add-plus">+</span><input id="addq" placeholder="Paste a pull request link to review" value="${esc(S.addq || '')}" autocomplete="off"><span class="kbd">N</span></label>`;
+  if (!t) return field;
+  if (!L) return field + `<div class="f-add-msg">A pull request link looks like github.com/owner/repo/pull/123</div>`;
+  const where = !L.p ? '' : L.p.role === 'mine' ? ' · your pull request, already on the board' : ' · already in Review requests';
+  const acts = L.p ? [['linkShow', 'Show on the board', '⏎', 'primary'], ['linkOpen', 'Open', '⇧⏎']] : [['linkAdd', 'Add to review', '⏎', 'primary'], ['linkOpen', 'Open without adding', '⇧⏎']];
+  return field + `<div class="f-link"><span class="f-link-t">${esc(L.title)}</span><span class="hb-meta">${L.repo} #${L.num} · @${L.author}${where}</span><span class="f-acts">${btns(acts)}</span></div>`;
+}
+const match = p => { const t = S.q.trim().toLowerCase(); return !t || p.title.toLowerCase().includes(t) || p.repo.toLowerCase().includes(t) || String(p.num).includes(t.replace('#', '')); };
+const vis = () => prs.filter(p => !p.merged && !p.closed && match(p) && (!S.repos.size || S.repos.has(p.repo)));
+const SORTS = [['repo', 'Repository', 'Priority within each'], ['priority', 'Priority', 'What to do first'], ['newest', 'Newest first', 'Most recent activity'], ['oldest', 'Oldest first', 'Waiting longest']];
+/* Priority, per column: your-turn PRs by kind (a person waiting on you before a machine), then longest waiting;
+   Ready to merge longest ready first, since conflicts grow with time; columns that need nothing, newest activity. */
+const priority = b => b === 'act' ? (x, y) => x.s.rank - y.s.rank || y.age - x.age : b === 'ready' ? (x, y) => y.age - x.age : (x, y) => x.age - y.age;
+const sorted = (ps, b) => [...ps].sort(S.sort === 'newest' ? (x, y) => x.age - y.age : S.sort === 'oldest' ? (x, y) => y.age - x.age : S.sort === 'repo' ? (x, y) => short(x.repo).localeCompare(short(y.repo)) || priority(b)(x, y) : priority(b));
+const byB = (list, b) => list.filter(p => p.s.b === b).sort(b === 'act' ? (x, y) => x.s.rank - y.s.rank || x.age - y.age : (x, y) => x.age - y.age);
+const key = p => `${p.repo}#${p.num}`;
+const on = p => `${S.sel === key(p) ? 'gp-sr-row-on' : ''} ${S.marked.has(key(p)) ? 'f-marked' : ''} ${S.arrive === key(p) ? `f-arrive ${S.arriveBad ? 'f-arrive-bad' : ''}` : ''}`;
+/* Space selects several: mergeable Ready cards (not behind, not queued), or Inactive PRs; one group at a time */
+const groupOf = p => p.role === 'mine' && p.s.b === 'ready' && !p.behind && !p.queued && !p.merging ? 'ready' : p.role === 'mine' && p.s.b === 'idle' ? 'idle' : null;
+const markedIn = g => prs.filter(p => S.marked.has(key(p)) && groupOf(p) === g);
+const ci = p => p.ci === 'pass' ? `<span class="hb-ci ci-ok">✓ ${p.ciPass}/${p.ciTotal}</span>` : p.ci === 'fail' ? `<span class="hb-ci ci-bad">✕ ${p.ciPass}/${p.ciTotal}</span>` : p.ci === 'pend' ? `<span class="hb-ci">• ${p.ciPass}/${p.ciTotal}</span>` : `<span class="hb-ci">–</span>`;
+/* the checks mark; in a waiting row the running spinner sits in the status chip, so only the count shows here */
+function checks(p, spinnerInChip = false) {
+  if (p.ci === 'none') return '';
+  const n = `${p.ciPass}/${p.ciTotal}`, pop = S.pop === key(p) ? 'ci-pop' : '';
+  if (p.ci === 'pass') return `<span class="ci-m ok ${pop}" title="All ${p.ciTotal} checks passed"><span class="ci-g">✓</span>${n}</span>`;
+  if (p.ci === 'fail') return `<span class="ci-m bad" title="${p.ciTotal - p.ciPass} of ${p.ciTotal} checks failing"><span class="ci-g">✕</span>${n}</span>`;
+  return `<span class="ci-m" title="${p.ciPass} of ${p.ciTotal} checks passed, the rest running">${spinnerInChip ? '' : '<i class="ci-spin"></i>'}${n}</span>`;
+}
+/* Waiting rows say who has the ball, starting with "Waiting on" or what you already did; the column heading
+   adds that nothing is needed from you. A running spinner sits in the chip of whatever is running. */
+function status(p) {
+  if (p.role === 'rev') return p.state === 'waiting' ? `<span class="st st-red">You requested changes</span>` : `<span class="st st-neutral">You commented</span>`;
+  const spin = p.ci === 'pend' ? '<i class="ci-spin"></i>' : '';
+  if (p.tandem) return `<span class="st st-purple ${spin ? 'st-run' : ''}">${spin}Waiting on Tandem <b>· ${p.tandem}</b></span>`;
+  if (spin) return `<span class="st st-neutral st-run">${spin}Waiting on checks</span>`;
+  return `<span class="st st-neutral">${p.review === '1of2' ? 'Waiting on 1 more approval' : 'Waiting on review'}</span>`;
+}
+const who = p => p.role === 'rev' ? ` · @${p.author}` : '';
+const av = (name, cls = '') => `<span class="f-av ${cls}" title="@${name}">${name.split(/[-_]/).map(w => w[0]).join('').slice(0, 2).toUpperCase()}</span>`;
+
+/* the selected card's actions, each with its key; a click and the key run the same ACT entry */
+const btn = (act, label, k, primary = false, cls = '') => `<button class="gp-btn gp-btn-sm ${primary ? 'gp-btn-primary' : ''} ${cls}" data-act="${act}">${label}<span class="kbd">${k}</span></button>`;
+const chip = t => `<span class="f-chip hb-verb">${t}</span>`;
+const whyT = t => `<span class="hb-why">${t}</span>`;
+
+/* the merge method, chosen per repository inside the card; a comment or label method takes its text here */
+function methodPanel(p, M) {
+  const opts = KINDS.map(([id, label, sub], i) => `<div class="hb-opt ${M.kind === id ? 'on' : ''} ${M.hl === i ? 'hl' : ''}" data-kind="${id}"><span class="tick">${M.kind === id ? '✓' : ''}</span>${label}<span class="sub">${sub}</span></div>`).join('');
+  const field = (f, label, ph) => `<label class="f-in">${label}<input data-field="${f}" value="${esc(M[f] || '')}" placeholder="${ph}" autocomplete="off"></label>`;
+  const inputs = M.kind === 'comment' ? field('text', 'Comment', '/merge') + field('cancel', 'To cancel', 'Optional, e.g. /cancel') : M.kind === 'label' ? field('text', 'Label', 'ready-to-merge') : '';
+  return `<div class="f-method"><div class="f-method-h">How ${short(p.repo)} merges</div>${opts}${inputs}<div class="f-src">${how(p).src}</div><div class="f-method-b">${btn('methodSave', 'Save', '⏎', true)}${btn('methodClose', 'Cancel', 'Esc', false, 'gp-btn-ghost')}</div></div>`;
+}
+/* A card's actions as data, so each placement draws the same list: [action, label, key, look]. `flow` is a
+   question or chooser that replaces the buttons while it is open; `status` is a running merge. */
+const BTN_CLS = { primary: '', merge: 'f-merge', ghost: 'gp-btn-ghost', danger: 'f-danger', confirm: 'f-confirm' };
+const btns = list => list.map(([a, l, k, c = '']) => btn(a, l, k, c === 'primary', BTN_CLS[c] || '')).join('');
+function actionsOf(p) {
+  const s = p.s, A = p.agent, sum = p.summary, k = key(p);
+  if (s.b === 'ready') {
+    const Q = p.queued, m = how(p), M = S.method?.k === k ? S.method : null;
+    const waitText = m.kind === 'queue' ? 'In the merge queue' : m.text?.startsWith('/aviator') ? `Queued in Aviator <b>· ${Q?.pos} in line</b>` : m.kind === 'label' ? `Labeled ${m.text} <b>· waiting for the merge</b>` : `Commented ${m.text} <b>· waiting for the merge</b>`;
+    const status = p.merging ? `<span class="st st-neutral st-run"><i class="ci-spin"></i>Merging…</span>` : !Q ? '' : `<span class="st st-neutral st-run"><i class="ci-spin"></i>${Q.st === 'pending' ? (m.kind === 'comment' ? `Posting ${m.text}…` : 'Sending…') : waitText}</span>`;
+    const canCancel = m.kind === 'label' || m.kind === 'queue' || !!m.cancel;
+    const flow = M ? methodPanel(p, M)
+      : S.confirm === k ? `<span class="f-ask">${mergeLabel(p)} into main?</span>${btns([['confirm', 'Confirm', '⌘⏎', 'confirm'], ['cancel', 'Cancel', 'Esc', 'ghost']])}`
+      : S.ask === k ? `<span class="f-ask">${short(p.repo)} seems to merge by commenting ${m.text}.</span><span class="f-src">${m.src}.</span>${btns([['useLearned', `Use ${m.text}`, '⌘⏎', 'merge'], ['method', 'Choose another', ',', 'ghost']])}` : '';
+    const list = p.merging ? [] : Q ? (Q.st === 'queued' && canCancel ? [['dequeue', 'Cancel merge', 'M', 'ghost']] : [])
+      : p.behind ? [['update', 'Update branch', 'U', 'primary'], ['method', 'Merge method', ',', 'ghost']]
+      : [['merge', mergeLabel(p), 'M', 'merge'], ['method', 'Merge method', ',', 'ghost']];
+    return { status, flow, list, hint: !Q && mergeNote(p) ? mergeNote(p) + (m.suggested ? ' · suggested' : '') : '' };
+  }
+  if (p.role === 'rev' && s.b === 'act') return { list: [['openPR', 'Review', '⏎', 'primary'], ...(p.state === 'added' ? [['unadd', 'Remove from Review requests', 'X']] : [])] };
+  /* your PRs that need you, plus In review PRs with a bot review the agent can address */
+  const agentable = p.role === 'mine' && (s.b === 'act' || (s.b === 'wait' && (p.bot || A)));
+  if (!agentable) return s.b === 'wait' ? { list: [['copy', 'Copy link', 'C']], quiet: true } : { list: [] };
+  if (S.discard === k && (A?.st === 'ready' || A?.st === 'reviewed'))
+    return { flow: `<span class="f-ask">Discard the fix? The agent's changes are deleted and nothing is pushed.</span>${btns([['discardOk', 'Discard fix', '⌘⏎', 'danger'], ['cancel', 'Cancel', 'Esc', 'ghost']])}`, list: [] };
+  if (A?.st === 'run') return { list: [['stop', 'Stop', 'A', 'ghost']] };
+  if (A?.st === 'ready') return { list: [['review', 'Review fix', '⏎', 'primary'], ['discard', 'Discard fix', 'D', 'ghost']] };
+  if (A?.st === 'reviewed') return { list: [['push', 'Push to branch', 'P', 'primary'], ['discard', 'Discard fix', 'D', 'ghost']] };
+  if (A?.st === 'fail') return { list: [['agent', 'Try again', 'A', 'primary'], ['worktree', 'Open worktree', 'O']] };
+  if (A?.st === 'clone') return { list: [['clone', `Clone ${short(p.repo)}`, 'A', 'primary'], ['folder', 'Choose folder…', 'O']] };
+  if (s.b === 'wait') return { list: [['agent', 'Fix bot comments', 'A', 'primary'], ['copy', 'Copy link', 'C']] };
+  const list = [];
+  if (fixable(p).length) list.push(['agent', agentLabel(p), 'A', 'primary']);
+  if (hasReply(p) && !sum) list.push(['summarize', 'Summarize', fixable(p).length ? '⇧A' : 'A', fixable(p).length ? '' : 'primary']);
+  return { list };
+}
+/* The card's split button: its main action, with the alternatives behind the attached ▾. CSS shows it in place
+   of the checks and age while the card is hovered or selected. */
+function corner(p, x, sel) {
+  if (x.flow || !x.list.length) return '';
+  const [a, l, k, c] = x.list[0], rest = x.list.slice(1), open = S.more === key(p), ready = p.s.b === 'ready' && a === 'merge';
+  const m = how(p);
+  const rows = ready
+    ? `<div class="hb-pop-h">Merge method · ${short(p.repo)}</div>` + KINDS.map(([id, label]) => `<div class="hb-opt" data-setkind="${id}"><span class="tick">${m.kind === id ? '✓' : ''}</span>${label}${(id === 'comment' || id === 'label') && m.kind === id ? `<span class="sub">${m.text}</span>` : ''}</div>`).join('')
+    : rest.map(([ra, rl, rk]) => `<div class="hb-opt" data-act="${ra}">${rl}<span class="sub"><span class="kbd">${rk}</span></span></div>`).join('');
+  const chev = sel && (ready || rest.length);
+  return `<span class="f-corner"><span class="f-split ${chev ? 'has' : ''}"><button class="f-cbtn f-cbtn-${c || 'plain'} ${sel ? 'on' : ''}" data-act="${a}">${ready ? 'Merge' : l}${sel ? `<span class="kbd">${k}</span>` : ''}</button>${chev ? `<button class="f-cbtn f-cbtn-${c || 'plain'} on f-chev" data-more="1" title="${ready ? 'Merge method' : 'More actions'}">▾</button>` : ''}</span>${open ? `<div class="f-moremenu">${rows}</div>` : ''}</span>`;
+}
+/* stacked row: verb + why, title, what the agent found, repo #num · author, checks, age, then actions by placement */
+function stack(p, showRepo = true) {
+  const s = p.s, A = p.agent, sum = p.summary, sel = S.sel === key(p), x = actionsOf(p);
+  const botNote = p.bot ? `<span class="f-botnote" title="@${p.bot} left a review. Reviews and comments from bots don't count as feedback.">Bot review not counted</span>` : '';
+  const info = `${checks(p, s.b === 'wait')}<span class="hb-age">${ago(p.age)}</span>`;
+  const metaRow = corner => `<div class="hb-l3">${p.role === 'rev' ? av(p.author, 'f-av-sm') : ''}<span class="hb-meta">${showRepo ? short(p.repo) + ' ' : ''}#${p.num}${who(p)}${p.external ? ' · external' : ''}${p.behind ? ' · Behind main' : ''}${p.bot && s.b !== 'wait' ? ` · ${botNote}` : ''}${A?.tokens ? ` · ${A.tokens} tokens` : ''}</span>${corner ? `<span class="f-info">${info}</span>${corner}` : info}</div>`;
+  const below = S.act === 'below' ? (sel || x.flow || x.status) && (x.flow || x.status || x.list.length) ? `<div class="f-acts">${x.status || ''}${x.flow || btns(x.list) + (x.hint ? `<span class="hb-note">${x.hint}</span>` : '')}</div>` : ''
+    : (x.flow || x.status) ? `<div class="f-acts">${x.status || ''}${x.flow || ''}</div>` : '';
+  const cornerHtml = S.act === 'corner' ? corner(p, x, sel) : '';
+  if (s.b === 'ready') {
+    return `<div class="hb-row f-rrow gp-sr-row ${on(p)}" data-row="${key(p)}"><span class="f-ok">${S.marked.has(key(p)) ? '<span class="f-box on">✓</span>' : '✓'}</span><div class="f-rmain"><span class="hb-title-t">${esc(p.title)}</span>${metaRow(cornerHtml)}${below}</div></div>`;
+  }
+  let tone = s.tone, l1, note = '', bar = '';
+  if (s.b === 'wait' && !A) l1 = status(p);
+  else if (p.role === 'mine' && (s.b === 'act' || A)) {
+    const chips = s.b !== 'act' ? status(p) : s.reasons.length > 1 ? s.reasons.map(r => chip(r[0])).join('') : chip(s.verb) + whyT(sum?.st === 'done' ? sum.verdict : s.why);
+    if (A?.st === 'run') {
+      tone = 'agent';
+      l1 = `<span class="st st-purple st-run"><i class="ci-spin ag"></i>Agent <b>· ${A.stage}</b></span><span class="f-tick" data-t0="${A.t0}">${clock(A.t0)}</span>`;
+      note = A.note;
+      bar = `<i class="f-prog" style="animation-duration: ${A.dur}ms; animation-delay: -${Date.now() - A.t0}ms"></i>`;
+    } else if (A?.st === 'ready') { tone = 'blue'; l1 = chip('Fix ready') + whyT(A.done); }
+    else if (A?.st === 'reviewed') { tone = 'blue'; l1 = chip('Reviewed') + whyT('Ready to push · 1 merge commit'); }
+    else {
+      l1 = chips;
+      if (A?.st === 'fail') note = `<span class="f-bad">Couldn't fix: ${A.why}</span>`;
+      else if (A?.st === 'clone') note = `No local copy of ${short(p.repo)}`;
+      if (sum?.st === 'run') note = `<span class="f-sumrun"><i class="ci-spin ag"></i>Summarizing ${p.threads} comments…</span>`;
+      if (sum?.st === 'done') note = `<div class="f-sum">${sum.lines.map(l => `<p>${l}</p>`).join('')}</div>`;
+    }
+  } else l1 = s.b === 'act' ? chip(s.verb) + whyT(s.why) : `<span class="hb-verb v-${s.tone}">${s.verb}</span>${s.verb === s.why ? '' : whyT(s.why)}`;
+  /* every card's action sits at the end of the repo line: that text truncates, so the button never overflows,
+     and the top line keeps the reason at full width */
+  return `<div class="hb-row hb-stack gp-sr-row t-${tone} ${on(p)} ${s.b === 'idle' ? 'hb-quiet' : ''}" data-row="${key(p)}">
+    <div class="hb-l1">${l1}</div>
+    <span class="hb-title-t">${esc(p.title)}</span>
+    ${note ? `<div class="f-note">${note}</div>` : ''}
+    ${metaRow(cornerHtml)}
+    ${below}${bar}
+  </div>`;
+}
+/* line row: optional verb column, #num, title, state, repo, checks, age */
+function line(p, { verbCol = false, repo = false } = {}) {
+  const s = p.s;
+  const state = verbCol ? `<span class="hb-state hb-why">${s.verb === s.why ? '' : s.why}</span>` : `<span class="hb-state v-${s.tone}">${s.b === 'act' || s.b === 'ready' ? `<b class="hb-verb">${s.verb}</b> · ${s.why}` : s.why}</span>`;
+  return `<div class="hb-row hb-line gp-sr-row ${on(p)} ${s.b === 'idle' ? 'hb-quiet' : ''}" data-row="${key(p)}">
+    ${S.marked.has(key(p)) ? '<span class="f-box on">✓</span>' : ''}${verbCol ? `<span class="hb-verbcol hb-verb v-${s.tone}">${s.verb}</span>` : ''}<span class="hb-num">#${p.num}</span><span class="hb-title-t">${esc(p.title)}</span>${state}${repo ? `<span class="hb-repo">${short(p.repo)}</span>` : ''}${ci(p)}<span class="hb-age">${ago(p.age)}</span>
+  </div>`;
+}
+function head(label, n, note = '') { return `<div class="hb-h"><span class="gp-panel-h">${label}</span><span class="hb-n">${n}</span>${note ? `<span class="hb-note">${note}</span>` : ''}</div>`; }
+function fold(idle, rowFn) {
+  if (!idle.length) return '';
+  const conf = idle.filter(p => p.conflict).length, drafts = idle.filter(p => p.draft).length;
+  const bits = [conf && `${conf} with conflicts`, drafts && `${drafts} drafts`].filter(Boolean).join(' · ');
+  const open = S.idleOpen || S.q || markedIn('idle').length;
+  return `<div><div class="hb-fold ${open ? 'open' : ''}" data-fold="1"><span class="chev">▸</span><span class="gp-panel-h">Inactive</span><span class="hb-n">${idle.length}</span><span class="hb-note">${bits} · drafts and pull requests with no activity for 7 days</span>${open && idle.some(p => !p.draft) ? `<span class="sp"></span>${btn('closeAll', 'Close stale', '⇧X', false, 'gp-btn-ghost f-foldbtn')}` : ''}</div>
+    ${open ? `<div class="hb-fold-rows">${batchBar('idle')}${idle.map(rowFn).join('')}</div>` : ''}</div>`;
+}
+/* the selection bar at the top of Ready to merge or Inactive: what's selected, the one action, then a confirm listing them */
+function batchBar(g) {
+  const ps = markedIn(g);
+  if (!ps.length) return '';
+  const verb = g === 'ready' ? 'Merge' : 'Close', k = g === 'ready' ? 'M' : 'X', n = ps.length, noun = n === 1 ? 'pull request' : 'pull requests';
+  if (S.batch === g) {
+    /* at most 5 titles, then a count; how they merge goes on one line under them instead of per row */
+    const shown = ps.slice(0, 5), more = ps.length - shown.length;
+    const rows = shown.map(p => `<div class="f-batch-row"><span class="hb-num">#${p.num}</span><span class="hb-title-t">${esc(p.title)}</span></div>`).join('') + (more ? `<div class="f-batch-row hb-note">and ${more} more</div>` : '');
+    const ways = [...new Set(ps.map(p => mergeNote(p) || mergeLabel(p)))];
+    const note = `<span class="f-src">${g === 'idle' ? 'Closed pull requests can be reopened.' : ways.length === 1 ? ways[0] : 'Each uses its repository\'s merge method'}</span>`;
+    return `<div class="f-batch"><span class="f-ask">${verb} ${n} ${noun}?</span><div class="f-batch-list">${rows}</div>${note}<span class="f-acts">${btns([['batchGo', `${verb} ${n}`, '⌘⏎', g === 'ready' ? 'confirm' : 'danger'], ['batchCancel', 'Cancel', 'Esc', 'ghost']])}</span></div>`;
+  }
+  return `<div class="f-batch f-batch-sel"><span class="f-batch-n">${n} selected</span><span class="f-acts">${btns([[g === 'ready' ? 'batchMerge' : 'batchClose', `${verb} ${n}`, k, g === 'ready' ? 'merge' : ''], ['clearMarks', 'Clear', 'Esc', 'ghost']])}</span></div>`;
+}
+const empty = t => `<div class="hb-empty">${t}</div>`;
+
+/* one board per process, behind Tern's tabs: Your pull requests (authoring) and Review requests (others').
+   To review has its own field for adding any PR by link. */
+function hubF() { return nextUI('strip') + board(); }
+function board() {
+  const L = vis(), list = L.filter(p => p.role === (S.tab === 'rev' ? 'rev' : 'mine'));
+  const rows = ps => {
+    if (S.sort !== 'repo') return ps.map(p => stack(p)).join('');
+    let last = '';
+    return ps.map(p => { const head = p.repo === last ? '' : `<div class="f-repo">${short(p.repo)}<span>${ps.filter(x => x.repo === p.repo).length}</span></div>`; last = p.repo; return head + stack(p); }).join('');
+  };
+  const col = (cls, label, b, none, note = '', pre = '') => { const ps = sorted(list.filter(p => p.s.b === b), b); return `<div class="f-col ${cls}"><div class="f-h"><span class="f-h-t">${label}</span><span class="f-pill">${ps.length}</span>${note ? `<span class="hb-note f-h-note">${note}</span>` : ''}</div>${pre}${b === 'ready' && S.tab === 'mine' ? batchBar('ready') : ''}${ps.length ? rows(ps) : empty(S.repos.size ? 'None in the selected repositories.' : none)}</div>`; };
+  if (S.tab === 'rev') return `<div class="f-board f-rev">`
+    + col('f-act', 'To review', 'act', 'No pull requests to review.', '', addBox()) + col('f-wait', 'Waiting on author', 'wait', 'No pull requests waiting on their authors.') + col('f-ready', 'Approved', 'ready', 'No approved pull requests.') + `</div>`;
+  return `<div class="f-board f-mine">`
+    + col('f-act', 'Needs fixes', 'act', 'No pull requests need fixes.', 'Failing checks, feedback from people, or conflicts') + col('f-wait', 'In review', 'wait', 'No pull requests in review.') + col('f-ready', 'Ready to merge', 'ready', 'No pull requests ready to merge.') + `</div>`
+    + fold(sorted(list.filter(p => p.s.b === 'idle'), 'idle'), p => line(p, { repo: true }));
+}
+/* the menus' rows, as [label, right-hand text, on, action]; shared by clicks and keys */
+function menuItems(kind) {
+  if (kind === 'sort') return SORTS.map(([id, label, sub]) => ({ label, sub, on: S.sort === id, run: () => { S.sort = id; S.menu = null; } }));
+  if (kind === 'agent') return MODELS.map(([prov, name, efforts], i) => ({ label: name, sub: prov, on: S.model === i, run: () => { S.model = i; if (efforts.length && !efforts.includes(S.effort)) S.effort = 'high'; S.menu = null; } }));
+  const role = S.tab === 'rev' ? 'rev' : 'mine';
+  const counts = new Map();
+  prs.filter(p => p.role === role && match(p)).forEach(p => counts.set(p.repo, (counts.get(p.repo) || 0) + 1));
+  const items = [...counts].sort((a, b) => b[1] - a[1]).map(([r, n]) => ({ label: short(r), cnt: n, box: true, on: S.repos.has(r), run: () => { S.repos.has(r) ? S.repos.delete(r) : S.repos.add(r); } }));
+  if (S.repos.size) items.push({ label: 'Clear filter', clear: true, run: () => { S.repos.clear(); S.menu = null; } });
+  return items;
+}
+function menu() {
+  if (!S.menu) return '';
+  const items = menuItems(S.menu.kind);
+  const row = (it, i) => `${it.clear ? '<hr>' : ''}<div class="hb-opt ${it.on ? 'on' : ''} ${it.clear ? 'clear' : ''} ${S.menu.hl === i ? 'hl' : ''}" data-opt="${i}">${it.box ? '<span class="box">✓</span>' : it.clear ? '' : `<span class="tick">${it.on ? '✓' : ''}</span>`}${it.label}${it.cnt != null ? `<span class="cnt">${it.cnt}</span>` : ''}${it.sub ? `<span class="sub">${it.sub}</span>` : ''}</div>`;
+  const efforts = S.menu.kind === 'agent' ? MODELS[S.menu.hl >= 0 ? S.menu.hl : S.model][2] : [];
+  const foot = S.menu.kind !== 'agent' ? '' : (efforts.length ? `<hr><div class="f-eff">${efforts.map(x => `<span class="${x === S.effort ? 'on' : ''}" data-eff="${x}">${x}</span>`).join('')}</div>` : `<hr><div class="hb-pop-foot">This model has no effort setting</div>`) + `<div class="hb-pop-foot">Used for fixes and summaries, and for guided reviews</div>`;
+  const title = { sort: 'Sort by', repo: 'Filter by repository', agent: 'Agent model' }[S.menu.kind];
+  return `<div class="hb-pop ${S.menu.anim ? 'anim' : ''}" style="${S.menu.kind === 'repo' ? 'right: auto; left: 0; transform-origin: top left;' : ''}"><div class="hb-pop-h">${title}</div>${items.map(row).join('')}${foot}</div>`;
+}
+function fTabs() {
+  const n = (role, b) => vis().filter(p => p.role === role && p.s.b === b).length;
+  const tab = (id, label, count, tone) => `<span class="sf-tab ${S.tab === id ? 'on' : ''}" data-tab="${id}">${label}${count ? `<span class="t-pill t-pill-${tone}">${count}</span>` : ''}</span>`;
+  const picked = [...S.repos].map(short);
+  const repoLabel = picked.length === 0 ? 'All repositories' : picked.length === 1 ? `<b>${picked[0]}</b>` : `<b>${picked.length} repositories</b>`;
+  return `<div class="hb-tabs"><div class="sf-tabs">${tab('mine', 'Your pull requests', n('mine', 'act'), 'blue')}${tab('rev', 'Review requests', n('rev', 'act'), 'blue')}</div>
+    <div class="hb-ctls">${ctl('repo', repoLabel, 'F', picked.length > 0)}${ctl('sort', `Sort: <b>${SORTS.find(s => s[0] === S.sort)[1]}</b>`, 'S')}${S.menu && S.menu.kind !== 'agent' ? menu() : ''}</div></div>`;
+}
+/* Next up in the placement being compared: where . goes, and how many items still need you across both tabs */
+function nextUI(place) {
+  if (S.v !== 'F' || S.nextv !== place) return '';
+  const n = nextTarget(), list = nextList();
+  if (!n) return '';
+  const at = list.findIndex(p => key(p) === S.sel), count = at >= 0 ? `${(at + 1) % list.length + 1} of ${list.length}` : `${list.length} left`;
+  const verb = n.agent?.st === 'ready' ? 'Fix ready' : n.s.verb, tone = n.role === 'rev' || n.agent?.st === 'ready' ? 'blue' : 'red';
+  if (place === 'strip') return `<div class="f-up" data-next="1"><span class="f-up-l">Next up</span><span class="f-chip hb-verb ${tone}">${verb}</span><span class="f-up-t">${esc(n.title)}</span><span class="f-up-m">${short(n.repo)} #${n.num} · ${count}</span><button class="gp-btn gp-btn-sm">Go<span class="kbd">.</span></button></div>`;
+  if (place === 'header') return `<button class="hb-up" data-next="1">Next up <b class="wide-only">#${n.num} ${verb}</b><span class="wide-only">${count}</span><span class="kbd">.</span></button>`;
+  return `<span class="hb-up-title" data-next="1"><b>${list.length}</b> need you · Next<span class="kbd">.</span></span>`;
+}
+/* a quiet menu button; its key is listed in the hint bar and its tooltip, not drawn on the button */
+const ctl = (kind, label, k, act = false) => `<button class="hb-ctl ${S.menu?.kind === kind ? 'open' : ''} ${act ? 'act' : ''}" data-menu="${kind}" title="${k}">${label}<span class="chev">▼</span></button>`;
+function agentCtl() {
+  const [, name, efforts] = MODELS[S.model];
+  return `<div class="hb-ctls">${ctl('agent', `Agent: <b>${name.replace(/^claude-/, '')}<span class="wide-only">${efforts.length ? ' · ' + S.effort : ''}</span></b>`, '⇧M')}${S.menu?.kind === 'agent' ? menu() : ''}</div>`;
+}
+function hubG() {
+  const L = vis(), rev = L.filter(p => p.role === 'rev').sort((a, b) => a.s.rank - b.s.rank || a.age - b.age);
+  const mine = L.filter(p => p.role === 'mine' && p.s.b !== 'idle'), idle = L.filter(p => p.role === 'mine' && p.s.b === 'idle').sort((a, b) => a.age - b.age);
+  const order = { act: 0, ready: 1, wait: 2 };
+  const by = new Map();
+  mine.sort((a, b) => order[a.s.b] - order[b.s.b] || a.s.rank - b.s.rank || a.age - b.age).forEach(p => { if (!by.has(p.repo)) by.set(p.repo, []); by.get(p.repo).push(p); });
+  const repos = [...by.entries()].sort((a, b) => order[a[1][0].s.b] - order[b[1][0].s.b] || a[1][0].age - b[1][0].age);
+  const nAct = mine.filter(p => p.s.b === 'act').length;
+  return `<div class="g-lanes">
+    <div class="g-rev">${head('Review requests', rev.length, `${rev.filter(p => p.s.b === 'act').length} need action`)}${rev.length ? rev.map(p => stack(p)).join('') : empty('No review requests.')}</div>
+    <div class="g-mine">${head('Created', mine.length + idle.length, `${nAct} need action · ${mine.filter(p => p.s.b === 'ready').length} ready to merge`)}
+      ${repos.map(([r, ps]) => `<div class="hb-sub">${r}<span>${ps.length}</span></div>${ps.map(p => line(p)).join('')}`).join('') || empty('No pull requests match.')}
+      <div style="height:16px"></div>${fold(idle, p => line(p))}
+    </div></div>`;
+}
+function hubH() {
+  const L = vis();
+  const repos = [...new Set(prs.map(p => p.repo))].map(r => ({ r, ps: L.filter(p => p.repo === r) })).filter(x => x.ps.length).sort((a, b) => b.ps.filter(p => p.s.b === 'act').length - a.ps.filter(p => p.s.b === 'act').length || b.ps.length - a.ps.length);
+  const items = [['next', 'Needs action', L.filter(p => p.s.b === 'act'), true], ['ready', 'Ready to merge', L.filter(p => p.s.b === 'ready'), true], ['rev', 'Review requests', L.filter(p => p.role === 'rev'), false]];
+  const it = (id, label, ps, plain) => { const a = ps.filter(p => p.s.b === 'act').length; return `<div class="h-item ${S.rail === id ? 'on' : ''}" data-rail="${id}"><span class="lbl">${label}</span>${!plain && a ? `<span class="act">${a}</span>` : ''}<span class="tot">${ps.length}</span></div>`; };
+  const rail = `<div class="h-rail">${items.map(([id, l, ps, plain]) => it(id, l, ps, plain)).join('')}<span class="gp-panel-h">Repositories</span>${repos.map(({ r, ps }) => it('repo:' + r, short(r), ps, false)).join('')}</div>`;
+  let main;
+  const sec = (label, list, opts) => list.length ? `<section>${head(label, list.length)}${list.map(p => line(p, opts)).join('')}</section>` : '';
+  if (S.rail === 'next' || S.rail === 'ready' || S.rail === 'rev') {
+    const src = S.rail === 'rev' ? L.filter(p => p.role === 'rev') : L;
+    const pick = S.rail === 'next' ? byB(src, 'act') : S.rail === 'ready' ? byB(src, 'ready') : src.sort((a, b) => a.s.rank - b.s.rank || a.age - b.age);
+    const title = items.find(i => i[0] === S.rail)[1];
+    main = `<div class="h-head"><b>${title}</b><span class="hb-note">All repositories</span></div><section>${pick.length ? pick.map(p => line(p, { verbCol: true, repo: true })).join('') : empty(S.rail === 'next' ? 'No pull requests need action.' : 'No pull requests.')}</section>`;
+  } else {
+    const r = S.rail.slice(5), ps = L.filter(p => p.repo === r);
+    main = `<div class="h-head"><b>${short(r)}</b><span class="hb-note">${r.split('/')[0]}</span></div>` + sec('Needs action', byB(ps, 'act'), { verbCol: true }) + sec('Ready to merge', byB(ps, 'ready'), { verbCol: true }) + sec('Waiting', byB(ps, 'wait'), { verbCol: true }) + fold(byB(ps, 'idle'), p => line(p, { verbCol: true }));
+  }
+  return `<div class="h-split">${rail}<div class="h-main">${main}</div></div>`;
+}
+
+const VARIANTS = { F: 'Tabs: yours and review requests', G: 'Two lanes: review requests and created', H: 'Repo rail, action first' };
+const HINTS = { F: [['h j k l', 'Move'], ['⏎', 'Open'], ['?', 'All shortcuts']], G: [['↑ ↓', 'Move'], ['⏎', 'Open'], ['/', 'Search'], ['⌘R', 'Refresh']], H: [['↑ ↓', 'Move'], ['← →', 'Repository'], ['⏎', 'Open'], ['/', 'Search'], ['⌘R', 'Refresh']] };
+/* The hint bar shows only what applies now: move, open, the selected card's main action (and Select where it
+   applies), then ? for everything else. Board-wide keys live in the ? panel and the controls' tooltips. */
+function hints() {
+  const h = [...HINTS[S.v]], p = S.v === 'F' && prs.find(x => key(x) === S.sel);
+  if (!p) return h;
+  const first = actionsOf(p).list[0], ctx = first && first[0] !== 'openPR' ? [first[2], first[1]] : null;
+  if (ctx) h.splice(ctx[0] === '⏎' ? 1 : 2, ctx[0] === '⏎' ? 1 : 0, ctx);
+  if (groupOf(p)) h.splice(h.length - 1, 0, ['Space', 'Select']);
+  return h;
+}
+const HELP = [
+  ['Move', [['h j k l', 'Move'], ['.', 'Next up'], ['T', 'Switch tab'], ['/', 'Search'], ['N', 'Add a pull request by link']]],
+  ['The selected card', [['⏎', 'Open'], ['A', 'Fix with agent, or Stop'], ['⇧A', 'Summarize comments'], ['M', 'Merge'], ['U', 'Update branch'], ['C', 'Copy link'], ['Space', 'Select']]],
+  ['The board', [['F', 'Repository'], ['S', 'Sort'], ['⇧M', 'Agent model'], ['⌘R', 'Refresh'], ['Esc', 'Clear or close'], ['?', 'All shortcuts']]],
+];
+function helpPanel() {
+  return `<div class="f-help-card">${HELP.map(([h, rows]) => `<div class="f-help-col"><div class="f-help-h">${h}</div>${rows.map(([k, l]) => `<div class="f-help-row"><span class="kbd">${k}</span>${l}</div>`).join('')}</div>`).join('')}</div>`;
+}
+const hub = document.getElementById('hub');
+function render() {
+  document.body.classList.toggle('split', S.w === 'split');
+  const body = { F: hubF, G: hubG, H: hubH }[S.v]();
+  const focused = document.activeElement?.id;
+  hub.innerHTML = `<div class="gp-header hb-head ${S.v === 'F' ? 'has-tabs' : ''}"><div class="hb-top"><span class="hb-title">Pull requests</span>${nextUI('title')}
+    <label class="gp-sr-box"><span class="gp-sr-slash">⌕</span><input id="q" placeholder="Search pull requests" value="${esc(S.q)}" autocomplete="off"><span class="kbd">/</span></label>
+    <span class="hb-fresh">${nextUI('header')}Updated 40s ago${S.v === 'F' ? agentCtl() : ''}</span></div>${S.v === 'F' ? fTabs() : ''}</div>
+    <div class="hb-body">${body}</div>
+    ${hintbar()}`;
+  const hp = document.getElementById('help'); hp.innerHTML = S.help ? helpPanel() : ''; hp.classList.toggle('show', !!S.help);
+  S.mode = null;
+  if (focused === 'q' || focused === 'addq') { const i = document.getElementById(focused); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }
+  const toReview = prs.filter(p => p.role === 'rev' && p.s.b === 'act').length, toFix = prs.filter(p => p.role === 'mine' && p.s.b === 'act').length;
+  const bump = S.lastFix != null && toFix > S.lastFix; S.lastFix = toFix;
+  const sl = document.getElementById('slpr'); sl.innerHTML = `<i></i>PRs · ${toReview} to review · ${toFix} need fixes`;
+  if (bump) { sl.classList.remove('bump'); void sl.offsetWidth; sl.classList.add('bump'); }
+  document.getElementById('vlabel').textContent = `${S.v}: ${VARIANTS[S.v]}`;
+  document.getElementById('vseg').innerHTML = Object.keys(VARIANTS).map(v => `<button class="${v === S.v ? 'on' : ''}" data-v="${v}">${v}</button>`).join('');
+  document.querySelectorAll('#wseg button').forEach(b => b.classList.toggle('on', b.dataset.w === S.w));
+  document.querySelectorAll('#aseg button').forEach(b => b.classList.toggle('on', b.dataset.actv === S.act));
+  document.querySelectorAll('#nseg button').forEach(b => b.classList.toggle('on', b.dataset.nextv === S.nextv));
+  document.getElementById('theme').textContent = (document.documentElement.style.colorScheme || 'dark') === 'light' ? 'Dark' : 'Light';
+}
+/* the hint bar; in the bar placement it leads with the selected PR and its actions as buttons */
+function hintbar() {
+  const keys = h => h.map(([k, l]) => `<span class="gp-hb-item"><span class="kbd">${k}</span><span class="gp-hb-label">${l}</span></span>`).join('');
+  const p = S.act === 'bar' && S.v === 'F' && prs.find(x => key(x) === S.sel), x = p && actionsOf(p);
+  const mode = S.mode || 'Pick a pull request';
+  if (!x || !x.list.length || x.flow) return `<div class="gp-hintbar"><span class="gp-hb-mode" id="mode">${mode}</span>${keys(hints())}</div>`;
+  return `<div class="gp-hintbar f-barmode"><span class="f-bar-t"><span>#${p.num}</span> ${esc(p.title)}</span><span class="f-acts f-acts-bar">${btns(x.list)}</span>${x.hint ? `<span class="hb-note">${x.hint}</span>` : ''}<span class="f-bar-sep"></span>${keys(HINTS.F.filter(([k]) => ['↑ ↓', 'T', '/'].includes(k)))}<span id="mode" hidden></span></div>`;
+}
+const rows = () => [...hub.querySelectorAll('[data-row]')];
+/* h j k l and the arrows: up and down within a column, left and right to the nearest card in the next column */
+function nav(dir) {
+  const cols = [...hub.querySelectorAll('.f-col')].map(c => [...c.querySelectorAll('[data-row]')]).filter(c => c.length);
+  const foldRows = [...hub.querySelectorAll('.hb-fold-rows [data-row]')];
+  if (!cols.length) return;
+  const fi = foldRows.findIndex(r => r.dataset.row === S.sel);
+  /* Inactive sits below the board: j from the bottom of a column enters it, k from its top leaves it */
+  if (fi >= 0) {
+    if (dir === 'down') return select(foldRows[Math.min(foldRows.length - 1, fi + 1)].dataset.row);
+    if (dir === 'up') return select(fi === 0 ? cols[0][cols[0].length - 1].dataset.row : foldRows[fi - 1].dataset.row);
+    return;
+  }
+  const ci = cols.findIndex(c => c.some(r => r.dataset.row === S.sel));
+  if (ci < 0) return select(cols[0][0].dataset.row);
+  const col = cols[ci], ri = col.findIndex(r => r.dataset.row === S.sel);
+  if (dir === 'down' && ri === col.length - 1 && foldRows.length) return select(foldRows[0].dataset.row);
+  if (dir === 'down' || dir === 'up') return select(col[Math.max(0, Math.min(col.length - 1, ri + (dir === 'down' ? 1 : -1)))].dataset.row);
+  const next = cols[ci + (dir === 'right' ? 1 : -1)];
+  if (!next) return;
+  const y = col[ri].getBoundingClientRect().top;
+  select(next.reduce((a, b) => Math.abs(b.getBoundingClientRect().top - y) < Math.abs(a.getBoundingClientRect().top - y) ? b : a).dataset.row);
+}
+/* . moves to the next most urgent item after the current one, switching tabs when it's on the other one */
+function nextTarget() {
+  const list = nextList();
+  if (!list.length) return null;
+  const i = list.findIndex(p => key(p) === S.sel);
+  return list[(i + 1) % list.length];
+}
+function goNext() {
+  const n = nextTarget();
+  if (!n) return;
+  S.tab = n.role === 'rev' ? 'rev' : 'mine';
+  select(key(n));
+}
+function toggleMark(p) {
+  const g = groupOf(p);
+  if (!g) return;
+  /* one group at a time: selecting in Ready clears Inactive's selection, and the other way round */
+  for (const k of [...S.marked]) { const o = prs.find(x => key(x) === k); if (!o || groupOf(o) !== g) S.marked.delete(k); }
+  S.marked.has(key(p)) ? S.marked.delete(key(p)) : S.marked.add(key(p));
+  S.batch = null; render();
+}
+function select(k) { S.sel = k; if (S.confirm && S.confirm !== k) S.confirm = null; render(); hub.querySelector(`[data-row="${CSS.escape(k)}"]`)?.scrollIntoView({ block: 'nearest' }); }
+/* ⏎ on one of your Needs fixes PRs opens it at what needs fixing (pr-fixes.html mocks three of them) */
+function open(k) {
+  const p = prs.find(x => key(x) === k);
+  /* the mock has three fixes pages; any other Needs fixes PR opens the one whose problem matches its first reason */
+  if (p && p.role === 'mine' && p.s.b === 'act') {
+    const page = [58, 404, 418].includes(p.num) ? p.num : p.review === 'changes' ? 58 : p.threads ? 404 : 418;
+    location.href = `pr-fixes.html?pr=${page}&t=${document.documentElement.style.colorScheme || 'dark'}`;
+    return;
+  }
+  toast(`Opening ${short(p.repo)} #${p.num} in PR Guide…`, 'plain');
+}
+const say = t => { S.mode = t; };
+let toastTimer;
+function toast(t, tone = 'ok') { const el = document.getElementById('toast'); el.innerHTML = (tone === 'bad' ? '<span class="bad">●</span>' : tone === 'ok' ? '<span class="ok">✓</span>' : '') + t; el.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), tone === 'bad' ? 4000 : 2400); }
+/* a PR changing columns: the old card fades out fast, then it arrives in its new column with the green wash */
+function move(p, change, msg) {
+  hub.querySelector(`[data-row="${CSS.escape(key(p))}"]`)?.classList.add('f-leave');
+  setTimeout(() => { change(); p.s = sort(p); S.arrive = key(p); render(); S.arrive = null; toast(msg); }, 150);
+}
+/* Fix with agent: merge first with no AI; only the conflicts left reach the agent. Never pushes. */
+let RUN = 0;
+function fix(p) {
+  if (p.repo === R.td) return move(p, () => { p.tandem = p.conflict ? 'resolving conflicts' : 'fixing checks'; }, `Handed #${p.num} to Tandem`);
+  if (!CLONED.has(p.repo)) { p.agent = { st: 'clone' }; return render(); }
+  const id = ++RUN, kind = p.s.b === 'wait' && p.bot ? 'bot' : p.conflict ? 'conflicts' : p.ci === 'fail' ? 'checks' : 'changes';
+  const plan = {
+    conflicts: [['merging main', 'Merging main into the branch, no agent yet', 0], ['resolving 2 conflicts', 'Merged main · 1 file resolved automatically · 2 conflicts left for the agent', 1100], ['checking the merge', 'Resolved 2 conflicts · running the typecheck', 3300]],
+    checks: [['reading the failing check', 'typecheck fails in src/session/receipts.ts', 0], ['fixing the typecheck', 'Editing 1 file', 1200], ['running the typecheck', 'Fixed 1 error · checking', 3300]],
+    changes: [['reading the feedback', '1 requested change from @maria-k', 0], ['addressing the change', 'Editing 2 files', 1200], ['running the tests', 'Addressed 1 change · checking', 3300]],
+    bot: [['reading 3 bot comments', `${p.bot?.replace('[bot]', '')}: 3 comments, 1 already outdated`, 0], ['addressing 2 comments', 'Editing 2 files', 1200], ['running the tests', 'Addressed 2 comments · checking', 3300]],
+  }[kind];
+  const done = { conflicts: 'Merged main, resolved 2 conflicts', checks: 'Fixed the failing typecheck', changes: 'Addressed the requested change', bot: 'Addressed 2 bot comments, skipped 1 outdated' }[kind];
+  p.agent = { st: 'run', id, t0: Date.now(), dur: 4400, stage: plan[0][0], note: plan[0][1] };
+  plan.slice(1).forEach(([stage, note, at]) => setTimeout(() => { if (p.agent?.id !== id) return; Object.assign(p.agent, { stage, note }); render(); }, at));
+  setTimeout(() => { if (p.agent?.id !== id) return; p.agent = { st: 'ready', done, tokens: kind === 'conflicts' ? '1.8k' : '6.2k' }; render(); toast(`Fix ready for #${p.num}`); }, 4400);
+  render();
+}
+function summarize(p) {
+  p.summary = { st: 'run' }; render();
+  setTimeout(() => { p.summary = { st: 'done', ...(SUMS[p.num] || { verdict: 'No reply needed', lines: ['The comments are suggestions with no questions.'] }) }; render(); }, 1600);
+}
+function merge(p) {
+  S.confirm = null; p.merging = true; render();
+  setTimeout(() => { hub.querySelector(`[data-row="${CSS.escape(key(p))}"]`)?.classList.add('f-leave'); setTimeout(() => { p.merged = true; p.merging = false; if (S.sel === key(p)) S.sel = null; render(); toast(`Merged #${p.num} into main`); }, 150); }, 900);
+}
+/* merging several, each with its repo's method: GitHub merges run one after another; comment, label and queue
+   merges are posted and then wait */
+function mergeNow(p, delay) {
+  setTimeout(() => { if (direct(how(p))) merge(p); else { p.queued = { st: 'queued', pos: '2nd' }; render(); } }, delay);
+}
+/* every card action, run alike by its button and its key */
+const ACT = {
+  agent: p => p.agent?.st === 'run' ? ACT.stop(p) : fix(p),
+  stop: p => { p.agent = null; render(); toast(`Stopped the agent on #${p.num}`); },
+  summarize,
+  review: p => { if (p.num === 177) { location.href = `review-fix.html?t=${document.documentElement.style.colorScheme || 'dark'}`; return; } say(`Opening the fix for #${p.num} in PR Guide…`); render(); setTimeout(() => { p.agent.st = 'reviewed'; say(`Reviewed the fix for #${p.num}`); render(); }, 900); },
+  push: p => move(p, () => { p.agent = null; p.conflict = false; if (p.s.b === 'wait') p.bot = null; if (p.ci === 'fail') p.ci = 'pend'; if (p.review === 'changes') p.review = 'none'; }, `Pushed the fix to #${p.num}`),
+  discard: p => { S.discard = key(p); render(); },
+  discardOk: p => { S.discard = null; p.agent = null; render(); toast(`Discarded the fix for #${p.num}`); },
+  worktree: p => toast(`Opened the worktree for #${p.num} in a new tab`),
+  clone: p => { CLONED.add(p.repo); p.agent = null; toast(`Cloned ${short(p.repo)}`); fix(p); },
+  folder: () => { say('Choosing the folder…'); render(); },
+  copy: p => { const url = `https://github.com/${p.repo}/pull/${p.num}`; navigator.clipboard?.write?.([new ClipboardItem({ 'text/html': new Blob([`<a href="${url}">${esc(p.title)} #${p.num}</a>`], { type: 'text/html' }), 'text/plain': new Blob([`${p.title} #${p.num} ${url}`], { type: 'text/plain' }) })]).catch(() => {}); toast(`Copied link to #${p.num}`); },
+  merge: p => {
+    const m = how(p);
+    if (m.suggested) { S.ask = key(p); return render(); }
+    if (direct(m)) { S.confirm = key(p); return render(); }
+    p.queued = { st: 'pending' }; render();
+    const did = m.kind === 'comment' ? `Commented ${m.text} on #${p.num}` : m.kind === 'label' ? `Added the ${m.text} label to #${p.num}` : `Added #${p.num} to the merge queue`;
+    setTimeout(() => { if (!p.queued) return; p.queued = { st: 'queued', pos: '2nd' }; render(); toast(did); }, 1200);
+  },
+  dequeue: p => { const m = how(p); p.queued = null; render(); toast(m.kind === 'comment' ? `Commented ${m.cancel} on #${p.num}` : m.kind === 'label' ? `Removed the ${m.text} label from #${p.num}` : `Removed #${p.num} from the merge queue`); },
+  useLearned: p => { const m = how(p); m.suggested = false; m.src = 'Set by you'; S.ask = null; ACT.merge(p); },
+  method: p => { const m = how(p); S.ask = null; S.method = { k: key(p), kind: m.kind, text: m.text || '', cancel: m.cancel || '', hl: KINDS.findIndex(k => k[0] === m.kind) }; render(); },
+  methodSave: p => { const M = S.method; if ((M.kind === 'comment' || M.kind === 'label') && !M.text.trim()) return; HOW[p.repo] = { kind: M.kind, text: M.text.trim(), cancel: M.cancel.trim(), src: 'Set by you' }; S.method = null; render(); toast(`${short(p.repo)} now merges with: ${mergeNote(p) || mergeLabel(p)}`); },
+  methodClose: () => { S.method = null; render(); },
+  confirm: merge,
+  cancel: () => { S.confirm = null; S.discard = null; S.ask = null; S.method = null; S.batch = null; render(); },
+  update: p => move(p, () => { p.behind = false; p.ci = 'pend'; p.ciPass = 1; }, `Updated #${p.num} with main`),
+  batchMerge: () => { S.batch = 'ready'; render(); },
+  batchClose: () => { S.batch = 'idle'; render(); },
+  batchCancel: () => { S.batch = null; render(); },
+  clearMarks: () => { S.marked.clear(); S.batch = null; render(); },
+  /* stale only: drafts are deliberate work in progress, so they're selected one by one with Space if at all */
+  closeAll: () => { prs.filter(p => groupOf(p) === 'idle' && !p.draft && !p.closed && vis().includes(p)).forEach(p => S.marked.add(key(p))); S.batch = 'idle'; S.idleOpen = true; render(); },
+  batchGo: () => {
+    const g = S.batch, ps = markedIn(g);
+    S.batch = null; S.marked.clear();
+    if (g === 'ready') { ps.forEach((p, i) => mergeNow(p, i * 350)); toast(`Merging ${ps.length} pull requests`, 'plain'); return; }
+    ps.forEach(p => { p.closed = true; }); if (ps.some(p => key(p) === S.sel)) S.sel = null;
+    render(); toast(`Closed ${ps.length} pull ${ps.length === 1 ? 'request' : 'requests'}`);
+  },
+  openPR: p => open(key(p)),
+  unadd: p => { prs.splice(prs.indexOf(p), 1); S.sel = null; render(); toast(`Removed #${p.num} from Review requests`); },
+  /* a link in To review's field: add it, open it once, or jump to it when it is already on the board */
+  linkOpen: () => { const L = linked(); S.addq = ''; say(`Opening ${short(L.repo)} #${L.num}…`); render(); },
+  linkShow: () => { const L = linked(); S.tab = L.p.role === 'rev' ? 'rev' : 'mine'; S.addq = ''; select(key(L.p)); },
+  linkAdd: () => {
+    const L = linked();
+    const p = { role: 'rev', repo: L.repo, num: L.num, title: L.title, author: L.author, adds: 84, dels: 12, age: 0, state: 'added', external: false, newCommits: 0, ci: 'pass', ciPass: 6, ciTotal: 6 };
+    p.s = sort(p); prs.push(p);
+    S.addq = ''; S.tab = 'rev'; S.sel = key(p); S.arrive = key(p); render(); S.arrive = null;
+    toast(`Added #${L.num} to Review requests`);
+  },
+};
+/* Live updates as the poller would apply them while the hub is in the background. Checks passing: the spinner
+   blurs out and the check pops in. A PR whose state changes leaves its column and arrives in the new one. */
+function demo(kind) {
+  const find = (repo, num) => prs.find(p => p.repo === repo && p.num === num);
+  if (kind === 'agent') { const p = find(R.tg, 177); S.v = 'F'; S.tab = 'mine'; S.sel = key(p); p.agent = null; fix(p); return; }
+  /* a queued merge fails: the card leaves Ready to merge and arrives in Needs fixes with a red ring; one toast */
+  if (kind === 'mergefail') {
+    const p = find(R.aw, 396);
+    if (p.mergeFail) return;
+    S.v = 'F'; S.tab = 'mine'; p.queued = { st: 'queued', pos: '1st' }; render();
+    setTimeout(() => {
+      hub.querySelector(`[data-row="${CSS.escape(key(p))}"]`)?.classList.add('f-leave');
+      setTimeout(() => { p.queued = null; p.mergeFail = 'Aviator: e2e failed on the merge group'; p.age = 1; p.s = sort(p); S.arrive = key(p); S.arriveBad = true; render(); S.arrive = null; S.arriveBad = false; toast(`#${p.num} needs fixes: merge failed`, 'bad'); hub.querySelector(`[data-row="${CSS.escape(key(p))}"]`)?.scrollIntoView({ block: 'nearest' }); }, 150);
+    }, 1800);
+    return;
+  }
+  if (kind === 'ci') {
+    const p = find(R.td, 421);
+    if (p.ci !== 'pend') return;
+    S.v = 'F'; S.tab = 'mine'; S.arrive = null; render();
+    hub.querySelectorAll(`[data-row="${CSS.escape(key(p))}"] .ci-spin`).forEach(s => s.classList.add('out'));
+    setTimeout(() => { p.ci = 'pass'; p.ciPass = p.ciTotal; p.tandem = ''; p.s = sort(p); S.pop = key(p); render(); S.pop = null; document.getElementById('mode').textContent = `Checks passed on #${p.num}`; }, 150);
+    return;
+  }
+  const p = find(R.tg, 188);
+  if (p.review === 'ok') return;
+  S.v = 'F'; S.tab = 'mine'; S.arrive = null; render();
+  hub.querySelector(`[data-row="${CSS.escape(key(p))}"]`)?.classList.add('f-leave');
+  setTimeout(() => { p.review = 'ok'; p.s = sort(p); S.arrive = key(p); render(); S.arrive = null; document.getElementById('mode').textContent = `#${p.num} approved by @maria-k`; }, 150);
+}
+document.addEventListener('click', e => {
+  if (S.help && !e.target.closest('.f-help-card')) { S.help = false; render(); return; }
+  const v = e.target.closest('[data-v]'); if (v) { S.v = v.dataset.v; S.sel = null; render(); return; }
+  const w = e.target.closest('[data-w]'); if (w) { S.w = w.dataset.w; render(); return; }
+  if (e.target.id === 'theme') { const r = document.documentElement; r.style.colorScheme = (r.style.colorScheme || 'dark') === 'light' ? 'dark' : 'light'; render(); return; }
+  const nx = e.target.closest('[data-next]'); if (nx) { goNext(); return; }
+  const f = e.target.closest('[data-fold]'); if (f && !e.target.closest('[data-act]')) { S.idleOpen = !S.idleOpen; render(); return; }
+  const ra = e.target.closest('[data-rail]'); if (ra) { S.rail = ra.dataset.rail; S.sel = null; render(); return; }
+  const mb = e.target.closest('[data-menu]'); if (mb) { S.menu = S.menu?.kind === mb.dataset.menu ? null : { kind: mb.dataset.menu, hl: -1, anim: !matchMedia('(prefers-reduced-motion: reduce)').matches }; render(); if (S.menu) S.menu.anim = false; return; }
+  const ef = e.target.closest('[data-eff]'); if (ef) { S.effort = ef.dataset.eff; render(); return; }
+  const op = e.target.closest('[data-opt]'); if (op && S.menu) { menuItems(S.menu.kind)[+op.dataset.opt].run(); S.sel = null; render(); return; }
+  if (S.menu && !e.target.closest('.hb-ctls')) { S.menu = null; render(); }
+  const as = e.target.closest('[data-actv]'); if (as) { S.act = as.dataset.actv; S.more = null; render(); return; }
+  const nv = e.target.closest('[data-nextv]'); if (nv) { S.nextv = nv.dataset.nextv; render(); return; }
+  const go = e.target.closest('[data-go]'); if (go) { location.href = `${go.dataset.go}?t=${document.documentElement.style.colorScheme || 'dark'}`; return; }
+  const mo = e.target.closest('[data-more]'); if (mo) { const k = mo.closest('[data-row]').dataset.row; S.more = S.more === k ? null : k; S.sel = k; render(); return; }
+  const sk = e.target.closest('[data-setkind]'); if (sk) { const p = prs.find(x => key(x) === S.more), id = sk.dataset.setkind; S.more = null; if (id === 'comment' || id === 'label') { ACT.method(p); S.method.kind = id; S.method.hl = KINDS.findIndex(q => q[0] === id); render(); hub.querySelector('[data-field]')?.focus(); } else { HOW[p.repo] = { kind: id, src: 'Set by you' }; render(); toast(`${short(p.repo)} now merges with: ${mergeLabel(p)}`); } return; }
+  if (S.more && !e.target.closest('.f-moremenu')) { S.more = null; render(); }
+  const tb = e.target.closest('[data-tab]'); if (tb) { S.tab = tb.dataset.tab; S.sel = null; S.menu = null; render(); return; }
+  const dm = e.target.closest('[data-demo]'); if (dm) { demo(dm.dataset.demo); return; }
+  const kd = e.target.closest('[data-kind]'); if (kd && S.method) { S.method.kind = kd.dataset.kind; S.method.hl = KINDS.findIndex(k => k[0] === kd.dataset.kind); render(); hub.querySelector('[data-field]')?.focus(); return; }
+  if (e.target.closest('.f-method') && !e.target.closest('[data-act]')) return;
+  const ab = e.target.closest('[data-act]'); if (ab) { const k = ab.closest('[data-row]')?.dataset.row ?? S.sel, p = prs.find(x => key(x) === k); S.more = null; ACT[ab.dataset.act](p); return; }
+  const row = e.target.closest('[data-row]'); if (row) { if (e.metaKey || e.shiftKey) { const p = prs.find(x => key(x) === row.dataset.row); select(row.dataset.row); toggleMark(p); } else select(row.dataset.row); }
+});
+hub.addEventListener('dblclick', e => { const row = e.target.closest('[data-row]'); if (row && !e.target.closest('[data-act], [data-more]')) open(row.dataset.row); });
+hub.addEventListener('input', e => { if (e.target.id === 'q') { S.q = e.target.value; render(); } if (e.target.id === 'addq') { S.addq = e.target.value; render(); } if (e.target.dataset.field && S.method) S.method[e.target.dataset.field] = e.target.value; });
+document.addEventListener('keydown', e => {
+  const inQ = document.activeElement?.id === 'q';
+  if (document.activeElement?.id === 'addq') {
+    if (e.key === 'Escape') { S.addq = ''; document.activeElement.blur(); render(); return; }
+    const L = e.key === 'Enter' && linked();
+    if (L) { e.preventDefault(); e.shiftKey ? ACT.linkOpen() : L.p ? ACT.linkShow() : ACT.linkAdd(); }
+    return;
+  }
+  if (S.method) {
+    const M = S.method, mp = prs.find(x => key(x) === M.k), inField = document.activeElement?.dataset?.field;
+    if (e.key === 'Escape') { e.preventDefault(); ACT.methodClose(); return; }
+    if (e.key === 'Enter') { e.preventDefault(); ACT.methodSave(mp); return; }
+    if (inField) return;
+    if (e.key === 'ArrowDown' || e.key === 'j' || e.key === 'ArrowUp' || e.key === 'k') { e.preventDefault(); M.hl = Math.max(0, Math.min(KINDS.length - 1, M.hl + (e.key === 'ArrowDown' || e.key === 'j' ? 1 : -1))); M.kind = KINDS[M.hl][0]; render(); return; }
+    if (e.key === 'Tab') { e.preventDefault(); hub.querySelector('[data-field]')?.focus(); return; }
+    return;
+  }
+  if (S.menu) {
+    const items = menuItems(S.menu.kind);
+    if (e.key === 'Escape') { S.menu = null; render(); return; }
+    if (S.menu.kind === 'agent' && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) { e.preventDefault(); const fx = MODELS[S.menu.hl >= 0 ? S.menu.hl : S.model][2], j = fx.indexOf(S.effort); if (fx.length) S.effort = fx[Math.max(0, Math.min(fx.length - 1, j + (e.key === 'ArrowRight' ? 1 : -1)))]; render(); return; }
+    if (e.key === 'ArrowDown' || e.key === 'j') { e.preventDefault(); S.menu.hl = Math.min(items.length - 1, S.menu.hl + 1); render(); return; }
+    if (e.key === 'ArrowUp' || e.key === 'k') { e.preventDefault(); S.menu.hl = Math.max(0, S.menu.hl - 1); render(); return; }
+    if ((e.key === 'Enter' || e.key === ' ') && S.menu.hl >= 0) { e.preventDefault(); items[S.menu.hl].run(); if (S.menu) S.menu.hl = Math.min(S.menu.hl, menuItems(S.menu.kind).length - 1); S.sel = null; render(); return; }
+  }
+  const p = S.sel && prs.find(x => key(x) === S.sel), A = p?.agent;
+  if ((e.key === '?' && !inQ) || (S.help && e.key === 'Escape')) { S.help = !S.help && e.key === '?'; render(); return; }
+  if (S.help) return;
+  if (e.key === 'Escape') { if (S.confirm || S.discard || S.ask || S.batch) { ACT.cancel(); return; } if (S.marked.size) { ACT.clearMarks(); return; } if (inQ) { document.activeElement.blur(); if (S.q) { S.q = ''; render(); } } return; }
+  if (e.key === 'Enter' && e.metaKey && S.batch) { e.preventDefault(); ACT.batchGo(); return; }
+  if (e.key === 'Enter' && e.metaKey && S.ask) { e.preventDefault(); ACT.useLearned(prs.find(x => key(x) === S.ask)); return; }
+  if (e.key === 'Enter' && e.metaKey && S.discard) { e.preventDefault(); ACT.discardOk(prs.find(x => key(x) === S.discard)); return; }
+  if (e.key === 'Enter' && e.metaKey && S.confirm) { e.preventDefault(); merge(prs.find(x => key(x) === S.confirm)); return; }
+  if (S.v === 'F' && !inQ && !e.metaKey && !e.ctrlKey && e.key === 'n') { e.preventDefault(); S.tab = 'rev'; S.menu = null; render(); document.getElementById('addq')?.focus(); return; }
+  if (inQ && !['ArrowDown', 'ArrowUp', 'Enter'].includes(e.key)) return;
+  if (e.key === '/') { e.preventDefault(); document.getElementById('q').focus(); return; }
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const rs = rows().map(r => r.dataset.row), i = rs.indexOf(S.sel);
+  const dir = { ArrowDown: 'down', j: 'down', ArrowUp: 'up', k: 'up', ArrowLeft: 'left', h: 'left', ArrowRight: 'right', l: 'right' }[e.key];
+  if (S.v === 'F' && dir) { e.preventDefault(); if (inQ) document.activeElement.blur(); nav(dir); }
+  else if (e.key === 'ArrowDown' || e.key === 'j') { e.preventDefault(); if (inQ) document.activeElement.blur(); select(rs[Math.min(rs.length - 1, i + 1)] ?? rs[0]); }
+  else if (e.key === 'ArrowUp' || e.key === 'k') { e.preventDefault(); select(rs[Math.max(0, i - 1)] ?? rs[0]); }
+  else if (e.key === 'Enter' && A?.st === 'ready') ACT.review(p);
+  else if (e.key === 'Enter' && S.sel) open(S.sel);
+  else if (S.v === 'F' && e.key === '.') goNext();
+  else if (S.v === 'F' && p && e.key === ' ') { e.preventDefault(); toggleMark(p); }
+  else if (S.v === 'F' && e.key === 'm' && markedIn('ready').length) ACT.batchMerge();
+  else if (S.v === 'F' && e.key === 'x' && markedIn('idle').length) ACT.batchClose();
+  else if (S.v === 'F' && e.key === 'X') ACT.closeAll();
+  else if (S.v === 'F' && p && e.key === 'u' && p.behind) ACT.update(p);
+  else if (S.v === 'F' && e.key === 'M') { S.menu = S.menu?.kind === 'agent' ? null : { kind: 'agent', hl: S.model, anim: false }; render(); }
+  else if (S.v === 'F' && p && e.key === 'm' && p.s.b === 'ready' && !p.merging) p.queued?.st === 'queued' ? ACT.dequeue(p) : !p.queued && ACT.merge(p);
+  else if (S.v === 'F' && p && e.key === ',' && p.s.b === 'ready' && !p.queued) ACT.method(p);
+  else if (S.v === 'F' && p && e.key === 'c') ACT.copy(p);
+  else if (S.v === 'F' && p && e.key === 'x' && p.state === 'added') ACT.unadd(p);
+  else if (S.v === 'F' && p && p.role === 'mine' && (p.s.b === 'act' || (p.s.b === 'wait' && (p.bot || A))) && ['a', 'A', 'p', 'd', 'o'].includes(e.key)) {
+    if (e.key === 'a') A?.st === 'clone' ? ACT.clone(p) : A?.st === 'ready' || A?.st === 'reviewed' ? null : fixable(p).length || A || p.bot ? ACT.agent(p) : hasReply(p) && !p.summary && summarize(p);
+    else if (e.key === 'A' && fixable(p).length && hasReply(p) && !p.summary) summarize(p);
+    else if (e.key === 'p' && A?.st === 'reviewed') ACT.push(p);
+    else if (e.key === 'd' && (A?.st === 'ready' || A?.st === 'reviewed')) ACT.discard(p);
+    else if (e.key === 'o' && A?.st === 'fail') ACT.worktree(p);
+    else if (e.key === 'o' && A?.st === 'clone') ACT.folder(p);
+  }
+  else if (S.v === 'H' && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) { const ids = [...hub.querySelectorAll('[data-rail]')].map(x => x.dataset.rail); const j = ids.indexOf(S.rail); S.rail = ids[(j + (e.key === 'ArrowRight' ? 1 : ids.length - 1)) % ids.length]; S.sel = null; render(); }
+  else if (S.v === 'F' && e.key === 't') { S.tab = S.tab === 'rev' ? 'mine' : 'rev'; S.sel = null; S.menu = null; render(); }
+  else if (S.v === 'F' && (e.key === 'f' || e.key === 's')) { const kind = e.key === 'f' ? 'repo' : 'sort'; S.menu = S.menu?.kind === kind ? null : { kind, hl: 0, anim: false }; render(); }
+  else if (e.key === 'v') { const ks = Object.keys(VARIANTS); S.v = ks[(ks.indexOf(S.v) + 1) % ks.length]; S.sel = null; render(); }
+});
+/* the running agent's elapsed time, updated in place so its spinner and bar keep running */
+setInterval(() => document.querySelectorAll('[data-t0]').forEach(el => { el.textContent = clock(+el.dataset.t0); }), 1000);
+render();
+</script>
+</body>
+</html>

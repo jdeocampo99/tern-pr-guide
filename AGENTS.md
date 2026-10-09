@@ -11,11 +11,18 @@ Each module's header comment names its one job. Put new code in the module that 
 - **Views:** `src/view/*.luau` turn state into nodes and nothing else. Build them with `Ui.el` and `Ui.span`.
 - **Styles:** `guide.css` only, with `gp-` classes and the color tokens `DESIGN.md` names. To change a look, edit the rule where it lives.
 - `GUIDE.md`, `prompts/guide.md` and `src/guide.luau` change together.
-- Mockups and scratch files go in `/tmp`. `docs/screenshots/` is only for README images.
+- Mockups and scratch files go in `/tmp`, except an approved design's reference mockups, which live with its spec (the PR hub's are in `docs/hub/`). A mockup links `docs/tern-tokens.css` (Tern's variable values), then `guide.css`, inside a `.gp-root` wrapper. `docs/screenshots/` is only for README images.
 
 ## UI
 
 Read `DESIGN.md` and `docs/ui.md` before any change to `src/view/` or `guide.css`, and before making a mockup. `DESIGN.md` is the visual system: tokens, components, and which colors come from Tern versus GitHub. `docs/ui.md` covers how to lay out new components, motion, and what Tern can't render.
+
+**Keyboard first.** A new control (button, field, tab, menu, toggle) ships with its keyboard path in the same change, mockups included:
+
+- It has a key, shown as its `kbd` beside the label and listed in `view/help.luau`, the hint bar and the README Keys table.
+- A menu or list opened by key works without the mouse: arrows (or `j`/`k`) move, ⏎ chooses, Esc closes, and a keyboard-opened menu appears without animation.
+- The key and the click send the same `ACTIONS` entry.
+- In the picker, letter keys act only while the filter field is empty, as `j` and `k` do.
 
 ## Copy
 
@@ -30,7 +37,7 @@ New UI text sounds official: neutral, plain and short, like GitHub.
 
 - Prefer a noun over "you": "Needs attention", "Awaiting author".
 - Plain statements: no exclamation marks, emoji or marketing words.
-- In the same change, update the README. A new key also goes in `view/help.luau` and the README Keys table.
+- In the same change, update the README.
 
 ## Verify
 

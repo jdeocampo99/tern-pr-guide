@@ -37,6 +37,6 @@ These rules are condensed from the `emil-design-eng` skill. The motion tokens ar
 
 - Layout is flex only. Pinned elements use `position: sticky` with Tern glass (`background: var(--panel)` plus `backdrop-filter`); plugins get no scroll events.
 - Colors are Tern's theme variables, or a pinned `--gp-*` review color from the top of `guide.css` (see `DESIGN.md`). A new pinned color is a `light-dark()` pair.
-- Tern draws the parts it has: keycaps are the native `kbd` node, icons the native `icon` node (Tern's named set), the view switch is `tabs`, and popovers are an `overlay` in the view's `layer`. No SVG of the plugin's own. Mockups follow the same limits.
+- Tern draws the parts it has: keycaps are the native `kbd` node, icons the native `icon` node (Tern's named set), the view switch is `tabs`, and popovers are an `overlay` in the view's `layer`. No SVG of the plugin's own. Mockups follow the same limits, and take Tern's variable values from `docs/tern-tokens.css`.
 - An action that has a key shows its `kbd` beside its label.
 - Check `tern.d.luau`, written by `tern plugin types .`, before assuming the host offers something.

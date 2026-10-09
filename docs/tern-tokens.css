@@ -1,0 +1,108 @@
+/* Tern's theme variables, for mockups and screenshots outside Tern.
+
+   Inside Tern the host sets these; guide.css only reads them. A mockup links
+   this file, then guide.css, and wraps its page in `.gp-root` so the pinned
+   --gp-* review colors apply too. Toggle `color-scheme` on :root for light
+   and dark.
+
+   Values are the kit defaults from Tern 0.7.0 (9ca00e4): theme.css,
+   surface.css and termview.css. A Tern theme (Settings → Theme) recomputes
+   --panel from the terminal background (--tv-bg) and --l1–--l4, --chip-bg
+   from its ink color, so treat these as the default look, not every look.
+   To refresh after a Tern update:
+     strings -n 6 /Applications/Tern.app/Contents/MacOS/tern | grep -n -A90 '^theme.css'
+   and copy the changed values here. */
+
+:root {
+  color-scheme: dark;
+
+  /* surfaces */
+  --page: light-dark(#efefec, #08080a);
+  --panel: light-dark(#fbfbfa, #0f0f12);
+  --card: light-dark(#ffffff, #161619);
+  --raise: light-dark(#f4f4f2, #1d1d21);
+  --chip-bg: light-dark(rgba(27, 28, 48, 0.055), rgba(255, 255, 255, 0.07));
+  --pop-bg: light-dark(rgba(255, 255, 255, 0.82), rgba(35, 35, 39, 0.98));
+  --sf-shade: light-dark(color-mix(in srgb, var(--t1) 2.8%, transparent), color-mix(in srgb, var(--t1) 3%, transparent));
+
+  /* lines: --l1 hover fill, --l2 hairline, --l3 control border, --l4 hovered control border */
+  --l1: light-dark(rgba(24, 26, 44, 0.06), rgba(255, 255, 255, 0.07));
+  --l2: light-dark(rgba(24, 26, 44, 0.09), rgba(255, 255, 255, 0.1));
+  --l3: light-dark(rgba(24, 26, 44, 0.14), rgba(255, 255, 255, 0.15));
+  --l4: light-dark(rgba(24, 26, 44, 0.22), rgba(255, 255, 255, 0.24));
+
+  /* text: --t1 ink, --t2 secondary, --t3 muted, --t4 faint */
+  --t1: light-dark(#1b1c20, #ededed);
+  --t2: light-dark(#55575f, #a1a1a1);
+  --t3: light-dark(#6a6c74, #8a8a92);
+  --t4: light-dark(#b3b5bb, #55555c);
+  --ink: light-dark(#1b1c20, #ededed);
+
+  /* Tern's own accent and tones. Tern chrome only (DESIGN.md, The Two Accents Rule). */
+  --accent: light-dark(#3d6fff, #5a8cff);
+  --accent-ink: light-dark(#2448c4, #9dbcff);
+  --ok: light-dark(#2fae74, #3ecf8e);
+  --warn: light-dark(#d98a0b, #f5a524);
+  --bad: light-dark(#e5484d, #ff6166);
+
+  /* shape */
+  --r-chip: 6px;
+  --r-ctl: 8px;
+  --r-card: 12px;
+  --r-panel: 16px;
+
+  /* type. Code inherits the terminal font, which is --tv-font. */
+  --sans: 'Geist', -apple-system, 'SF Pro Text', system-ui, sans-serif;
+  --mono: 'Berkeley Mono', ui-monospace, 'SF Mono', SFMono-Regular, Menlo, monospace;
+  --tv-font: var(--mono);
+
+  /* terminal surface */
+  --tv-bg: light-dark(#fcfcfb, #0b0b0c);
+  --tv-fg: light-dark(#1f2126, #e4e4e7);
+  --tv-sel: light-dark(rgb(from var(--accent) r g b / 20%), rgb(from var(--accent) r g b / 32%));
+}
+
+/* Tern's native `kbd` node, as plugins render it (Ui `kbd`). */
+.kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 5px;
+  font: 500 10.5px/1 var(--mono);
+  color: var(--t2);
+  background: var(--l1);
+  box-shadow: inset 0 0 0 1px var(--l2), inset 0 -1px 0 var(--l1);
+}
+
+/* Tern's native `tabs` node (Ui `tabs`). The underline is Tern's accent: the one place it appears
+   (DESIGN.md, The Two Accents Rule). */
+.sf-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  min-width: 0;
+  overflow: hidden;
+  box-shadow: inset 0 -1px 0 var(--l2);
+  font: 500 12px/1 var(--sans);
+  letter-spacing: -0.003em;
+  user-select: none;
+}
+.sf-tab {
+  flex: none;
+  display: flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 6px 6px 0 0;
+  color: var(--t3);
+  white-space: pre;
+  cursor: pointer;
+  transition: color 0.15s cubic-bezier(0.2, 0.7, 0.2, 1), background-color 0.15s cubic-bezier(0.2, 0.7, 0.2, 1), box-shadow 0.15s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.sf-tab:hover { color: var(--t1); background-color: var(--l1); }
+.sf-tab.on { color: var(--t1); box-shadow: inset 0 -2px 0 var(--accent); }
+.sf-tab.on:hover { background-color: transparent; }
+@media (prefers-reduced-motion: reduce) { .sf-tab { transition: none; } }

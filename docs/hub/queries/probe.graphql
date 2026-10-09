@@ -1,0 +1,4 @@
+query { rateLimit { cost }
+ mine: search(type: ISSUE, query: "is:pr is:open author:@me archived:false", first: 50) { issueCount nodes { ... on PullRequest { number updatedAt headRefOid } } }
+ requested: search(type: ISSUE, query: "is:pr is:open review-requested:@me archived:false", first: 50) { issueCount nodes { ... on PullRequest { number updatedAt headRefOid } } }
+ reviewed: search(type: ISSUE, query: "is:pr is:open reviewed-by:@me -author:@me archived:false", first: 50) { issueCount nodes { ... on PullRequest { number updatedAt headRefOid } } } }
