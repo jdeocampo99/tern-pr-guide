@@ -87,6 +87,67 @@ function M.new(pr: Pr.PR, guide: Guide.Guide): Review
  }
 end
 
+-- How the page shows the review: the guide it walks, its steps in reading order, the step the
+-- reader is on, the suggestion jumped to, and the steps ticked. The guided view and the plain
+-- file view each have one, over the same comments, summary and verdict.
+export type Reading = {
+ guide: Guide.Guide,
+ steps: { Guide.Step },
+ cur: number,
+ focus: string?,
+ reviewed: { [string]: boolean },
+}
+
+function M.reading(r: Review): Reading
+ return { guide = r.guide, steps = r.steps, cur = r.cur, focus = r.focus, reviewed = r.reviewed }
+end
+
+function M.adopt(r: Review, reading: Reading)
+ r.guide, r.steps, r.cur, r.focus, r.reviewed = reading.guide, reading.steps, reading.cur, reading.focus, reading.reviewed
+end
+
+-- The ticks of the file view, one per file, kept in the guided reading's own ticks so the views
+-- never disagree: a file reads as ticked when all its guided steps are (a file no step visits,
+-- when it is marked viewed), and ticking or unticking it does so for each of them.
+local function fileTicks(r: Review, fileSteps: { Guide.Step }): { [string]: boolean }
+ local pathOf: { [string]: string } = {}
+ for _, step in fileSteps do pathOf[step.key] = step.file end
+ local guided, reviewed, filesViewed = r.steps, r.reviewed, r.filesViewed
+ local function keysOf(path: string): { string }
+  local keys = {}
+  for _, step in guided do
+   if step.file == path then table.insert(keys, step.key) end
+  end
+  return keys
+ end
+ return setmetatable({} :: { [string]: boolean }, {
+  __index = function(_, key: string): boolean?
+   local path = pathOf[key]
+   if not path then return nil end
+   local keys = keysOf(path)
+   if #keys == 0 then return filesViewed[path] end
+   for _, k in keys do
+    if not reviewed[k] then return nil end
+   end
+   return true
+  end,
+  __newindex = function(_, key: string, on: boolean?)
+   local path = pathOf[key]
+   if not path then return end
+   local keys = keysOf(path)
+   if #keys == 0 then filesViewed[path] = on end
+   for _, k in keys do reviewed[k] = on end
+  end,
+ }) :: any
+end
+
+-- The file view's reading of a review being read as a guide: one step per changed file.
+function M.filesReading(r: Review): Reading
+ local guide = Guide.filesOf(r.guide, r.pr)
+ local steps = guide.changes[1].steps
+ return { guide = guide, steps = steps, cur = 1, focus = nil, reviewed = fileTicks(r, steps) }
+end
+
 -- Steps and files
 
 function M.keysOfChange(r: Review, change: number): { string }

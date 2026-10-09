@@ -29,6 +29,7 @@ local function readingKeys(s: State.State): (string, { { string } })
  table.insert(keys, { "c", "comment" })
  table.insert(keys, { "r", "submit review" })
  table.insert(keys, { "/", "search" })
+ if State.switchable(s) then table.insert(keys, { "t", if s.view == "guided" then "file view" else "guided view" }) end
  if not r.guide.guided then return "File " .. r.cur .. " of " .. #r.steps .. "  ·  " .. step.file, keys end
  return "Step " .. r.cur .. " of " .. #r.steps .. "  ·  " .. step.title, keys
 end

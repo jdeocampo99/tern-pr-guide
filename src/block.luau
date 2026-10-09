@@ -36,6 +36,8 @@ type Block = {
  page: State?,
  -- The page shows a guide file rather than the default walkthrough.
  guided: boolean,
+ -- The view the reader last chose on a page with a guide, kept for the block's other PRs.
+ view: State.ViewId?,
  -- The reader's AI agent, once found, and its run writing a guide.
  ai: Agent.Run?,
  -- Why the agent isn't available, once looked for and missing.
@@ -165,7 +167,7 @@ end
 local function gotoOwn(s: State, cx: BlockCx, n: number)
  local r = s.review
  local own = r.own[n]
- local i = if own then Review.stepShowing(r, own.file, own.to) else nil
+ local i = if own then State.stepFor(s, own.file, own.to) else nil
  if not i then return end
  r.cur = i
  follow(s, cx, true)
@@ -230,6 +232,15 @@ local function gotoStep(s: State, cx: BlockCx, i: number, explicit: boolean)
  follow(s, cx, explicit)
 end
 
+-- Shows the guided walkthrough or the file view, landing on the file being read. A switch swaps
+-- the whole page, so it shows at once, mouse or key.
+local function switchView(s: State, cx: BlockCx, to: State.ViewId)
+ local blockId = State.switchView(s, to)
+ if not blockId then return end
+ s.keyed = true
+ jump(s, cx, Page.blockPath(blockId), "start", nil)
+end
+
 -- Sends the review once: the page shows it sending, then where it went or why it didn't. A review
 -- bound for GitHub first asks to be confirmed, and the next submit posts it; any other action
 -- cancels the ask (see dispatch).
@@ -287,6 +298,8 @@ local ACTIONS: { [string]: Handler } = {
  end,
  ["scroll"] = function(_, cx, how) cx:frame({ { "scroll", "main", how } }) end,
  ["open-github"] = function(s, cx) cx:open(s.review.pr.url) end,
+ ["view"] = function(s, cx, to) switchView(s, cx, to :: State.ViewId) end,
+ ["toggle-view"] = function(s, cx) switchView(s, cx, if s.view == "guided" then "files" else "guided") end,
 
  -- marking
  ["review-step"] = function(s, _, key) markSteps(s, { key }) end,
@@ -450,6 +463,11 @@ local function offerAgent(b: Block)
  if b.page then b.page.ai = if b.guided then nil else b.ai end
 end
 
+-- Keeps the view the reader is in, so the block's next PR with a guide opens in it.
+local function remember(b: Block, s: State)
+ if State.switchable(s) then b.view = s.view end
+end
+
 -- Shows `pr` with `guide`, from a guide file when `guided`. Submitting posts to GitHub once the
 -- reader confirms, unless the block was opened with `post=false` or has no checkout (the sample):
 -- then it is a dry run.
@@ -457,6 +475,7 @@ local function showGuide(b: Block, pr: Pr.PR, guide: Guide.Guide, guided: boolea
  local repo = if b.repo then b.repo.root else nil
  local dryRunPath = if b.opts.post and repo then nil else Fetch.dryRunPath(pr.number)
  b.page, b.guided = State.new(pr, guide, { repo = repo, dryRunPath = dryRunPath }), guided
+ if b.view == "files" and b.page and State.switchable(b.page) then State.switchView(b.page, "files") end
  offerAgent(b)
 end
 
@@ -499,6 +518,7 @@ local function generate(b: Block, cx: BlockCx)
   run.running, run.error = false, err
   if guide then
    Fetch.saveRunSeconds(run.seconds)
+   b.view = nil
    showGuide(b, pr, guide, true)
    local page = b.page :: State
    page.review.own = own
@@ -704,6 +724,7 @@ local block: BlockDef<Block> = {
    generate(b, cx)
   elseif b.page then
    dispatch(b.page, cx, action)
+   remember(b, b.page)
   elseif b.picker then
    pickerDispatch(b, b.picker, cx, action)
   end
@@ -716,6 +737,7 @@ local block: BlockDef<Block> = {
   if action then
    s.keyed = true
    if action.act == "generate-guide" then generate(b, cx) else dispatch(s, cx, action) end
+   remember(b, s)
    return true
   end
   local field = State.field(s)

@@ -86,6 +86,7 @@ local function readingKey(s: State.State, key: Key): Action?
  if (name == "s" and key.shift) or name == "S" then return act("mark-supporting") end
  if name == "s" then return act("toggle-group") end
  if name == "o" then return act("open-all-supporting") end
+ if name == "t" and State.switchable(s) then return act("toggle-view") end
  if name == "h" or isQuestionMark(key) then return act("toggle-help") end
  if name == "escape" and (s.helpOpen or s.review.focus ~= nil) then return act("dismiss") end
  local scroll = SCROLLS[key.name]

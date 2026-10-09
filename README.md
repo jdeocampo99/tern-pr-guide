@@ -34,6 +34,10 @@ diagram of what the PR changes. The author's own description is one click (or `i
 for the step you're on sits on the right. `j`/`k` move between steps, `⏎` marks a step reviewed and
 moves on. **Mark all reviewed** in the header (`m`) ticks every file at once, and pressing it again clears them.
 
+**Two ways to read it.** A PR with a guide opens guided. The **Guided | Files** switch in the header
+(or `t`) flips to the plain GitHub-style file tree, one file at a time, and back. Your comments, drafts,
+summary and ticks are the same in both, and each view remembers where you were.
+
 ![A step with its code and a suggested comment](docs/screenshots/step.png)
 
 **Suggested comments, if you want them.** The AI review comes with suggested review comments. Add the
@@ -185,6 +189,7 @@ review block** (see [AI guided review](#ai-guided-review)).
 | `o` | open every supporting file | `c` | comment on this step | `⌘⏎` | submit |
 | `g` | open on GitHub | | | `?` | all shortcuts |
 | `i` | PR description | `m` | mark / unmark all reviewed | | |
+| `t` | guided / file view | | | | |
 
 ## Good to know
 

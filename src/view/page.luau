@@ -38,6 +38,7 @@ end
 -- just finished writing, the rare moment of a review, has the blocks below the header rise in one
 -- after another. The classes stay for the page's life: they only play when their node is drawn.
 local function arriving(s: State.State, blocks: { Node })
+ if s.arrival == "still" then return end
  if s.arrival == "guide" then
   for n = 2, #blocks do addClass(blocks[n], "gp-arrive gp-ad" .. math.min(n - 1, STAGGERED_BLOCKS)) end
  else
@@ -45,7 +46,8 @@ local function arriving(s: State.State, blocks: { Node })
  end
 end
 
--- Without a guide: the header, then the file tree pinned beside the code with a scroll of its own,
+-- Without a guide, or in the file view of a PR that has one: the header, then the file tree pinned
+-- beside the code with a scroll of its own,
 -- and the description at the top of the code. The code scrolls with the page: Tern's reveal into
 -- a nested scroller left the wheel unable to scroll past the revealed block. Keys match the guided
 -- page's first change row, so block paths are the same.

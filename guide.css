@@ -1015,3 +1015,10 @@
   .gp-sk-list { animation: none; opacity: 0.7; }
   .gp-btn:active, .gp-rv-button:active, .gp-rv-submit:active { transform: none; }
 }
+/* the switch between a guided PR's walkthrough and its plain file view: an instant swap, so no motion beyond the hover tint */
+.gp-vs { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
+.gp-vs-segs { display: flex; padding: 2px; gap: 2px; border-radius: 8px; background: light-dark(#eef0f3, #2a2c31); }
+.gp-vs-opt { padding: 3px 12px; border-radius: 6px; cursor: pointer; color: light-dark(#555c66, #a9afb8); }
+.gp-vs-opt:hover { color: light-dark(#111, #fff); }
+.gp-vs-on, .gp-vs-on:hover { background: light-dark(#ffffff, #3a3d45); color: light-dark(#111, #fff); box-shadow: 0 1px 2px light-dark(rgba(16, 24, 40, 0.12), rgba(0, 0, 0, 0.4)); }
+.gp-vs-label { font-family: -apple-system, "SF Pro Text", "Helvetica Neue", sans-serif; font-size: 13px; font-weight: 600; }

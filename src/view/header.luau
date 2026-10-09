@@ -32,6 +32,19 @@ local function headerAction(label: string, keyHint: string?, action: string): No
  return el("span", { class = "gp-hdr-act", actions = { click = action } }, kids)
 end
 
+-- The two views of a PR with a guide as a segmented switch, with the key that flips it.
+local function viewSwitch(s: State.State): Node
+ local function segment(id: State.ViewId, label: string): Node
+  return el("span", { class = "gp-vs-opt" .. (if s.view == id then " gp-vs-on" else ""), key = id, actions = { click = "view=" .. id } }, {
+   span("gp-vs-label", label),
+  })
+ end
+ return el("span", { class = "gp-vs", key = "views" }, {
+  el("span", { class = "gp-vs-segs", key = "segs" }, { segment("guided", "Guided"), segment("files", "Files") }),
+  span("gp-act-key", "t"),
+ })
+end
+
 -- What the generating row says it is doing, one after another while the agent works.
 local PHRASES = {
  "Reading the diff", "Following the changes", "Untangling the why", "Sketching the walkthrough",
@@ -139,13 +152,16 @@ end
 function M.view(s: State.State, motion: Ui.Motion): Node
  local pr = s.review.pr
  local counts = Review.counts(s.review)
+ local title = { span("gp-title-num", "#" .. pr.number), span("gp-title-text", pr.title), Ui.spacer() }
+ if State.switchable(s) then table.insert(title, viewSwitch(s)) end
+ table.insert(title, reviewButton(s, counts.included))
  local parts = {
-  el("div", { class = "gp-title" }, { span("gp-title-num", "#" .. pr.number), span("gp-title-text", pr.title), Ui.spacer(), reviewButton(s, counts.included) }),
+  el("div", { class = "gp-title" }, title),
   status(s, counts),
  }
  if s.ai then table.insert(parts, aiRow(s.ai, s.models, motion, s.closing.models == true)) end
  if s.search then table.insert(parts, SearchPanel.view(s.search, s.review.guide.guided, Ui.entering(motion, "p:search", "gp-enter-panel"))) end
- if s.helpOpen then table.insert(parts, Help.view(s.closing.help == true, s.review.guide.guided, Ui.entering(motion, "p:help", "gp-enter-panel"))) end
+ if s.helpOpen then table.insert(parts, Help.view(s.closing.help == true, { guided = s.review.guide.guided, switch = State.switchable(s) }, Ui.entering(motion, "p:help", "gp-enter-panel"))) end
  if s.reviewOpen then table.insert(parts, ReviewPanel.view(s, motion)) end
  return el("div", { class = "gp-header", key = "header" }, parts)
 end

@@ -1,7 +1,7 @@
 schema = 1
 id = "prguide"
 name = "PR Guide"
-version = "0.4.4"
+version = "0.4.5"
 host = "host.luau"
 window = "window.luau"
 styles = ["guide.css"]

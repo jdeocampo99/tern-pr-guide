@@ -239,6 +239,14 @@ function M.defaultGuide(pr: Pr.PR): Guide
  }
 end
 
+-- `guide` read as the plain file list: one change, a step per changed file, and everything the
+-- guide says about the PR (suggested comments, author, lens, head, summary) kept.
+function M.filesOf(guide: Guide, pr: Pr.PR): Guide
+ local files = M.defaultGuide(pr)
+ files.head, files.author, files.lens, files.summary, files.comments = guide.head, guide.author, guide.lens, guide.summary, guide.comments
+ return files
+end
+
 -- The guide file at `path` for `pr`, or why it can't be used. The one place guide data enters
 -- the plugin.
 function M.read(path: string, pr: Pr.PR): (Guide?, string?)
