@@ -203,10 +203,20 @@ Anywhere in Tern: `⌥⌘R` opens the PR hub and `⌥⇧⌘R` opens it with AI g
 | `I` | show or hide Inactive | `⇧⏎` | open with the AI guide started |
 | `R` | show or hide Recently opened (Review requests) | `⇧A` | summarize feedback | `S` | sort |
 | | | `C` | copy link | `⇧M` | agent model |
-| | | `M` | merge | `Esc` | clear or close |
-| | | `U` | update branch | `?` | all shortcuts |
+| | | `M` | merge (asks first: `⌘⏎` confirms, `Esc` cancels) | `N` | add a pull request by link |
+| | | | | `⌘⏎` | confirm a question |
+| | | | | `Esc` | clear, cancel or close |
+| | | `U` | update branch (Ready cards that are behind main) | `?` | all shortcuts |
 | | | `,` | merge method | | |
-| | | `X` | remove from Review requests | | |
+| | | `X` | remove from Review requests (pull requests you added) | | |
+
+**Merge** uses the repository's merge method (squash and merge until the hub detects another) and
+shows GitHub's reason when it refuses. **Copy link** copies the title and link as plain text.
+
+**Add a pull request by link:** `N` (from either tab) opens the field at the top of To review.
+Paste a `github.com/owner/repo/pull/123` link or type `owner/repo#123`. `⏎` adds it to Review
+requests as "Added by you" (up to 50), `⇧⏎` opens it without adding. For a pull request already on
+the board, `⏎` shows it and `⇧⏎` opens it. `X` removes one you added.
 
 In a menu, `j` `k` move, `Space` chooses (a repository toggles), `⏎` chooses or closes, `Esc` closes, and in the agent menu `←` `→` change the effort.
 

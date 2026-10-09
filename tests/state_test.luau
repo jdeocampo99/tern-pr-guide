@@ -1,4 +1,6 @@
 --!strict
+local Fields = require("../src/text-field")
+local Model = require("../src/hub/model")
 local State = require("../src/hub/state")
 local Cases: any = require("../fixtures/hub/cases")
 
@@ -22,8 +24,24 @@ local function column(s: State.State, id: string): { string }
 	error("no column " .. id)
 end
 
+-- The PR with `key` in `s`, mutable.
+local function byKey(s: State.State, key: string): Model.HubPR
+	for _, pr in s.prs do
+		if pr.key == key then return pr end
+	end
+	error("no PR " .. key)
+end
+
+local function copy(value: any): any
+	if type(value) ~= "table" then return value end
+	local out = {}
+	for k, v in value do out[k] = copy(v) end
+	return out
+end
+
+-- A state over its own copy of the cases, so a test that changes a PR leaves the fixture alone.
 local function fresh(saved: any?): State.State
-	return State.new(Cases.prs, NOW, saved)
+	return State.new(copy(Cases.prs), NOW, saved)
 end
 
 return function()
@@ -296,4 +314,113 @@ return function()
 	local mine = fresh({ tab = "mine" })
 	State.setRecent(mine, recent)
 	assert(#mine.board.recent == 0 and not mine.board.open.recent)
+
+	-- Card actions: Merge asks first, naming the repo's method; ⌘⏎ is the block's, Esc cancels.
+	local ms = fresh()
+	assert(State.mergeMethodFor(ms, byKey(ms, "acme/api#110")) == "squash", "no detected method: squash")
+	assert(State.askMerge(ms, "acme/api#110") and ms.mode == "confirm" and ms.selected == "acme/api#110")
+	local asked = State.card(ms, "acme/api#110") :: State.Card
+	assert(asked.asking == "Squash and merge #110?" and State.card(ms, "acme/api#108") :: any and (State.card(ms, "acme/api#108") :: State.Card).asking == nil)
+	State.cancelConfirm(ms)
+	assert(ms.mode == "board" and ms.confirm == nil and (State.card(ms, "acme/api#110") :: State.Card).asking == nil)
+	ms.merges["acme/api"] = { method = { kind = "rebase" }, source = "user", ask = false }
+	State.askMerge(ms, "acme/api#110")
+	assert((State.card(ms, "acme/api#110") :: State.Card).asking == "Rebase and merge #110?")
+	State.select(ms, "acme/api#108")
+	assert(ms.confirm == nil and ms.mode == "board", "choosing another card drops the question")
+	ms.merges["acme/api"] = { method = { kind = "queue" }, source = "user", ask = false }
+	assert(State.mergeMethodFor(ms, byKey(ms, "acme/api#110")) == "squash", "a queue method is not merged by GitHub's merge")
+	assert(not State.askMerge(ms, "acme/web#103"), "only Merge cards ask")
+	State.setBusy(ms, "acme/api#110", "Merging…")
+	assert(not State.askMerge(ms, "acme/api#110") and (State.card(ms, "acme/api#110") :: State.Card).busy == "Merging…")
+	State.dropPr(ms, "acme/api#110")
+	assert(State.card(ms, "acme/api#110") == nil and ms.busy["acme/api#110"] == nil)
+
+	-- Update branch: the card waits on its checks afterwards.
+	local us = fresh()
+	local behind = byKey(us, "acme/api#110")
+	behind.behind = true
+	State.project(us)
+	local upd = State.card(us, "acme/api#110") :: State.Card
+	assert(upd.main and upd.main.label == "Update branch" and upd.main.key == "U" and upd.column == "ready")
+	State.branchUpdated(us, "acme/api#110")
+	upd = State.card(us, "acme/api#110") :: State.Card
+	assert(behind.behind == false and behind.checks.state == "pending" and upd.column ~= "ready")
+
+	-- Add by link: what the field's text names.
+	local ls = fresh({ tab = "review" })
+	local function target(text: string): State.LinkTarget
+		ls.link = Fields.create(text)
+		return State.linkTarget(ls)
+	end
+	assert(target("").kind == "empty" and target("   ").kind == "empty")
+	assert(target("hello").kind == "invalid" and target("123").kind == "invalid" and target("https://example.com/a/b/pull/3").kind == "invalid")
+	assert(target("https://gitlab.com/acme/api/pull/3").kind == "invalid")
+	local fresh1 = target("https://github.com/acme/new/pull/77/files") :: any
+	assert(fresh1.kind == "new" and fresh1.repo == "acme/new" and fresh1.number == 77)
+	fresh1 = target("acme/new#78") :: any
+	assert(fresh1.kind == "new" and fresh1.repo == "acme/new" and fresh1.number == 78)
+	local known = target("  https://github.com/ACME/web/pull/301  ") :: any
+	assert(known.kind == "board" and known.pr.key == "acme/web#301" and known.repo == "acme/web")
+	assert((target("acme/web#0") :: any).kind == "invalid")
+
+	-- N opens the field on Review requests; choosing a card leaves it; Esc empties it.
+	local ns = fresh()
+	State.openLink(ns)
+	assert(ns.tab == "review" and ns.mode == "link")
+	ns.link = Fields.create("abc")
+	State.closeLink(ns, false)
+	assert(ns.mode == "board" and ns.link.text == "abc")
+	State.openLink(ns)
+	State.select(ns, "acme/web#301")
+	assert(ns.mode == "board")
+	State.openLink(ns)
+	State.closeLink(ns, true)
+	assert(ns.mode == "board" and ns.link.text == "")
+
+	-- Show on the board: the PR's tab, with a search or filter that hides it cleared.
+	local ss = fresh({ tab = "mine" })
+	State.setSearch(ss, "zzz")
+	State.toggleRepository(ss, "acme/web")
+	assert(State.show(ss, "acme/web#301") and ss.tab == "review" and ss.selected == "acme/web#301" and ss.search.text == "" and ss.repositories == nil)
+	assert(not State.show(ss, "acme/none#1"))
+	local idle = State.show(fresh(), "acme/api#122")
+	assert(idle)
+
+	-- The added set: the cap is 50, and a fetched PR's own spelling of the repo wins.
+	local set: { [string]: Model.PRRef }? = {}
+	for n = 1, 50 do set = State.withAdded(set :: any, { repo = "o/r", number = n }) end
+	assert(set ~= nil and set["o/r#50"] ~= nil)
+	local over, why = State.withAdded(set :: any, { repo = "o/r", number = 51 })
+	assert(over == nil and why == "50 pull requests are added already. Remove one first.")
+	local again = State.withAdded(set :: any, { repo = "o/r", number = 7 })
+	assert(again == set, "adding one already there changes nothing")
+	local canon, changed = State.canonicalAdded({ ["ACME/web#303"] = { repo = "ACME/web", number = 303 }, ["x/y#1"] = { repo = "x/y", number = 1 } }, copy(Cases.prs))
+	assert(changed and canon["acme/web#303"] ~= nil and canon["acme/web#303"].repo == "acme/web" and canon["ACME/web#303"] == nil and canon["x/y#1"] ~= nil)
+	local _, same = State.canonicalAdded({ ["acme/web#303"] = { repo = "acme/web", number = 303 } }, copy(Cases.prs))
+	assert(not same)
+
+	-- Remove (X): an added PR with no other reason to be on the board leaves it; one that is also requested stays.
+	local rs2 = fresh({ tab = "review" })
+	assert(byKey(rs2, "acme/web#303").addedByMe and not byKey(rs2, "acme/web#303").reviews.requestedMe)
+	State.unadd(rs2, "acme/web#303")
+	assert(State.card(rs2, "acme/web#303") == nil)
+	local both2 = fresh({ tab = "review" })
+	byKey(both2, "acme/web#303").reviews.requestedMe = true
+	State.unadd(both2, "acme/web#303")
+	assert(State.card(both2, "acme/web#303") ~= nil and not byKey(both2, "acme/web#303").addedByMe)
+
+	-- Opening a card: a checkout, PR Guide's own copy, or nothing (a toast with the reason, no open).
+	local plan = State.openPlan("acme/api", 412, false, "/Users/me/code/api", nil, "/Users/me/code/hub")
+	assert(plan.kind == "open" and plan.url == "https://github.com/acme/api/pull/412#prguide-open=%2FUsers%2Fme%2Fcode%2Fapi")
+	plan = State.openPlan("acme/api", 412, true, "/Users/me/code/api", nil, "/Users/me/code/hub")
+	assert(plan.kind == "open" and plan.url == "https://github.com/acme/api/pull/412#prguide-open=%2FUsers%2Fme%2Fcode%2Fapi&generate=true")
+	plan = State.openPlan("acme/api", 412, false, nil, nil, "/Users/me/code/hub")
+	assert(plan.kind == "open" and plan.url == "https://github.com/acme/api/pull/412#prguide-open=%2FUsers%2Fme%2Fcode%2Fhub&search=true")
+	plan = State.openPlan("acme/api", 412, true, nil, nil, "/Users/me/code/hub")
+	assert(plan.kind == "open" and plan.url == "https://github.com/acme/api/pull/412#prguide-open=%2FUsers%2Fme%2Fcode%2Fhub&generate=true&search=true")
+	plan = State.openPlan("acme/api", 412, false, nil, "PR Guide only downloads repos on github.com.", "/x")
+	assert(plan.kind == "refuse" and plan.text == "Couldn't open #412 of acme/api" and plan.sub == "PR Guide only downloads repos on github.com.")
+	plan = State.openPlan("acme/api", 412, false, nil, nil, "")
+	assert(plan.kind == "refuse" and plan.sub == "No folder to look for a checkout in.")
 end

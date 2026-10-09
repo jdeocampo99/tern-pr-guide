@@ -11,6 +11,8 @@ M.titleLabel = M.ROOT .. ".header.top.title"
 M.agentButton = M.ROOT .. ".header.top.fresh.agent"
 M.repositoriesButton = M.ROOT .. ".header.tabs.ctls.repos"
 M.sortButton = M.ROOT .. ".header.tabs.ctls.sort"
+-- The add-by-link field, at the top of the To review column.
+M.linkField = M.ROOT .. ".body.board.col_to_review.add.row.field"
 
 -- The key of a card's node, unique on the board.
 function M.cardKey(prKey: string): string

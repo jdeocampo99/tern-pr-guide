@@ -6,7 +6,7 @@
 -- envelope; the caller sums them. Failures are `Error` values, never thrown.
 --
 -- Not built yet (each lands with the issue that first needs it): `details`, `history`, `detect`,
--- `parseDetails` and the `commands` builders.
+-- `parseDetails` and the `commands` builders other than merge and updateBranch.
 local Model = require("./hub/model")
 
 type HubPR = Model.HubPR
@@ -16,6 +16,7 @@ type RateLimit = Model.RateLimit
 type Refresh = Model.Refresh
 type PRRef = Model.PRRef
 type OpenThread = Model.OpenThread
+type MergeMethod = Model.MergeMethod
 
 -- What `tern.process.run` gives and takes, minus the `cx`. src/fetch.luau exports the real runner.
 export type Out = { status: number, stdout: string, stderr: string, timed_out: boolean }
@@ -443,6 +444,21 @@ local function hubQuery(added: { PRRef }): string
 	local close = string.find(HUB_QUERY, "\n}\n\nfragment", 1, true) :: number
 	return string.sub(HUB_QUERY, 1, close) .. table.concat(lines, "\n") .. "\n" .. string.sub(HUB_QUERY, close + 1)
 end
+
+-- Command builders: exact argv, no network. `Client.run` executes them.
+local MERGE_FLAGS: { [string]: string } = { squash = "--squash", merge = "--merge", rebase = "--rebase" }
+
+M.commands = {
+	-- The three GitHub methods only; a queue, comment or label method is #10's and raises here.
+	merge = function(pr: HubPR, method: MergeMethod): Command
+		local flag = MERGE_FLAGS[method.kind]
+		if flag == nil then error("commands.merge: " .. method.kind .. " is not a GitHub merge method", 0) end
+		return { argv = { "gh", "pr", "merge", tostring(pr.number), "--repo", pr.repo, flag }, stdin = nil }
+	end,
+	updateBranch = function(pr: HubPR): Command
+		return { argv = { "gh", "pr", "update-branch", tostring(pr.number), "--repo", pr.repo }, stdin = nil }
+	end,
+}
 
 function M.client(run: Runner, decode: Decode): Client
 	-- Runs `argv` once and hands `done` its result, also when the runner throws.

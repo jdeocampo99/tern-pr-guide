@@ -8,7 +8,6 @@ local Fetch = require("../fetch")
 local Fields = require("../text-field")
 local Github = require("../github")
 local Keys = require("../keys")
-local Links = require("../links")
 local Model = require("./model")
 local Paths = require("../view/hub/paths")
 local State = require("./state")
@@ -38,6 +37,8 @@ export type Block = {
 	flights: { refresh: boolean, checks: boolean, probe: boolean }, -- one call of each kind at a time
 	sched: Sched,
 	closed: boolean, -- a render failed: the window is gone, so no timer starts anything
+	refetch: boolean, -- a refresh was asked for while one was running: run another when it ends
+	show: Model.PRRef?, -- a pull request just added by link: select it when the refresh brings it
 }
 
 type Handler = (b: Block, cx: BlockCx, value: string) -> ()
@@ -116,22 +117,19 @@ end
 
 -- Opens PR `number` of `slug` ("owner/repo") in the guide. The block can't open blocks, so it finds a
 -- checkout of the repo (beside the hub's folder, else PR Guide's own copy) and opens a link the window
--- routes to the guide (`Links.openLink`). With no checkout and no copy to make, it says why and opens
+-- routes to the guide (`State.openPlan`). With no checkout and no copy to make, it says why and opens
 -- nothing. A card's open action uses this too.
 local function openPr(b: Block, cx: BlockCx, slug: string, number: number, generate: boolean)
 	local dir = cx.cwd or tern.getenv("HOME") or ""
 	Fetch.checkoutFor(nil, dir, slug, function(found)
 		if b.closed then return end
-		if found then
-			cx:open(Links.openLink(slug, number, found.root, generate, false))
-			return
-		end
 		local _, why = Fetch.savedCopy("github.com", slug)
-		if why or dir == "" then
-			cx:toast("error", "Couldn't open #" .. number .. " of " .. slug, why or "No folder to look for a checkout in.")
-			return
+		local plan = State.openPlan(slug, number, generate, if found then found.root else nil, why, dir)
+		if plan.kind == "open" then
+			cx:open(plan.url)
+		else
+			cx:toast("error", plan.text, plan.sub)
 		end
-		cx:open(Links.openLink(slug, number, dir, generate, true))
 	end)
 end
 
@@ -143,7 +141,7 @@ local function openRow(b: Block, cx: BlockCx, value: string, withGuide: boolean)
 	local recent = State.selectedRecent(s)
 	if recent then return openPr(b, cx, recent.repo, recent.number, generate) end
 	local card = State.selectedCard(s)
-	if card then cx:toast("info", "Opening a pull request isn't available yet", card.pr.key) end
+	if card then openPr(b, cx, card.pr.repo, card.pr.number, generate) end
 end
 
 local function openCard(b: Block, cx: BlockCx, value: string)
@@ -329,7 +327,34 @@ onProbe = function(b, cx)
 	end)
 end
 
-local function startRefresh(b: Block, cx: BlockCx)
+local startRefresh: (b: Block, cx: BlockCx) -> ()
+
+-- Writes hub.added. Returns why it failed.
+local function writeAdded(added: Sync.Added): string?
+	local ok, err = pcall(tern.kv.set, KV_ADDED, added)
+	return if ok then nil else tostring(err)
+end
+
+-- After a refresh: a pull request just added by link is selected and brought into view, or, when GitHub
+-- didn't return it, forgotten with the reason.
+local function showAdded(b: Block, cx: BlockCx)
+	local ref = b.show
+	if not ref then return end
+	b.show = nil
+	local pr = State.find(b.s, ref.repo, ref.number)
+	if pr and State.show(b.s, pr.key) then
+		revealSelected(b, cx)
+		return
+	end
+	local added = readLocal().added
+	for key, entry in added do
+		if entry.number == ref.number and string.lower(entry.repo) == string.lower(ref.repo) then added[key] = nil end
+	end
+	writeAdded(added)
+	cx:toast("error", "Couldn't add #" .. ref.number .. ": GitHub has no pull request " .. ref.repo .. "#" .. ref.number)
+end
+
+startRefresh = function(b: Block, cx: BlockCx)
 	b.flights.refresh = true
 	b.s.loading = true
 	local refs: { Model.PRRef } = {}
@@ -343,6 +368,8 @@ local function startRefresh(b: Block, cx: BlockCx)
 			b.s.loading = false
 			b.s.error = { operation = if err then err.operation else "hub", message = reasonOf(if err then err.message else "no answer"), rateLimit = if err then err.rateLimit else nil }
 		else
+			local canon, moved = State.canonicalAdded(readLocal().added, fresh.prs)
+			if moved then writeAdded(canon) end
 			local cache = Sync.merge(fresh, b.cache, readLocal(), now)
 			cache.lastModified = b.sched.lastModified
 			b.cache = cache
@@ -350,6 +377,11 @@ local function startRefresh(b: Block, cx: BlockCx)
 			State.replace(b.s, cache.prs, now, cache.refreshedAt)
 			local why = persist(b)
 			if why then b.s.error = { operation = KV_CACHE, message = "the cache couldn't be saved: " .. why } end
+			showAdded(b, cx)
+		end
+		if b.refetch then
+			b.refetch = false
+			return startRefresh(b, cx)
 		end
 		rearm(b, cx)
 		draw(b, cx)
@@ -514,11 +546,158 @@ end
 ACTIONS["card-agent"] = notYet("Fix with agent")
 ACTIONS["card-handoff"] = notYet("Hand off to Tandem")
 ACTIONS["card-summarize"] = notYet("Summarize")
-ACTIONS["card-copy"] = notYet("Copy link")
-ACTIONS["card-merge"] = notYet("Merge")
-ACTIONS["card-update"] = notYet("Update branch")
 ACTIONS["card-method"] = notYet("Merge method")
-ACTIONS["card-remove"] = notYet("Remove from Review requests")
+
+-- A refresh now: after an add, a remove, a merge or a branch update. One running already runs again when it ends.
+local function refetch(b: Block, cx: BlockCx)
+	if b.fixture or b.closed then return end
+	if b.flights.refresh then
+		b.refetch = true
+	else
+		startRefresh(b, cx)
+	end
+end
+
+-- A refresh a few seconds on, for changes GitHub's search takes a moment to show (a merge, a branch update).
+local function refetchSoon(b: Block, cx: BlockCx)
+	tern.timer(3000, function()
+		if not b.closed then refetch(b, cx) end
+	end)
+end
+
+-- Keeps the cache in step with a change the viewer just made to the board.
+local function keepCache(b: Block)
+	if b.cache then
+		b.cache.prs = b.s.prs
+		persist(b)
+	end
+end
+
+-- Copy link (C): "title url" as plain text, which is all Tern's clipboard takes.
+ACTIONS["card-copy"] = function(b, cx, key)
+	local card = State.card(b.s, key)
+	if not card then return end
+	State.select(b.s, key)
+	cx:copy(card.pr.title .. " " .. card.pr.url)
+	cx:toast("success", "Copied link")
+end
+
+-- Merge (M) asks first; ⌘⏎ merges with the repo's method, Esc cancels.
+ACTIONS["card-merge"] = function(b, cx, key)
+	State.askMerge(b.s, key)
+end
+ACTIONS["hub-confirm-cancel"] = function(b)
+	State.cancelConfirm(b.s)
+end
+ACTIONS["hub-confirm"] = function(b, cx)
+	local s = b.s
+	local confirm = s.confirm
+	local card = if confirm and confirm.kind == "merge" then State.card(s, confirm.keys[1]) else nil
+	State.cancelConfirm(s)
+	if not card then return end
+	local pr = card.pr
+	if b.fixture then return cx:toast("info", "The sample board doesn't merge", pr.key) end
+	local method = { kind = State.mergeMethodFor(s, pr) } :: any
+	State.setBusy(s, pr.key, "Merging…")
+	b.github.run(Github.commands.merge(pr, method), function(_, err)
+		if b.closed then return end
+		if err then
+			State.setBusy(s, pr.key, nil)
+			cx:toast("error", "Couldn't merge #" .. pr.number .. ": " .. reasonOf(err.message), pr.repo)
+		else
+			s.acted[pr.key] = true
+			State.dropPr(s, pr.key)
+			keepCache(b)
+			cx:toast("success", "Merged #" .. pr.number, pr.title)
+			refetchSoon(b, cx)
+		end
+		draw(b, cx)
+	end)
+end
+
+-- Update branch (U): a Ready card that is behind main. Its checks run again, so the card waits on them.
+ACTIONS["card-update"] = function(b, cx, key)
+	local s = b.s
+	local card = State.card(s, key)
+	if not card or s.busy[key] then return end
+	local pr = card.pr
+	if not pr.behind or pr.conflicts then return cx:toast("info", "#" .. pr.number .. " isn't behind " .. pr.baseBranch, pr.key) end
+	if b.fixture then return cx:toast("info", "The sample board doesn't update branches", pr.key) end
+	State.setBusy(s, key, "Updating…")
+	b.github.run(Github.commands.updateBranch(pr), function(_, err)
+		if b.closed then return end
+		if err then
+			State.setBusy(s, key, nil)
+			cx:toast("error", "Couldn't update #" .. pr.number .. ": " .. reasonOf(err.message), pr.repo)
+		else
+			s.acted[key] = true
+			State.branchUpdated(s, key)
+			keepCache(b)
+			cx:toast("success", "Updated #" .. pr.number .. " with " .. pr.baseBranch)
+			refetchSoon(b, cx)
+		end
+		draw(b, cx)
+	end)
+end
+
+-- Add by link (N) ---------------------------------------------------------------------------------------
+
+ACTIONS["hub-link"] = function(b, cx)
+	State.openLink(b.s)
+	frameLater(cx, { { "focus", Paths.linkField } })
+end
+ACTIONS["hub-link-clear"] = function(b)
+	State.closeLink(b.s, true)
+end
+
+-- ⏎: add a new pull request to Review requests, or show one the board already has.
+ACTIONS["hub-link-add"] = function(b, cx)
+	local s = b.s
+	local target = State.linkTarget(s)
+	if target.kind == "board" then
+		State.closeLink(s, true)
+		if State.show(s, target.pr.key) then revealSelected(b, cx) end
+	elseif target.kind == "new" then
+		local ref: Model.PRRef = { repo = target.repo, number = target.number }
+		if b.fixture then return cx:toast("info", "The sample board doesn't add pull requests") end
+		local added, why = State.withAdded(readLocal().added, ref)
+		local problem = why or (if added then writeAdded(added) else nil)
+		if problem then return cx:toast("error", "Couldn't add #" .. ref.number .. ": " .. problem, ref.repo) end
+		State.closeLink(s, true)
+		b.show = ref
+		cx:toast("info", "Adding #" .. ref.number .. " to Review requests…", ref.repo)
+		refetch(b, cx)
+	end
+end
+
+-- ⇧⏎: open it without adding it.
+ACTIONS["hub-link-open"] = function(b, cx)
+	local target = State.linkTarget(b.s)
+	if target.kind == "board" or target.kind == "new" then
+		State.closeLink(b.s, true)
+		openPr(b, cx, target.repo, target.number, b.generate)
+	end
+end
+
+-- Remove from Review requests (X): only on a pull request added by link.
+ACTIONS["card-remove"] = function(b, cx, key)
+	local s = b.s
+	local card = State.card(s, key)
+	if not card or not card.pr.addedByMe then return end
+	local pr = card.pr
+	if not b.fixture then
+		local added = readLocal().added
+		for at, ref in added do
+			if ref.number == pr.number and string.lower(ref.repo) == string.lower(pr.repo) then added[at] = nil end
+		end
+		local why = writeAdded(added)
+		if why then return cx:toast("error", "Couldn't remove #" .. pr.number .. ": " .. why, pr.repo) end
+	end
+	State.unadd(s, key)
+	keepCache(b)
+	cx:toast("info", "Removed #" .. pr.number .. " from Review requests", pr.repo)
+	refetch(b, cx)
+end
 
 local function dispatch(b: Block, cx: BlockCx, action: Keys.Action)
 	local handler = ACTIONS[action.act]
@@ -589,7 +768,7 @@ local block: BlockDef<Block> = {
 				probedAt = now, probeChanged = false, focusedAt = if live then now else nil, checksAt = nil,
 				refreshTried = nil, lastModified = if cache then cache.lastModified else nil,
 			},
-			closed = false,
+			closed = false, refetch = false, show = nil,
 		}
 		if fixture then
 			local sample = table.clone(SAMPLE_AGENT)
@@ -631,6 +810,10 @@ local block: BlockDef<Block> = {
 				s.keyed = true
 				dispatch(b, cx, next)
 			end
+			return true
+		end
+		if s.mode == "link" then
+			Fields.key(s.link, key)
 			return true
 		end
 		-- Menus and the key panel swallow the keys they don't use.

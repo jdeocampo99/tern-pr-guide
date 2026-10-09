@@ -5,6 +5,7 @@ local Card = require("./card")
 local Fields = require("../../text-field")
 local Help = require("./help")
 local Hints = require("./hints")
+local Link = require("./link")
 local Menus = require("./menus")
 local Model = require("../../hub/model")
 local Paths = require("./paths")
@@ -135,6 +136,7 @@ local function columns(s: State.State): Node
 				span("gp-hub-colcount" .. (if #entry.cards == 0 then " gp-hub-colcount-zero" else ""), tostring(#entry.cards)),
 			}),
 		}
+		if entry.column == "to_review" then table.insert(kids, Link.view(s)) end
 		if #entry.cards == 0 then
 			table.insert(kids, span("gp-hub-empty", emptyText(entry.column)))
 		else
