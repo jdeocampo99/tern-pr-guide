@@ -532,7 +532,12 @@ local function loadPr(b: Block, cx: BlockCx, pr: string)
   b.notice = Notice.loading(b.name, stage, b.notice)
   cx:render()
  end, function(loaded, err)
-  if loaded then showPr(b, loaded) else b.notice = Notice.failed(b.name, err :: string) end
+  if loaded then
+   Fetch.rememberPr(loaded)
+   showPr(b, loaded)
+  else
+   b.notice = Notice.failed(b.name, err :: string)
+  end
   autoGenerate(b, cx)
   cx:render()
  end)
@@ -580,7 +585,7 @@ end
 local function openPicker(b: Block, cx: BlockCx)
  local repo = b.repo
  local function anywhere()
-  local p = Picker.new({}, true)
+  local p = Picker.new({}, true, Fetch.recentPrs(), nil)
   showPicker(b, cx, p)
   Fetch.listAnywhere(function(prs, err)
    p.prs, p.error, p.loadedAt = prs, err, os.time()
@@ -590,7 +595,7 @@ local function openPicker(b: Block, cx: BlockCx)
  if not repo then return anywhere() end
  Fetch.originOf(repo, function(slug)
   if not slug then return anywhere() end
-  local p = Picker.new(Fetch.guidedPrs(repo), false)
+  local p = Picker.new(Fetch.guidedPrs(repo), false, Fetch.recentPrs(), slug)
   showPicker(b, cx, p)
   Fetch.listPrs(repo.root, function(prs, current, err)
    p.prs, p.current, p.error, p.loadedAt = prs, current, err, os.time()

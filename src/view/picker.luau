@@ -21,7 +21,8 @@ end
 local function row(p: Picker.Picker, item: Picker.Row, on: boolean): Node
  local pr = item.pr
  local title = { span("gp-sr-text", pr.title) }
- if p.guided[pr.number] then table.insert(title, span("gp-pk-tag", "Guide")) end
+ local inCheckout = pr.repo == nil or Picker.sameRepo(pr.repo, p.slug)
+ if inCheckout and p.guided[pr.number] then table.insert(title, span("gp-pk-tag", "Guide")) end
  if pr.draft then table.insert(title, span("gp-pk-tag", "Draft")) end
  local sub = if pr.repo then pr.repo .. " #" .. pr.number .. "  ·  " .. pr.author else pr.author .. "  ·  " .. pr.branch
  local cells = {}
@@ -63,12 +64,31 @@ local function skeleton(): Node
  return el("div", { class = "gp-sk-list", key = "skeleton" }, rows)
 end
 
+-- The section a row sits under: its own label (recently opened, or why GitHub lists it), else
+-- "This branch" or "Open" in a checkout's list once anything above the rest needs setting apart.
+local function groupOf(item: Picker.Row, labelled: boolean): string?
+ if item.pr.group then return item.pr.group end
+ if item.thisBranch then return "This branch" end
+ return if labelled then "Open" else nil
+end
+
 -- Rows under section labels, or what the list has instead of rows; true beside them while the
--- list is still loading.
+-- list is still loading. Recently opened PRs show at once, before the list arrives.
 local function list(p: Picker.Picker, repoName: string): ({ Node }, boolean)
  local kids = {}
  local hint = named(p)
  if hint then table.insert(kids, span("gp-sr-empty", hint)) end
+ local rows = Picker.rows(p)
+ local labelled = #rows > 0 and (rows[1].thisBranch or rows[1].pr.group ~= nil)
+ local label: string? = nil
+ for n, item in rows do
+  local group = groupOf(item, labelled)
+  if group and group ~= label then
+   table.insert(kids, span("gp-panel-h gp-pk-section", group))
+   label = group
+  end
+  table.insert(kids, row(p, item, n == p.selected))
+ end
  if p.error then
   table.insert(kids, span("gp-sr-empty gp-notice-error", p.error))
   return kids, false
@@ -78,26 +98,12 @@ local function list(p: Picker.Picker, repoName: string): ({ Node }, boolean)
   table.insert(kids, skeleton())
   return kids, true
  end
- local rows = Picker.rows(p)
  if #rows == 0 then
-  if #(p.prs :: { Picker.Summary }) == 0 then
+  if #(p.prs :: { Picker.Summary }) == 0 and #p.recent == 0 then
    table.insert(kids, span("gp-sr-empty", if p.anywhere then "None of your open pull requests are waiting on a review or yours. Paste a PR link to open one." else "No open pull requests in " .. repoName .. "."))
   elseif not hint then
-   table.insert(kids, span("gp-sr-empty", "No open pull request matches “" .. p.field.text .. "”."))
+   table.insert(kids, span("gp-sr-empty", "No pull request matches “" .. p.field.text .. "”."))
   end
-  return kids, false
- end
- -- With the current branch's PR on top, labels set it apart from the rest; across GitHub the
- -- labels say why each PR is listed.
- local split = rows[1].thisBranch
- local label: string? = nil
- for n, item in rows do
-  local group = if p.anywhere then item.pr.group elseif split and n <= 2 then (if n == 1 then "This branch" else "Open") else nil
-  if group and group ~= label then
-   table.insert(kids, span("gp-panel-h gp-pk-section", group))
-   label = group
-  end
-  table.insert(kids, row(p, item, n == p.selected))
  end
  return kids, false
 end

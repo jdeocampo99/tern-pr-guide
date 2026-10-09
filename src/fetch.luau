@@ -671,6 +671,21 @@ function M.saveRunSeconds(seconds: number)
  pcall(tern.kv.set, RUN_SECONDS_KEY, seconds)
 end
 
+-- The PRs the reader opened lately, newest first, which the picker lists above the rest.
+local RECENT_KEY = "recent"
+
+function M.recentPrs(): { Picker.Opened }
+ local ok, saved = pcall(tern.kv.get, RECENT_KEY)
+ return Picker.openedList(if ok then saved else nil)
+end
+
+-- Puts `pr` first in the recently opened list.
+function M.rememberPr(pr: Pr.PR)
+ if pr.repo == "" then return end
+ local opened = { repo = pr.repo, number = pr.number, title = pr.title, author = pr.author, at = os.date("!%Y-%m-%dT%H:%M:%SZ") :: string }
+ pcall(tern.kv.set, RECENT_KEY, Picker.remember(M.recentPrs(), opened))
+end
+
 -- The models `agent` can run with, from `omp models`. Calls `done` once; the list is empty when
 -- listing fails, which leaves the current model as the only choice.
 function M.listModels(agent: Agent.Agent, done: (models: { Agent.Model }) -> ())

@@ -77,6 +77,9 @@ To work on the plugin itself, clone it and use `tern plugin link /path/to/tern-p
 Open the command palette, choose **New PR review block**, and pick a PR. It works from any
 terminal, inside a clone or not, and any GitHub PR link opens: paste it and press `⏎`.
 
+PRs you opened lately, from any repo, sit at the top under **Recently opened**, so a PR you closed
+is one `⏎` away.
+
 In a terminal inside a clone, the picker lists that repo's open PRs, the one for your branch first.
 Type to filter by number, title, author or branch, or paste a PR number or link. Anywhere else, it
 lists your open PRs across GitHub: the ones waiting for your review first, then your own. Type to

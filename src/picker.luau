@@ -28,6 +28,10 @@ export type Picker = {
  field: Fields.Field,
  -- Nil until the list loads, or when loading it failed.
  prs: { Summary }?,
+ -- PRs the reader opened lately, in any repo, newest first; listed above the rest.
+ recent: { Summary },
+ -- The checkout's "owner/repo"; nil across GitHub.
+ slug: string?,
  -- The current branch's PR, when it has one.
  current: number?,
  error: string?,
@@ -43,6 +47,9 @@ export type Picker = {
 
 export type Row = { pr: Summary, thisBranch: boolean }
 
+-- A PR the reader opened, as kept between sessions.
+export type Opened = { repo: string, number: number, title: string, author: string, at: string }
+
 local M = {}
 
 M.LIST_FIELDS = "number,title,author,headRefName,isDraft,updatedAt,additions,deletions,changedFiles"
@@ -50,10 +57,50 @@ M.SEARCH_FIELDS = "repository,number,title,author,isDraft,updatedAt"
 
 -- How many PRs a list across GitHub keeps, and the labels it groups them under.
 M.ANYWHERE_CAP = 50
-M.REQUESTED, M.OWN = "Review requested", "Yours"
+M.REQUESTED, M.OWN, M.RECENT = "Review requested", "Yours", "Recently opened"
+-- How many recently opened PRs are kept.
+M.RECENT_CAP = 8
 
-function M.new(guided: { [number]: boolean }, anywhere: boolean): Picker
- return { field = Fields.create(), prs = nil, current = nil, error = nil, guided = guided, selected = 1, loadedAt = 0, anywhere = anywhere }
+-- The opened PRs kept in `saved` (whatever was stored), skipping anything malformed.
+function M.openedList(saved: any): { Opened }
+ local list = {}
+ if type(saved) ~= "table" then return list end
+ for _, item in saved do
+  if type(item) == "table" and type(item.repo) == "string" and type(item.number) == "number" then
+   table.insert(list, {
+    repo = item.repo,
+    number = item.number,
+    title = if type(item.title) == "string" then item.title else "",
+    author = if type(item.author) == "string" then item.author else "",
+    at = if type(item.at) == "string" then item.at else "",
+   })
+  end
+ end
+ return list
+end
+
+-- `list` with `opened` moved to the front, each PR once, at most RECENT_CAP long.
+function M.remember(list: { Opened }, opened: Opened): { Opened }
+ local out = { opened }
+ for _, item in list do
+  if #out >= M.RECENT_CAP then break end
+  if not (M.sameRepo(item.repo, opened.repo) and item.number == opened.number) then table.insert(out, item) end
+ end
+ return out
+end
+
+function M.new(guided: { [number]: boolean }, anywhere: boolean, recent: { Opened }, slug: string?): Picker
+ local rows = {}
+ for n, item in recent do
+  table.insert(rows, {
+   number = item.number, title = item.title, author = item.author, branch = "", draft = false,
+   updated = item.at, repo = item.repo, group = M.RECENT, key = "rc" .. n,
+  })
+ end
+ return {
+  field = Fields.create(), prs = nil, recent = rows, slug = slug, current = nil, error = nil, guided = guided,
+  selected = 1, loadedAt = os.time(), anywhere = anywhere,
+ }
 end
 
 -- Reads `gh pr list --json <LIST_FIELDS>`.
@@ -172,15 +219,35 @@ local function matches(pr: Summary, needle: string): boolean
  return false
 end
 
--- The PRs the list shows: the current branch's first, then the rest in GitHub's order, all matching
--- what the reader typed.
+-- Which repo `pr` is in: its own across GitHub, else the checkout's.
+local function repoOf(p: Picker, pr: Summary): string
+ return string.lower(pr.repo or p.slug or "")
+end
+
+-- The PRs the list shows, all matching what the reader typed: the current branch's PR, then the
+-- recently opened ones, then the rest in GitHub's order, each PR once.
 function M.rows(p: Picker): { Row }
- local rows: { Row } = {}
  local needle = string.lower(string.match(p.field.text, "^%s*(.-)%s*$") :: string)
+ local function shown(pr: Summary): boolean
+  return needle == "" or matches(pr, needle)
+ end
+ local branch: Summary? = nil
  for _, pr in p.prs or {} do
-  if needle == "" or matches(pr, needle) then
-   local row = { pr = pr, thisBranch = pr.number == p.current }
-   if row.thisBranch then table.insert(rows, 1, row) else table.insert(rows, row) end
+  if pr.number == p.current and pr.repo == nil then branch = pr end
+ end
+ local rows: { Row } = {}
+ local seen: { [string]: boolean } = {}
+ if branch then
+  seen[repoOf(p, branch) .. "#" .. branch.number] = true
+  if shown(branch) then table.insert(rows, { pr = branch, thisBranch = true }) end
+ end
+ for _, list in { p.recent, p.prs or {} } do
+  for _, pr in list do
+   local id = repoOf(p, pr) .. "#" .. pr.number
+   if not seen[id] then
+    seen[id] = true
+    if shown(pr) then table.insert(rows, { pr = pr, thisBranch = false }) end
+   end
   end
  end
  return rows
