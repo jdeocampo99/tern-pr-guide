@@ -229,7 +229,7 @@ Every issue builds against these types and signatures. An issue that needs a cha
 | `src/hub/sync.luau` | `model` |
 | `src/hub/agent-fix.luau` | `model`, `fixes` |
 | `src/hub/summary.luau` | `model`, `fixes` |
-| `window.luau` | `src/links.luau`, `src/hub/sync.luau` (to read `hub.cache`) |
+| `window.luau` | `src/links.luau` |
 | `src/hub/state.luau` | `model`, `sync`, `fixes`, `agent-fix`, `summary`, `src/text-field.luau`. Never `fetch`, `github` or `block`. |
 | `src/keys.luau` | `src/hub/state.luau`, plus what it requires today minus `picker` |
 | `src/view/hub/*.luau` | `state`, `model`, `fixes`, `src/view/ui.luau`, `src/text.luau`. Never `sync` or `github`. |
@@ -726,9 +726,9 @@ The hub has its own `ACTIONS` table, sent by clicks (`event`) and by `Keys.hubAc
 
 `window.luau` registers `tern.chrome.status(function(pane) ... end)` (`tern.d.luau:1939`). It returns one `StatusSegment` (`:955-964`) such as "PRs · 2 to review · 10 need fixes", with `command = "plugin.prguide.review"` and `tone = "error"` while flashing.
 
-- **The formatter only reads.** It reads `hub.cache` with `tern.kv.get` and uses `Cache.counts`. It never fetches, and it is pure per input (`:1931-1932`).
-- **The block can't refresh chrome.** `tern.chrome.refresh` is window only (`:1943`). `window_start` (`:1909`) starts a one-shot window timer that re-arms itself every 15 s, re-reads `hub.cache`, and calls `tern.chrome.refresh()` when `refreshedAt` or `counts` changed, and once when `flashAt` plus 10 s passes so the flash ends. It never calls it from the formatter (that raises, `:1942`).
-- **The segment is hidden** (the formatter returns nil) while no cache exists.
+- **The formatter is O(1).** Tern disables a status hook that takes more than about 4 ms (decoding the 42-PR `hub.cache` there did, and the segment never showed). The formatter reads one module-local `Seen` record (`current` in `window.luau`) and touches no kv. The hub block writes the tiny `hub.status` key beside `hub.cache` on every cache write, and the window's timer reads that key, never the cache.
+- **The block can't refresh chrome.** `tern.chrome.refresh` is window only (`:1943`). `window_start` (`:1909`) starts a one-shot window timer that re-arms itself every 15 s, re-reads `hub.status`, sets `current`, and calls `tern.chrome.refresh()` when `refreshedAt` or `counts` changed, and once when `flashAt` plus 10 s passes so the flash ends. It never calls it from the formatter (that raises, `:1942`).
+- **The segment is hidden** (the formatter returns nil) while `hub.status` is missing or malformed (`Links.statusOf`).
 
 ### Timers and visibility
 
@@ -745,6 +745,7 @@ The hub has its own `ACTIONS` table, sent by clicks (`event`) and by `Keys.hubAc
 | Key | Holds | Cap |
 |---|---|---|
 | `hub.cache` | `Sync.Cache`, schema 1: normalized records only | at most 50 PRs per search query; the serialized value at most 1 MiB, evicting the oldest `lastActivityAt` first; if the write still fails the block keeps its in-memory state and shows the error |
+| `hub.status` | `{ refreshedAt, counts = { toReview, needFixes, flashAt? } }`, written with every `hub.cache` write; what the status segment reads | a few bytes |
 | `hub.recent` | `{ Opened }`, migrated from the picker's `recent` key | 8 entries |
 | `hub.added` | `Sync.Added`: PRs added by link | 50 entries |
 | `hub.clones` | slug (`owner/repo`) → the clone path the viewer chose ("Choose folder…"), for the agent's clone lookup | one per repo |

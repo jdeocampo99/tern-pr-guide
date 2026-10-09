@@ -183,7 +183,7 @@ end
 -- Visibility is not observable from a block, so the hub polls for as long as the block exists (parked or in a
 -- background tab). A closed block is found out by a failing render, which ends every chain.
 
-local KV_CACHE, KV_ADDED = "hub.cache", "hub.added"
+local KV_CACHE, KV_ADDED, KV_STATUS = "hub.cache", "hub.added", "hub.status"
 local CACHE_CAP_BYTES = 1024 * 1024
 
 local function kvGet(key: string): any
@@ -210,6 +210,15 @@ local function readLocal(): Sync.Local
 	return { added = added, tandem = {} }
 end
 
+-- The tiny record the window's status segment reads every 15 s, so it never decodes the whole cache.
+local function writeStatus(cache: Sync.Cache)
+	local counts = cache.counts
+	pcall(tern.kv.set, KV_STATUS, {
+		refreshedAt = cache.refreshedAt,
+		counts = { toReview = counts.toReview, needFixes = counts.needFixes, flashAt = counts.flashAt },
+	})
+end
+
 -- Writes the cache under the size cap. Returns why it failed; memory state stands either way.
 local function persist(b: Block): string?
 	local cache = b.cache
@@ -217,6 +226,7 @@ local function persist(b: Block): string?
 	local ok, err = pcall(function()
 		tern.kv.set(KV_CACHE, Sync.save(cache, CACHE_CAP_BYTES, function(value: any): number return #tern.json.encode(value) end))
 	end)
+	if ok then writeStatus(cache) end
 	return if ok then nil else tostring(err)
 end
 
@@ -554,7 +564,10 @@ local block: BlockDef<Block> = {
 		elseif live then
 			-- Open from the cache with no network wait; the first tick refreshes in the background.
 			cache = readCache()
-			if cache then prs, refreshedAt = cache.prs, cache.refreshedAt end
+			if cache then
+				prs, refreshedAt = cache.prs, cache.refreshedAt
+				writeStatus(cache)
+			end
 		end
 		local s = State.new(prs, now, saved)
 		if fixture then

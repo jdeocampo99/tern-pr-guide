@@ -88,4 +88,10 @@ return function()
 	assert(Links.statusChanged(a, { refreshedAt = "t1", toReview = 3, needFixes = 1, flashing = false }))
 	assert(Links.statusChanged(a, { refreshedAt = "t1", toReview = 2, needFixes = 1, flashing = true }))
 	assert(Links.statusChanged(nil, a) and Links.statusChanged(a, nil) and not Links.statusChanged(nil, nil))
+	local raw = { refreshedAt = "t1", counts = { toReview = 2, needFixes = 10, flashAt = 1000 } }
+	local seen = Links.statusOf(raw, 1004)
+	assert(seen and seen.toReview == 2 and seen.needFixes == 10 and seen.flashing and seen.flashAt == 1000)
+	seen = Links.statusOf({ refreshedAt = "t1", counts = { toReview = 0, needFixes = 0 } }, 1004)
+	assert(seen and not seen.flashing and seen.flashAt == nil)
+	assert(Links.statusOf(nil, 0) == nil and Links.statusOf({ refreshedAt = "t", counts = {} }, 0) == nil and Links.statusOf({ counts = { toReview = 1, needFixes = 1 } }, 0) == nil)
 end

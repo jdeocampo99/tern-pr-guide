@@ -22,7 +22,7 @@ Read `DESIGN.md` and `docs/ui.md` before any change to `src/view/` or `guide.css
 - It has a key, listed in `view/help.luau` (the `?` panel) and the README Keys table, and shown as a `kbd` where `DESIGN.md`'s Keycaps section says.
 - A menu or list opened by key works without the mouse: arrows (or `j`/`k`) move, ⏎ chooses, Esc closes, and a keyboard-opened menu appears without animation.
 - The key and the click send the same `ACTIONS` entry.
-- In the picker, letter keys act only while the filter field is empty, as `j` and `k` do.
+- In the hub, letter keys act only while the search and add-by-link fields are empty, as `j` and `k` do.
 
 ## Copy
 

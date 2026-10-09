@@ -628,7 +628,7 @@ local block: BlockDef<Block> = {
   end
   if not pr then
    -- The PR hub is the way to a PR.
-   b.notice = { title = "Review a pull request", text = "Open a pull request from the PR hub (⌥⌘R)", error = true, done = {} }
+   b.notice = Notice.message("Review a pull request", "Open a pull request from the PR hub (⌥⌘R)")
    return b
   end
   -- Starts after init returns, so each stage renders over a block that exists.

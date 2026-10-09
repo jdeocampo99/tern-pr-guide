@@ -2,7 +2,6 @@
 -- The window half: the one way into the PR hub (the commands, the status segment and the link route that
 -- opens a card's PR in the guide), kept fresh by a timer and by focus. The decisions are in src/links.luau.
 local Links = require("./src/links")
-local Sync = require("./src/hub/sync")
 
 -- The node a window-sent event names. A block's root is always drawn, so the event reaches it even if
 -- Tern drops action events that name no node.
@@ -29,7 +28,8 @@ local function openHub(cx: WindowCx, generate: boolean)
   end
  end
  cx.layout:focus(pane)
- cx.session:event(pane, { ev = "action", id = HUB_NODE, act = "set-generate", value = if generate then "true" else "false" })
+ -- A hub restored from an earlier session may have no program to receive this; it is focused all the same.
+ pcall(function() cx.session:event(pane, { ev = "action", id = HUB_NODE, act = "set-generate", value = if generate then "true" else "false" }) end)
 end
 
 tern.command({ id = "review", title = "PR hub", keys = { "cmd+alt+r" }, run = function(cx: WindowCx) openHub(cx, false) end })
@@ -41,22 +41,13 @@ tern.command({ id = "hub-sample", title = "New PR hub sample block", run = funct
  cx:new_block("prguide.hub", { "fixture=cases" }, "tab")
 end })
 
--- The hub's cache, as the board last stored it; nil while there is none.
-local function readCache(): Sync.Cache?
- local ok, raw = pcall(tern.kv.get, "hub.cache")
- return if ok then Sync.load(raw) else nil
-end
+-- What the segment shows, set by the watcher below. The formatter reads only this: Tern disables a
+-- status hook that takes more than a few milliseconds, so it never touches kv or decodes anything.
+local current: Links.Seen? = nil
 
-local function seenOf(cache: Sync.Cache, now: number): Links.Seen
- local counts = cache.counts
- return { refreshedAt = cache.refreshedAt, toReview = counts.toReview, needFixes = counts.needFixes, flashing = Links.flashing(counts.flashAt, now) }
-end
-
--- Reads the cache and nothing else: a formatter never fetches. Hidden while there is no cache.
 tern.chrome.status(function(_pane): { StatusSegment }?
- local cache = readCache()
- if not cache then return nil end
- local seen = seenOf(cache, os.time())
+ local seen = current
+ if not seen then return nil end
  return { {
   text = Links.statusText(seen.toReview, seen.needFixes),
   tone = if seen.flashing then "error" else nil,
@@ -71,27 +62,27 @@ tern.route.link(function(link: LinkRequest, _cx: WindowCx): RouteDecision?
  return { block = "prguide.guide", args = Links.routeArgs(route) }
 end)
 
--- A hub pane that gains focus is told, so it can refresh when it has gone stale.
+-- A hub pane that gains focus is told, so it can refresh when it has gone stale. A pane restored from an
+-- earlier session may have no program to receive it: that is not worth a message.
 tern.on("focus", function(ev: FocusEvent, cx: WindowCx)
  local pane = cx.session:pane(ev.pane)
  if pane and isHub(pane.block) then
-  cx.session:event(ev.pane, { ev = "action", id = HUB_NODE, act = "hub-focused" })
+  pcall(function() cx.session:event(ev.pane, { ev = "action", id = HUB_NODE, act = "hub-focused" }) end)
  end
 end)
 
--- Blocks can't redraw the status line, so the window looks at the cache every 15 s (sooner when a
--- flash is about to end) and redraws it when what the segment shows has changed.
+-- Blocks can't redraw the status line, so the window reads the tiny `hub.status` record the hub writes
+-- every 15 s (sooner when a flash is about to end) and redraws the line when what it shows has changed.
 tern.on("window_start", function(_cx: WindowCx)
- local seen: Links.Seen? = nil
  local function watch()
   local now = os.time()
-  local cache = readCache()
-  local latest = if cache then seenOf(cache, now) else nil
-  if Links.statusChanged(seen, latest) then tern.chrome.refresh() end
-  seen = latest
-  tern.timer(math.ceil(Links.watchDelay(if cache then cache.counts.flashAt else nil, now) * 1000), watch)
+  local ok, raw = pcall(tern.kv.get, "hub.status")
+  local latest = if ok then Links.statusOf(raw, now) else nil
+  if Links.statusChanged(current, latest) then
+   current = latest
+   tern.chrome.refresh()
+  end
+  tern.timer(math.ceil(Links.watchDelay(if latest then latest.flashAt else nil, now) * 1000), watch)
  end
- local cache = readCache()
- seen = if cache then seenOf(cache, os.time()) else nil
- tern.timer(Links.WATCH_SECONDS * 1000, watch)
+ watch()
 end)

@@ -292,8 +292,8 @@ A card of boxes joined by labeled arrows, in the terminal font. A box's state is
 ### Review panel
 A two-column card. On the left, comments grouped under file names: one row per comment with a tick, avatar, kind label, line link and text, and unticked rows at 50% opacity. On the right, a shade side card with the summary field, three verdict rows (Comment, Approve, Request changes, each with a colored circle icon and a keycap), and the Submit button. Chosen verdicts take their meaning color as a wash plus hairline.
 
-### Search and picker rows
-One-line rows at `--r-ctl`, hover `--l1`, selected Review Blue wash. Search rows lead with a fixed 70px kind column. Picker rows keep fixed number, stat and time columns.
+### Search and recent rows
+One-line rows at `--r-ctl`, hover `--l1`, selected Review Blue wash. Search rows lead with a fixed 70px kind column. Recently opened rows in the hub keep fixed repository, title and time columns.
 
 ### Model and lens menu
 Tern's native `overlay`, anchored under the model button. It holds a search field, grouped model rows, and a footer with effort and lens segments. Segments are chip fills, and the chosen one is a card fill with a 1px lift.

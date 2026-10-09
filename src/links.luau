@@ -149,8 +149,18 @@ function M.watchDelay(flashAt: number?, now: number): number
  return M.WATCH_SECONDS
 end
 
+-- The tiny `hub.status` record the hub writes beside `hub.cache`: { refreshedAt, counts = { toReview, needFixes, flashAt? } }.
+-- Reads `raw` (whatever kv held) into what the segment shows; nil for anything malformed.
+function M.statusOf(raw: any, now: number): Seen?
+ if type(raw) ~= "table" or type(raw.refreshedAt) ~= "string" or type(raw.counts) ~= "table" then return nil end
+ local counts = raw.counts
+ if type(counts.toReview) ~= "number" or type(counts.needFixes) ~= "number" then return nil end
+ local flashAt = if type(counts.flashAt) == "number" then counts.flashAt else nil
+ return { refreshedAt = raw.refreshedAt, toReview = counts.toReview, needFixes = counts.needFixes, flashing = M.flashing(flashAt, now), flashAt = flashAt }
+end
+
 -- What the chrome last drew from, so the window knows when to redraw it.
-export type Seen = { refreshedAt: string, toReview: number, needFixes: number, flashing: boolean }
+export type Seen = { refreshedAt: string, toReview: number, needFixes: number, flashing: boolean, flashAt: number? }
 
 -- Whether the chrome must be redrawn: the cache was refreshed, a count moved or the flash ended.
 function M.statusChanged(old: Seen?, new: Seen?): boolean
