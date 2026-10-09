@@ -1,0 +1,2243 @@
+{
+ "data": {
+  "viewer": {
+   "login": "jubbydev"
+  },
+  "rateLimit": {
+   "cost": 8,
+   "remaining": 3582,
+   "resetAt": "2026-10-09T04:16:06Z",
+   "limit": 5000,
+   "used": 1418,
+   "nodeCount": 21450
+  },
+  "mine": {
+   "issueCount": 36,
+   "pageInfo": {
+    "hasNextPage": false,
+    "endCursor": "Y3Vyc29yOjM2"
+   },
+   "nodes": [
+    {
+     "id": "PR_kwDOU-hYAc8AAAABHXPuFg",
+     "number": 1,
+     "title": "<redacted>",
+     "url": "https://github.com/arg3t/neotern/pull/1",
+     "isDraft": false,
+     "updatedAt": "2026-10-09T00:45:09Z",
+     "headRefOid": "999a411ebf1942577d02c7d2e46958d2e6142a23",
+     "author": {
+      "login": "jubbydev"
+     },
+     "repository": {
+      "nameWithOwner": "arg3t/neotern"
+     },
+     "reviewDecision": null,
+     "mergeable": "MERGEABLE",
+     "mergeStateStatus": "CLEAN",
+     "totalCommentsCount": 1,
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "statusCheckRollup": null
+        }
+       }
+      ]
+     },
+     "latestReviews": {
+      "nodes": []
+     },
+     "reviewRequests": {
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 0,
+      "nodes": []
+     },
+     "comments": {
+      "totalCount": 1,
+      "nodes": [
+       {
+        "updatedAt": "2026-10-09T00:45:09Z",
+        "author": {
+         "login": "jubbydev"
+        }
+       }
+      ]
+     }
+    },
+    {
+     "id": "PR_kwDORh-wSM8AAAABHUA8FA",
+     "number": 1444,
+     "title": "<redacted>",
+     "url": "https://github.com/tagalog-learning-app/Tagalingo-App/pull/1444",
+     "isDraft": false,
+     "updatedAt": "2026-10-08T11:04:05Z",
+     "headRefOid": "4f8b66fecc781fe957245fd56d9c0a054ffde6cc",
+     "author": {
+      "login": "jubbydev"
+     },
+     "repository": {
+      "nameWithOwner": "tagalog-learning-app/Tagalingo-App"
+     },
+     "reviewDecision": null,
+     "mergeable": "MERGEABLE",
+     "mergeStateStatus": "CLEAN",
+     "totalCommentsCount": 5,
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "statusCheckRollup": {
+          "state": "SUCCESS"
+         }
+        }
+       }
+      ]
+     },
+     "latestReviews": {
+      "nodes": [
+       {
+        "author": {
+         "login": "chatgpt-codex-connector"
+        },
+        "state": "COMMENTED",
+        "submittedAt": "2026-10-08T11:02:27Z",
+        "commit": {
+         "oid": "5716f4541ba2ee8d0f212cc5314b1fc7e64563d3"
+        }
+       }
+      ]
+     },
+     "reviewRequests": {
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 2,
+      "nodes": [
+       {
+        "isResolved": false
+       },
+       {
+        "isResolved": false
+       }
+      ]
+     },
+     "comments": {
+      "totalCount": 2,
+      "nodes": [
+       {
+        "updatedAt": "2026-10-08T11:02:33Z",
+        "author": {
+         "login": "chatgpt-codex-connector"
+        }
+       }
+      ]
+     }
+    },
+    {
+     "id": "PR_kwDORh-wSM8AAAABHT9grw",
+     "number": 1443,
+     "title": "<redacted>",
+     "url": "https://github.com/tagalog-learning-app/Tagalingo-App/pull/1443",
+     "isDraft": false,
+     "updatedAt": "2026-10-08T10:58:16Z",
+     "headRefOid": "f8e1f28a797a727bc3225c7515514ddd4a6f8e02",
+     "author": {
+      "login": "jubbydev"
+     },
+     "repository": {
+      "nameWithOwner": "tagalog-learning-app/Tagalingo-App"
+     },
+     "reviewDecision": null,
+     "mergeable": "MERGEABLE",
+     "mergeStateStatus": "CLEAN",
+     "totalCommentsCount": 5,
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "statusCheckRollup": {
+          "state": "SUCCESS"
+         }
+        }
+       }
+      ]
+     },
+     "latestReviews": {
+      "nodes": [
+       {
+        "author": {
+         "login": "chatgpt-codex-connector"
+        },
+        "state": "COMMENTED",
+        "submittedAt": "2026-10-08T10:58:12Z",
+        "commit": {
+         "oid": "f8e1f28a797a727bc3225c7515514ddd4a6f8e02"
+        }
+       }
+      ]
+     },
+     "reviewRequests": {
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 2,
+      "nodes": [
+       {
+        "isResolved": false
+       },
+       {
+        "isResolved": false
+       }
+      ]
+     },
+     "comments": {
+      "totalCount": 2,
+      "nodes": [
+       {
+        "updatedAt": "2026-10-08T10:55:39Z",
+        "author": {
+         "login": "cloudflare-workers-and-pages"
+        }
+       }
+      ]
+     }
+    },
+    {
+     "id": "PR_kwDORh-wSM8AAAABHT3iEw",
+     "number": 1442,
+     "title": "<redacted>",
+     "url": "https://github.com/tagalog-learning-app/Tagalingo-App/pull/1442",
+     "isDraft": false,
+     "updatedAt": "2026-10-08T10:50:56Z",
+     "headRefOid": "7a31166990118b714a51a0e940620b317fa618aa",
+     "author": {
+      "login": "jubbydev"
+     },
+     "repository": {
+      "nameWithOwner": "tagalog-learning-app/Tagalingo-App"
+     },
+     "reviewDecision": null,
+     "mergeable": "MERGEABLE",
+     "mergeStateStatus": "CLEAN",
+     "totalCommentsCount": 2,
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "statusCheckRollup": {
+          "state": "SUCCESS"
+         }
+        }
+       }
+      ]
+     },
+     "latestReviews": {
+      "nodes": []
+     },
+     "reviewRequests": {
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 0,
+      "nodes": []
+     },
+     "comments": {
+      "totalCount": 2,
+      "nodes": [
+       {
+        "updatedAt": "2026-10-08T10:47:20Z",
+        "author": {
+         "login": "cloudflare-workers-and-pages"
+        }
+       }
+      ]
+     }
+    },
+    {
+     "id": "PR_kwDORh-wSM8AAAABHS7Glw",
+     "number": 1440,
+     "title": "<redacted>",
+     "url": "https://github.com/tagalog-learning-app/Tagalingo-App/pull/1440",
+     "isDraft": false,
+     "updatedAt": "2026-10-08T10:19:12Z",
+     "headRefOid": "05166bf465c9e524e217c1664d8a7da25e7e269b",
+     "author": {
+      "login": "jubbydev"
+     },
+     "repository": {
+      "nameWithOwner": "tagalog-learning-app/Tagalingo-App"
+     },
+     "reviewDecision": null,
+     "mergeable": "MERGEABLE",
+     "mergeStateStatus": "CLEAN",
+     "totalCommentsCount": 27,
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "statusCheckRollup": {
+          "state": "SUCCESS"
+         }
+        }
+       }
+      ]
+     },
+     "latestReviews": {
+      "nodes": [
+       {
+        "author": {
+         "login": "chatgpt-codex-connector"
+        },
+        "state": "COMMENTED",
+        "submittedAt": "2026-10-08T10:18:31Z",
+        "commit": {
+         "oid": "05166bf465c9e524e217c1664d8a7da25e7e269b"
+        }
+       }
+      ]
+     },
+     "reviewRequests": {
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 9,
+      "nodes": [
+       {
+        "isResolved": false
+       },
+       {
+        "isResolved": false
+       },
+       {
+        "isResolved": false
+       },
+       {
+        "isResolved": false
+       },
+       {
+        "isResolved": false
+       },
+       {
+        "isResolved": false
+       },
+       {
+        "isResolved": false
+       },
+       {
+        "isResolved": false
+       },
+       {
+        "isResolved": false
+       }
+      ]
+     },
+     "comments": {
+      "totalCount": 3,
+      "nodes": [
+       {
+        "updatedAt": "2026-10-08T10:17:11Z",
+        "author": {
+         "login": "cloudflare-workers-and-pages"
+        }
+       }
+      ]
+     }
+    },
+    {
+     "id": "PR_kwDORh-wSM8AAAABHS7ERQ",
+     "number": 1439,
+     "title": "<redacted>",
+     "url": "https://github.com/tagalog-learning-app/Tagalingo-App/pull/1439",
+     "isDraft": false,
+     "updatedAt": "2026-10-08T09:35:08Z",
+     "headRefOid": "4951b6e0d6c838845c82e51f5071d183690c8013",
+     "author": {
+      "login": "jubbydev"
+     },
+     "repository": {
+      "nameWithOwner": "tagalog-learning-app/Tagalingo-App"
+     },
+     "reviewDecision": null,
+     "mergeable": "MERGEABLE",
+     "mergeStateStatus": "CLEAN",
+     "totalCommentsCount": 8,
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "statusCheckRollup": {
+          "state": "SUCCESS"
+         }
+        }
+       }
+      ]
+     },
+     "latestReviews": {
+      "nodes": [
+       {
+        "author": {
+         "login": "chatgpt-codex-connector"
+        },
+        "state": "COMMENTED",
+        "submittedAt": "2026-10-08T09:25:39Z",
+        "commit": {
+         "oid": "c011192b4fbb3db0e6e23635e40fee328b9d86d4"
+        }
+       }
+      ]
+     },
+     "reviewRequests": {
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 2,
+      "nodes": [
+       {
+        "isResolved": false
+       },
+       {
+        "isResolved": false
+       }
+      ]
+     },
+     "comments": {
+      "totalCount": 3,
+      "nodes": [
+       {
+        "updatedAt": "2026-10-08T09:34:23Z",
+        "author": {
+         "login": "chatgpt-codex-connector"
+        }
+       }
+      ]
+     }
+    },
+    {
+     "id": "PR_kwDORh-wSM8AAAABHS6_GQ",
+     "number": 1438,
+     "title": "<redacted>",
+     "url": "https://github.com/tagalog-learning-app/Tagalingo-App/pull/1438",
+     "isDraft": false,
+     "updatedAt": "2026-10-08T09:38:07Z",
+     "headRefOid": "470dddd935dc917d0f9b5e5f84100c4bb71cdbeb",
+     "author": {
+      "login": "jubbydev"
+     },
+     "repository": {
+      "nameWithOwner": "tagalog-learning-app/Tagalingo-App"
+     },
+     "reviewDecision": null,
+     "mergeable": "MERGEABLE",
+     "mergeStateStatus": "CLEAN",
+     "totalCommentsCount": 6,
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "statusCheckRollup": {
+          "state": "SUCCESS"
+         }
+        }
+       }
+      ]
+     },
+     "latestReviews": {
+      "nodes": [
+       {
+        "author": {
+         "login": "chatgpt-codex-connector"
+        },
+        "state": "COMMENTED",
+        "submittedAt": "2026-10-08T09:22:09Z",
+        "commit": {
+         "oid": "470dddd935dc917d0f9b5e5f84100c4bb71cdbeb"
+        }
+       }
+      ]
+     },
+     "reviewRequests": {
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 1,
+      "nodes": [
+       {
+        "isResolved": false
+       }
+      ]
+     },
+     "comments": {
+      "totalCount": 3,
+      "nodes": [
+       {
+        "updatedAt": "2026-10-08T09:23:25Z",
+        "author": {
+         "login": "cloudflare-workers-and-pages"
+        }
+       }
+      ]
+     }
+    },
+    {
+     "id": "PR_kwDOUeDx688AAAABHIrL-Q",
+     "number": 354,
+     "title": "<redacted>",
+     "url": "https://github.com/jubbydev/tandem/pull/354",
+     "isDraft": false,
+     "updatedAt": "2026-10-08T10:18:23Z",
+     "headRefOid": "eec2e7105ac7c728999b7a9418e8a5665de2bb6e",
+     "author": {
+      "login": "jubbydev"
+     },
+     "repository": {
+      "nameWithOwner": "jubbydev/tandem"
+     },
+     "reviewDecision": null,
+     "mergeable": "CONFLICTING",
+     "mergeStateStatus": "DIRTY",
+     "totalCommentsCount": 5,
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "statusCheckRollup": null
+        }
+       }
+      ]
+     },
+     "latestReviews": {
+      "nodes": [
+       {
+        "author": {
+         "login": "chatgpt-codex-connector"
+        },
+        "state": "COMMENTED",
+        "submittedAt": "2026-10-07T14:09:36Z",
+        "commit": {
+         "oid": "eec2e7105ac7c728999b7a9418e8a5665de2bb6e"
+        }
+       }
+      ]
+     },
+     "reviewRequests": {
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 3,
+      "nodes": [
+       {
+        "isResolved": false
+       },
+       {
+        "isResolved": false
+       },
+       {
+        "isResolved": false
+       }
+      ]
+     },
+     "comments": {
+      "totalCount": 1,
+      "nodes": [
+       {
+        "updatedAt": "2026-10-07T14:09:39Z",
+        "author": {
+         "login": "chatgpt-codex-connector"
+        }
+       }
+      ]
+     }
+    },
+    {
+     "id": "PR_kwDOUeDx688AAAABHHxO9A",
+     "number": 352,
+     "title": "<redacted>",
+     "url": "https://github.com/jubbydev/tandem/pull/352",
+     "isDraft": false,
+     "updatedAt": "2026-10-08T02:26:40Z",
+     "headRefOid": "a48a5dae130b9cc623b4417bb12921e4110325f2",
+     "author": {
+      "login": "jubbydev"
+     },
+     "repository": {
+      "nameWithOwner": "jubbydev/tandem"
+     },
+     "reviewDecision": null,
+     "mergeable": "MERGEABLE",
+     "mergeStateStatus": "CLEAN",
+     "totalCommentsCount": 40,
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "statusCheckRollup": null
+        }
+       }
+      ]
+     },
+     "latestReviews": {
+      "nodes": [
+       {
+        "author": {
+         "login": "chatgpt-codex-connector"
+        },
+        "state": "COMMENTED",
+        "submittedAt": "2026-10-08T02:26:21Z",
+        "commit": {
+         "oid": "a48a5dae130b9cc623b4417bb12921e4110325f2"
+        }
+       }
+      ]
+     },
+     "reviewRequests": {
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 15,
+      "nodes": [
+       {
+        "isResolved": true
+       },
+       {
+        "isResolved": true
+       },
+       {
+        "isResolved": true
+       },
+       {
+        "isResolved": true
+       },
+       {
+        "isResolved": true
+       },
+       {
+        "isResolved": true
+       },
+       {
+        "isResolved": true
+       },
+       {
+        "isResolved": true
+       },
+       {
+        "isResolved": true
+       },
+       {
+        "isResolved": true
+       },
+       {
+        "isResolved": true
+       },
+       {
+        "isResolved": true
+       },
+       {
+        "isResolved": true
+       },
+       {
+        "isResolved": true
+       },
+       {
+        "isResolved": true
+       }
+      ]
+     },
+     "comments": {
+      "totalCount": 1,
+      "nodes": [
+       {
+        "updatedAt": "2026-10-08T02:26:24Z",
+        "author": {
+         "login": "chatgpt-codex-connector"
+        }
+       }
+      ]
+     }
+    },
+    {
+     "id": "PR_kwDOUeDx688AAAABG-oUJw",
+     "number": 337,
+     "title": "<redacted>",
+     "url": "https://github.com/jubbydev/tandem/pull/337",
+     "isDraft": false,
+     "updatedAt": "2026-10-07T14:43:24Z",
+     "headRefOid": "cc481147258a64bb2a1abfb15e74c90ccdd0446c",
+     "author": {
+      "login": "jubbydev"
+     },
+     "repository": {
+      "nameWithOwner": "jubbydev/tandem"
+     },
+     "reviewDecision": null,
+     "mergeable": "CONFLICTING",
+     "mergeStateStatus": "DIRTY",
+     "totalCommentsCount": 9,
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "statusCheckRollup": null
+        }
+       }
+      ]
+     },
+     "latestReviews": {
+      "nodes": [
+       {
+        "author": {
+         "login": "chatgpt-codex-connector"
+        },
+        "state": "COMMENTED",
+        "submittedAt": "2026-10-07T14:43:20Z",
+        "commit": {
+         "oid": "cc481147258a64bb2a1abfb15e74c90ccdd0446c"
+        }
+       }
+      ]
+     },
+     "reviewRequests": {
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 5,
+      "nodes": [
+       {
+        "isResolved": false
+       },
+       {
+        "isResolved": false
+       },
+       {
+        "isResolved": false
+       },
+       {
+        "isResolved": false
+       },
+       {
+        "isResolved": false
+       }
+      ]
+     },
+     "comments": {
+      "totalCount": 1,
+      "nodes": [
+       {
+        "updatedAt": "2026-10-07T14:43:24Z",
+        "author": {
+         "login": "chatgpt-codex-connector"
+        }
+       }
+      ]
+     }
+    },
+    {
+     "id": "PR_kwDORh-wSM8AAAABG2WIWA",
+     "number": 1434,
+     "title": "<redacted>",
+     "url": "https://github.com/tagalog-learning-app/Tagalingo-App/pull/1434",
+     "isDraft": false,
+     "updatedAt": "2026-10-06T05:38:33Z",
+     "headRefOid": "7239264712808f4546420c7a95827b45f495eb00",
+     "author": {
+      "login": "jubbydev"
+     },
+     "repository": {
+      "nameWithOwner": "tagalog-learning-app/Tagalingo-App"
+     },
+     "reviewDecision": null,
+     "mergeable": "MERGEABLE",
+     "mergeStateStatus": "CLEAN",
+     "totalCommentsCount": 4,
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "statusCheckRollup": {
+          "state": "SUCCESS"
+         }
+        }
+       }
+      ]
+     },
+     "latestReviews": {
+      "nodes": [
+       {
+        "author": {
+         "login": "chatgpt-codex-connector"
+        },
+        "state": "COMMENTED",
+        "submittedAt": "2026-10-06T05:38:30Z",
+        "commit": {
+         "oid": "7239264712808f4546420c7a95827b45f495eb00"
+        }
+       }
+      ]
+     },
+     "reviewRequests": {
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 1,
+      "nodes": [
+       {
+        "isResolved": false
+       }
+      ]
+     },
+     "comments": {
+      "totalCount": 2,
+      "nodes": [
+       {
+        "updatedAt": "2026-10-06T05:38:07Z",
+        "author": {
+         "login": "cloudflare-workers-and-pages"
+        }
+       }
+      ]
+     }
+    },
+    {
+     "id": "PR_kwDORh-wSM8AAAABGknPEQ",
+     "number": 1432,
+     "title": "<redacted>",
+     "url": "https://github.com/tagalog-learning-app/Tagalingo-App/pull/1432",
+     "isDraft": false,
+     "updatedAt": "2026-10-04T16:54:15Z",
+     "headRefOid": "6601b3b76c7eeaddd5f74fb471e24bd68e5c2ea0",
+     "author": {
+      "login": "jubbydev"
+     },
+     "repository": {
+      "nameWithOwner": "tagalog-learning-app/Tagalingo-App"
+     },
+     "reviewDecision": null,
+     "mergeable": "MERGEABLE",
+     "mergeStateStatus": "CLEAN",
+     "totalCommentsCount": 3,
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "statusCheckRollup": {
+          "state": "SUCCESS"
+         }
+        }
+       }
+      ]
+     },
+     "latestReviews": {
+      "nodes": []
+     },
+     "reviewRequests": {
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 0,
+      "nodes": []
+     },
+     "comments": {
+      "totalCount": 3,
+      "nodes": [
+       {
+        "updatedAt": "2026-10-04T16:54:15Z",
+        "author": {
+         "login": "cloudflare-workers-and-pages"
+        }
+       }
+      ]
+     }
+    },
+    {
+     "id": "PR_kwDORh-wSM8AAAABGknCQA",
+     "number": 1431,
+     "title": "<redacted>",
+     "url": "https://github.com/tagalog-learning-app/Tagalingo-App/pull/1431",
+     "isDraft": false,
+     "updatedAt": "2026-10-04T16:53:14Z",
+     "headRefOid": "35352ef8b841244d49fcd99c30a430b1fd16964a",
+     "author": {
+      "login": "jubbydev"
+     },
+     "repository": {
+      "nameWithOwner": "tagalog-learning-app/Tagalingo-App"
+     },
+     "reviewDecision": null,
+     "mergeable": "MERGEABLE",
+     "mergeStateStatus": "CLEAN",
+     "totalCommentsCount": 6,
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "statusCheckRollup": {
+          "state": "SUCCESS"
+         }
+        }
+       }
+      ]
+     },
+     "latestReviews": {
+      "nodes": [
+       {
+        "author": {
+         "login": "chatgpt-codex-connector"
+        },
+        "state": "COMMENTED",
+        "submittedAt": "2026-10-04T16:53:08Z",
+        "commit": {
+         "oid": "35352ef8b841244d49fcd99c30a430b1fd16964a"
+        }
+       }
+      ]
+     },
+     "reviewRequests": {
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 2,
+      "nodes": [
+       {
+        "isResolved": false
+       },
+       {
+        "isResolved": false
+       }
+      ]
+     },
+     "comments": {
+      "totalCount": 3,
+      "nodes": [
+       {
+        "updatedAt": "2026-10-04T16:52:12Z",
+        "author": {
+         "login": "cloudflare-workers-and-pages"
+        }
+       }
+      ]
+     }
+    },
+    {
+     "id": "PR_kwDORh-wSM8AAAABFU3_3Q",
+     "number": 1381,
+     "title": "<redacted>",
+     "url": "https://github.com/tagalog-learning-app/Tagalingo-App/pull/1381",
+     "isDraft": true,
+     "updatedAt": "2026-09-27T07:31:40Z",
+     "headRefOid": "56d6e06e3c7100671576f8850a75b3c003476541",
+     "author": {
+      "login": "jubbydev"
+     },
+     "repository": {
+      "nameWithOwner": "tagalog-learning-app/Tagalingo-App"
+     },
+     "reviewDecision": null,
+     "mergeable": "CONFLICTING",
+     "mergeStateStatus": "DIRTY",
+     "totalCommentsCount": 0,
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "statusCheckRollup": {
+          "state": "FAILURE"
+         }
+        }
+       }
+      ]
+     },
+     "latestReviews": {
+      "nodes": []
+     },
+     "reviewRequests": {
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 0,
+      "nodes": []
+     },
+     "comments": {
+      "totalCount": 0,
+      "nodes": []
+     }
+    },
+    {
+     "id": "PR_kwDORh-wSM8AAAABFTaJIg",
+     "number": 1377,
+     "title": "<redacted>",
+     "url": "https://github.com/tagalog-learning-app/Tagalingo-App/pull/1377",
+     "isDraft": false,
+     "updatedAt": "2026-09-27T01:26:11Z",
+     "headRefOid": "b772872ed9c50cdad1d53b2418d214c0a917c44e",
+     "author": {
+      "login": "jubbydev"
+     },
+     "repository": {
+      "nameWithOwner": "tagalog-learning-app/Tagalingo-App"
+     },
+     "reviewDecision": null,
+     "mergeable": "CONFLICTING",
+     "mergeStateStatus": "DIRTY",
+     "totalCommentsCount": 5,
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "statusCheckRollup": {
+          "state": "SUCCESS"
+         }
+        }
+       }
+      ]
+     },
+     "latestReviews": {
+      "nodes": [
+       {
+        "author": {
+         "login": "chatgpt-codex-connector"
+        },
+        "state": "COMMENTED",
+        "submittedAt": "2026-09-27T01:16:29Z",
+        "commit": {
+         "oid": "b772872ed9c50cdad1d53b2418d214c0a917c44e"
+        }
+       }
+      ]
+     },
+     "reviewRequests": {
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 2,
+      "nodes": [
+       {
+        "isResolved": false
+       },
+       {
+        "isResolved": false
+       }
+      ]
+     },
+     "comments": {
+      "totalCount": 2,
+      "nodes": [
+       {
+        "updatedAt": "2026-09-27T01:26:11Z",
+        "author": {
+         "login": "cloudflare-workers-and-pages"
+        }
+       }
+      ]
+     }
+    },
+    {
+     "id": "PR_kwDORh-wSM8AAAABFEGtQQ",
+     "number": 1370,
+     "title": "<redacted>",
+     "url": "https://github.com/tagalog-learning-app/Tagalingo-App/pull/1370",
+     "isDraft": false,
+     "updatedAt": "2026-09-26T07:00:24Z",
+     "headRefOid": "dd6eb3e767d5defa94afbf6c191387700ff80644",
+     "author": {
+      "login": "jubbydev"
+     },
+     "repository": {
+      "nameWithOwner": "tagalog-learning-app/Tagalingo-App"
+     },
+     "reviewDecision": null,
+     "mergeable": "CONFLICTING",
+     "mergeStateStatus": "DIRTY",
+     "totalCommentsCount": 5,
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "statusCheckRollup": {
+          "state": "SUCCESS"
+         }
+        }
+       }
+      ]
+     },
+     "latestReviews": {
+      "nodes": [
+       {
+        "author": {
+         "login": "chatgpt-codex-connector"
+        },
+        "state": "COMMENTED",
+        "submittedAt": "2026-09-25T06:24:55Z",
+        "commit": {
+         "oid": "2d28215fd62d93133ca7525137d6677fc454ff23"
+        }
+       }
+      ]
+     },
+     "reviewRequests": {
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 1,
+      "nodes": [
+       {
+        "isResolved": false
+       }
+      ]
+     },
+     "comments": {
+      "totalCount": 3,
+      "nodes": [
+       {
+        "updatedAt": "2026-09-25T06:20:29Z",
+        "author": {
+         "login": "linear-code"
+        }
+       }
+      ]
+     }
+    },
+    {
+     "id": "PR_kwDORh-wSM8AAAABERzvog",
+     "number": 1347,
+     "title": "<redacted>",
+     "url": "https://github.com/tagalog-learning-app/Tagalingo-App/pull/1347",
+     "isDraft": false,
+     "updatedAt": "2026-09-20T03:16:33Z",
+     "headRefOid": "916c078a400311390372cf34fe771cf3495efc23",
+     "author": {
+      "login": "jubbydev"
+     },
+     "repository": {
+      "nameWithOwner": "tagalog-learning-app/Tagalingo-App"
+     },
+     "reviewDecision": null,
+     "mergeable": "CONFLICTING",
+     "mergeStateStatus": "DIRTY",
+     "totalCommentsCount": 7,
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "statusCheckRollup": {
+          "state": "SUCCESS"
+         }
+        }
+       }
+      ]
+     },
+     "latestReviews": {
+      "nodes": [
+       {
+        "author": {
+         "login": "chatgpt-codex-connector"
+        },
+        "state": "COMMENTED",
+        "submittedAt": "2026-09-20T03:16:28Z",
+        "commit": {
+         "oid": "916c078a400311390372cf34fe771cf3495efc23"
+        }
+       }
+      ]
+     },
+     "reviewRequests": {
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 4,
+      "nodes": [
+       {
+        "isResolved": false
+       },
+       {
+        "isResolved": false
+       },
+       {
+        "isResolved": false
+       },
+       {
+        "isResolved": false
+       }
+      ]
+     },
+     "comments": {
+      "totalCount": 2,
+      "nodes": [
+       {
+        "updatedAt": "2026-09-20T03:16:33Z",
+        "author": {
+         "login": "chatgpt-codex-connector"
+        }
+       }
+      ]
+     }
+    },
+    {
+     "id": "PR_kwDORh-wSM7_adsW",
+     "number": 1230,
+     "title": "<redacted>",
+     "url": "https://github.com/tagalog-learning-app/Tagalingo-App/pull/1230",
+     "isDraft": false,
+     "updatedAt": "2026-08-15T07:07:44Z",
+     "headRefOid": "022d76914727ec038d91534bf336e82da9813797",
+     "author": {
+      "login": "jubbydev"
+     },
+     "repository": {
+      "nameWithOwner": "tagalog-learning-app/Tagalingo-App"
+     },
+     "reviewDecision": null,
+     "mergeable": "CONFLICTING",
+     "mergeStateStatus": "DIRTY",
+     "totalCommentsCount": 3,
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "statusCheckRollup": {
+          "state": "SUCCESS"
+         }
+        }
+       }
+      ]
+     },
+     "latestReviews": {
+      "nodes": [
+       {
+        "author": {
+         "login": "chatgpt-codex-connector"
+        },
+        "state": "COMMENTED",
+        "submittedAt": "2026-08-15T06:26:26Z",
+        "commit": {
+         "oid": "f7420722b8f4e47cd757e3bdaf3b972018583c48"
+        }
+       }
+      ]
+     },
+     "reviewRequests": {
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 1,
+      "nodes": [
+       {
+        "isResolved": false
+       }
+      ]
+     },
+     "comments": {
+      "totalCount": 1,
+      "nodes": [
+       {
+        "updatedAt": "2026-08-15T07:07:44Z",
+        "author": {
+         "login": "cloudflare-workers-and-pages"
+        }
+       }
+      ]
+     }
+    },
+    {
+     "id": "PR_kwDORh-wSM7725bE",
+     "number": 1214,
+     "title": "<redacted>",
+     "url": "https://github.com/tagalog-learning-app/Tagalingo-App/pull/1214",
+     "isDraft": false,
+     "updatedAt": "2026-08-07T03:46:12Z",
+     "headRefOid": "b9796818a99fbaf035c36c4003aabacd69b114c3",
+     "author": {
+      "login": "jubbydev"
+     },
+     "repository": {
+      "nameWithOwner": "tagalog-learning-app/Tagalingo-App"
+     },
+     "reviewDecision": null,
+     "mergeable": "CONFLICTING",
+     "mergeStateStatus": "DIRTY",
+     "totalCommentsCount": 1,
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "statusCheckRollup": {
+          "state": "SUCCESS"
+         }
+        }
+       }
+      ]
+     },
+     "latestReviews": {
+      "nodes": []
+     },
+     "reviewRequests": {
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 0,
+      "nodes": []
+     },
+     "comments": {
+      "totalCount": 1,
+      "nodes": [
+       {
+        "updatedAt": "2026-08-07T03:46:12Z",
+        "author": {
+         "login": "cloudflare-workers-and-pages"
+        }
+       }
+      ]
+     }
+    },
+    {
+     "id": "PR_kwDOTb3j38744ZID",
+     "number": 132,
+     "title": "<redacted>",
+     "url": "https://github.com/jubbydev/nextchord/pull/132",
+     "isDraft": false,
+     "updatedAt": "2026-07-31T08:11:32Z",
+     "headRefOid": "7f49de71ed6d4ed3c90bc1cf2d8b8e283ef16465",
+     "author": {
+      "login": "jubbydev"
+     },
+     "repository": {
+      "nameWithOwner": "jubbydev/nextchord"
+     },
+     "reviewDecision": null,
+     "mergeable": "MERGEABLE",
+     "mergeStateStatus": "CLEAN",
+     "totalCommentsCount": 0,
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "statusCheckRollup": null
+        }
+       }
+      ]
+     },
+     "latestReviews": {
+      "nodes": []
+     },
+     "reviewRequests": {
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 0,
+      "nodes": []
+     },
+     "comments": {
+      "totalCount": 0,
+      "nodes": []
+     }
+    },
+    {
+     "id": "PR_kwDOTb3j3872ecCe",
+     "number": 83,
+     "title": "<redacted>",
+     "url": "https://github.com/jubbydev/nextchord/pull/83",
+     "isDraft": false,
+     "updatedAt": "2026-07-26T07:44:33Z",
+     "headRefOid": "8e2ee10899cd86ee3b65eb7c67a4f49884b4c20d",
+     "author": {
+      "login": "jubbydev"
+     },
+     "repository": {
+      "nameWithOwner": "jubbydev/nextchord"
+     },
+     "reviewDecision": null,
+     "mergeable": "MERGEABLE",
+     "mergeStateStatus": "CLEAN",
+     "totalCommentsCount": 1,
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "statusCheckRollup": null
+        }
+       }
+      ]
+     },
+     "latestReviews": {
+      "nodes": []
+     },
+     "reviewRequests": {
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 0,
+      "nodes": []
+     },
+     "comments": {
+      "totalCount": 1,
+      "nodes": [
+       {
+        "updatedAt": "2026-07-26T05:30:16Z",
+        "author": {
+         "login": "jubbydev"
+        }
+       }
+      ]
+     }
+    },
+    {
+     "id": "PR_kwDOTb3j3872eSOr",
+     "number": 82,
+     "title": "<redacted>",
+     "url": "https://github.com/jubbydev/nextchord/pull/82",
+     "isDraft": false,
+     "updatedAt": "2026-07-26T05:06:24Z",
+     "headRefOid": "27ff4d06df350265a0ee8864e131a9d9eebbc56e",
+     "author": {
+      "login": "jubbydev"
+     },
+     "repository": {
+      "nameWithOwner": "jubbydev/nextchord"
+     },
+     "reviewDecision": null,
+     "mergeable": "MERGEABLE",
+     "mergeStateStatus": "CLEAN",
+     "totalCommentsCount": 0,
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "statusCheckRollup": null
+        }
+       }
+      ]
+     },
+     "latestReviews": {
+      "nodes": []
+     },
+     "reviewRequests": {
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 0,
+      "nodes": []
+     },
+     "comments": {
+      "totalCount": 0,
+      "nodes": []
+     }
+    },
+    {
+     "id": "PR_kwDOTb3j3872eOXE",
+     "number": 81,
+     "title": "<redacted>",
+     "url": "https://github.com/jubbydev/nextchord/pull/81",
+     "isDraft": false,
+     "updatedAt": "2026-07-26T04:59:47Z",
+     "headRefOid": "1f512e82521675cfa4720a85e4a460fa76641e85",
+     "author": {
+      "login": "jubbydev"
+     },
+     "repository": {
+      "nameWithOwner": "jubbydev/nextchord"
+     },
+     "reviewDecision": null,
+     "mergeable": "MERGEABLE",
+     "mergeStateStatus": "CLEAN",
+     "totalCommentsCount": 0,
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "statusCheckRollup": null
+        }
+       }
+      ]
+     },
+     "latestReviews": {
+      "nodes": []
+     },
+     "reviewRequests": {
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 0,
+      "nodes": []
+     },
+     "comments": {
+      "totalCount": 0,
+      "nodes": []
+     }
+    },
+    {
+     "id": "PR_kwDOTb3j3872eIxW",
+     "number": 80,
+     "title": "<redacted>",
+     "url": "https://github.com/jubbydev/nextchord/pull/80",
+     "isDraft": false,
+     "updatedAt": "2026-07-26T04:49:20Z",
+     "headRefOid": "5680e5217be1b2ab6b208c1a9d1c030fad7c3afa",
+     "author": {
+      "login": "jubbydev"
+     },
+     "repository": {
+      "nameWithOwner": "jubbydev/nextchord"
+     },
+     "reviewDecision": null,
+     "mergeable": "MERGEABLE",
+     "mergeStateStatus": "CLEAN",
+     "totalCommentsCount": 0,
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "statusCheckRollup": null
+        }
+       }
+      ]
+     },
+     "latestReviews": {
+      "nodes": []
+     },
+     "reviewRequests": {
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 0,
+      "nodes": []
+     },
+     "comments": {
+      "totalCount": 0,
+      "nodes": []
+     }
+    },
+    {
+     "id": "PR_kwDOTb3j3872d_0u",
+     "number": 79,
+     "title": "<redacted>",
+     "url": "https://github.com/jubbydev/nextchord/pull/79",
+     "isDraft": false,
+     "updatedAt": "2026-07-26T04:31:41Z",
+     "headRefOid": "8fe7e9415f431c70039429074e7622fd6f6eb63b",
+     "author": {
+      "login": "jubbydev"
+     },
+     "repository": {
+      "nameWithOwner": "jubbydev/nextchord"
+     },
+     "reviewDecision": null,
+     "mergeable": "MERGEABLE",
+     "mergeStateStatus": "CLEAN",
+     "totalCommentsCount": 0,
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "statusCheckRollup": null
+        }
+       }
+      ]
+     },
+     "latestReviews": {
+      "nodes": []
+     },
+     "reviewRequests": {
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 0,
+      "nodes": []
+     },
+     "comments": {
+      "totalCount": 0,
+      "nodes": []
+     }
+    },
+    {
+     "id": "PR_kwDOTb3j3872d2rC",
+     "number": 78,
+     "title": "<redacted>",
+     "url": "https://github.com/jubbydev/nextchord/pull/78",
+     "isDraft": false,
+     "updatedAt": "2026-07-26T04:14:01Z",
+     "headRefOid": "3b37b2c6d1711153ef449a70a929206fd8575d0e",
+     "author": {
+      "login": "jubbydev"
+     },
+     "repository": {
+      "nameWithOwner": "jubbydev/nextchord"
+     },
+     "reviewDecision": null,
+     "mergeable": "MERGEABLE",
+     "mergeStateStatus": "CLEAN",
+     "totalCommentsCount": 0,
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "statusCheckRollup": null
+        }
+       }
+      ]
+     },
+     "latestReviews": {
+      "nodes": []
+     },
+     "reviewRequests": {
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 0,
+      "nodes": []
+     },
+     "comments": {
+      "totalCount": 0,
+      "nodes": []
+     }
+    },
+    {
+     "id": "PR_kwDOTb3j3872dpil",
+     "number": 77,
+     "title": "<redacted>",
+     "url": "https://github.com/jubbydev/nextchord/pull/77",
+     "isDraft": false,
+     "updatedAt": "2026-07-26T03:54:45Z",
+     "headRefOid": "b4981f54e489928208a90ae3a5119ab47d15d84e",
+     "author": {
+      "login": "jubbydev"
+     },
+     "repository": {
+      "nameWithOwner": "jubbydev/nextchord"
+     },
+     "reviewDecision": null,
+     "mergeable": "CONFLICTING",
+     "mergeStateStatus": "DIRTY",
+     "totalCommentsCount": 0,
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "statusCheckRollup": null
+        }
+       }
+      ]
+     },
+     "latestReviews": {
+      "nodes": []
+     },
+     "reviewRequests": {
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 0,
+      "nodes": []
+     },
+     "comments": {
+      "totalCount": 0,
+      "nodes": []
+     }
+    },
+    {
+     "id": "PR_kwDORh-wSM7zsxDS",
+     "number": 1111,
+     "title": "<redacted>",
+     "url": "https://github.com/tagalog-learning-app/Tagalingo-App/pull/1111",
+     "isDraft": false,
+     "updatedAt": "2026-07-20T06:03:22Z",
+     "headRefOid": "289b37fc27896cbcaf068aea5d580606e64bbe92",
+     "author": {
+      "login": "jubbydev"
+     },
+     "repository": {
+      "nameWithOwner": "tagalog-learning-app/Tagalingo-App"
+     },
+     "reviewDecision": null,
+     "mergeable": "CONFLICTING",
+     "mergeStateStatus": "DIRTY",
+     "totalCommentsCount": 7,
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "statusCheckRollup": {
+          "state": "SUCCESS"
+         }
+        }
+       }
+      ]
+     },
+     "latestReviews": {
+      "nodes": [
+       {
+        "author": {
+         "login": "chatgpt-codex-connector"
+        },
+        "state": "COMMENTED",
+        "submittedAt": "2026-07-20T06:02:30Z",
+        "commit": {
+         "oid": "289b37fc27896cbcaf068aea5d580606e64bbe92"
+        }
+       }
+      ]
+     },
+     "reviewRequests": {
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 3,
+      "nodes": [
+       {
+        "isResolved": false
+       },
+       {
+        "isResolved": false
+       },
+       {
+        "isResolved": false
+       }
+      ]
+     },
+     "comments": {
+      "totalCount": 2,
+      "nodes": [
+       {
+        "updatedAt": "2026-07-20T06:03:22Z",
+        "author": {
+         "login": "cloudflare-workers-and-pages"
+        }
+       }
+      ]
+     }
+    },
+    {
+     "id": "PR_kwDOTb3j387zZWEP",
+     "number": 40,
+     "title": "<redacted>",
+     "url": "https://github.com/jubbydev/nextchord/pull/40",
+     "isDraft": false,
+     "updatedAt": "2026-07-18T19:41:10Z",
+     "headRefOid": "5f52deca6c075de99044da790118da8a2734a417",
+     "author": {
+      "login": "jubbydev"
+     },
+     "repository": {
+      "nameWithOwner": "jubbydev/nextchord"
+     },
+     "reviewDecision": null,
+     "mergeable": "CONFLICTING",
+     "mergeStateStatus": "DIRTY",
+     "totalCommentsCount": 0,
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "statusCheckRollup": null
+        }
+       }
+      ]
+     },
+     "latestReviews": {
+      "nodes": []
+     },
+     "reviewRequests": {
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 0,
+      "nodes": []
+     },
+     "comments": {
+      "totalCount": 0,
+      "nodes": []
+     }
+    },
+    {
+     "id": "PR_kwDORh-wSM7wrShq",
+     "number": 1058,
+     "title": "<redacted>",
+     "url": "https://github.com/tagalog-learning-app/Tagalingo-App/pull/1058",
+     "isDraft": false,
+     "updatedAt": "2026-07-12T14:00:13Z",
+     "headRefOid": "dd11720bf4fd9cd26b433be2648f932315351e4a",
+     "author": {
+      "login": "jubbydev"
+     },
+     "repository": {
+      "nameWithOwner": "tagalog-learning-app/Tagalingo-App"
+     },
+     "reviewDecision": null,
+     "mergeable": "CONFLICTING",
+     "mergeStateStatus": "DIRTY",
+     "totalCommentsCount": 6,
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "statusCheckRollup": {
+          "state": "SUCCESS"
+         }
+        }
+       }
+      ]
+     },
+     "latestReviews": {
+      "nodes": [
+       {
+        "author": {
+         "login": "chatgpt-codex-connector"
+        },
+        "state": "COMMENTED",
+        "submittedAt": "2026-07-12T04:41:48Z",
+        "commit": {
+         "oid": "95b61b8d80432208904d982de82d327816c6ddfd"
+        }
+       }
+      ]
+     },
+     "reviewRequests": {
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 2,
+      "nodes": [
+       {
+        "isResolved": false
+       },
+       {
+        "isResolved": false
+       }
+      ]
+     },
+     "comments": {
+      "totalCount": 2,
+      "nodes": [
+       {
+        "updatedAt": "2026-07-12T05:08:55Z",
+        "author": {
+         "login": "chatgpt-codex-connector"
+        }
+       }
+      ]
+     }
+    },
+    {
+     "id": "PR_kwDORh-wSM7u6qUs",
+     "number": 1016,
+     "title": "<redacted>",
+     "url": "https://github.com/tagalog-learning-app/Tagalingo-App/pull/1016",
+     "isDraft": false,
+     "updatedAt": "2026-07-07T16:29:14Z",
+     "headRefOid": "3a27d0b51f92d649d37f5060d87f290129813750",
+     "author": {
+      "login": "jubbydev"
+     },
+     "repository": {
+      "nameWithOwner": "tagalog-learning-app/Tagalingo-App"
+     },
+     "reviewDecision": null,
+     "mergeable": "CONFLICTING",
+     "mergeStateStatus": "DIRTY",
+     "totalCommentsCount": 1,
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "statusCheckRollup": {
+          "state": "SUCCESS"
+         }
+        }
+       }
+      ]
+     },
+     "latestReviews": {
+      "nodes": []
+     },
+     "reviewRequests": {
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 0,
+      "nodes": []
+     },
+     "comments": {
+      "totalCount": 1,
+      "nodes": [
+       {
+        "updatedAt": "2026-07-07T16:29:14Z",
+        "author": {
+         "login": "cloudflare-workers-and-pages"
+        }
+       }
+      ]
+     }
+    },
+    {
+     "id": "PR_kwDORh-wSM7uqtHy",
+     "number": 1013,
+     "title": "<redacted>",
+     "url": "https://github.com/tagalog-learning-app/Tagalingo-App/pull/1013",
+     "isDraft": false,
+     "updatedAt": "2026-07-07T05:42:06Z",
+     "headRefOid": "49c6959480d0dbbfb2c6c552b45b6d4cde818ff7",
+     "author": {
+      "login": "jubbydev"
+     },
+     "repository": {
+      "nameWithOwner": "tagalog-learning-app/Tagalingo-App"
+     },
+     "reviewDecision": null,
+     "mergeable": "CONFLICTING",
+     "mergeStateStatus": "DIRTY",
+     "totalCommentsCount": 3,
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "statusCheckRollup": {
+          "state": "FAILURE"
+         }
+        }
+       }
+      ]
+     },
+     "latestReviews": {
+      "nodes": []
+     },
+     "reviewRequests": {
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 0,
+      "nodes": []
+     },
+     "comments": {
+      "totalCount": 3,
+      "nodes": [
+       {
+        "updatedAt": "2026-07-07T05:40:04Z",
+        "author": {
+         "login": "cloudflare-workers-and-pages"
+        }
+       }
+      ]
+     }
+    },
+    {
+     "id": "PR_kwDORh-wSM7l-JtM",
+     "number": 693,
+     "title": "<redacted>",
+     "url": "https://github.com/tagalog-learning-app/Tagalingo-App/pull/693",
+     "isDraft": false,
+     "updatedAt": "2026-06-13T00:13:19Z",
+     "headRefOid": "5c6be51993089bb4b7d9fdedacdd5fc57e4cd20d",
+     "author": {
+      "login": "jubbydev"
+     },
+     "repository": {
+      "nameWithOwner": "tagalog-learning-app/Tagalingo-App"
+     },
+     "reviewDecision": null,
+     "mergeable": "CONFLICTING",
+     "mergeStateStatus": "DIRTY",
+     "totalCommentsCount": 1,
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "statusCheckRollup": {
+          "state": "SUCCESS"
+         }
+        }
+       }
+      ]
+     },
+     "latestReviews": {
+      "nodes": []
+     },
+     "reviewRequests": {
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 0,
+      "nodes": []
+     },
+     "comments": {
+      "totalCount": 1,
+      "nodes": [
+       {
+        "updatedAt": "2026-06-13T00:13:19Z",
+        "author": {
+         "login": "cloudflare-workers-and-pages"
+        }
+       }
+      ]
+     }
+    },
+    {
+     "id": "PR_kwDORzoYcs7cdOy1",
+     "number": 22,
+     "title": "<redacted>",
+     "url": "https://github.com/tagalog-learning-app/grammar-engine/pull/22",
+     "isDraft": false,
+     "updatedAt": "2026-05-17T23:35:07Z",
+     "headRefOid": "39f23c3be9df0dd0e2174208544f4950f22cf3e6",
+     "author": {
+      "login": "jubbydev"
+     },
+     "repository": {
+      "nameWithOwner": "tagalog-learning-app/grammar-engine"
+     },
+     "reviewDecision": null,
+     "mergeable": "MERGEABLE",
+     "mergeStateStatus": "CLEAN",
+     "totalCommentsCount": 2,
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "statusCheckRollup": null
+        }
+       }
+      ]
+     },
+     "latestReviews": {
+      "nodes": [
+       {
+        "author": {
+         "login": "chatgpt-codex-connector"
+        },
+        "state": "COMMENTED",
+        "submittedAt": "2026-05-17T23:35:07Z",
+        "commit": {
+         "oid": "39f23c3be9df0dd0e2174208544f4950f22cf3e6"
+        }
+       }
+      ]
+     },
+     "reviewRequests": {
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 1,
+      "nodes": [
+       {
+        "isResolved": false
+       }
+      ]
+     },
+     "comments": {
+      "totalCount": 0,
+      "nodes": []
+     }
+    },
+    {
+     "id": "MDExOlB1bGxSZXF1ZXN0NTQzMDAzNTU2",
+     "number": 1,
+     "title": "<redacted>",
+     "url": "https://github.com/jubbydev/jdeocampo99.github.io/pull/1",
+     "isDraft": false,
+     "updatedAt": "2020-12-20T01:49:37Z",
+     "headRefOid": "e1020364180a296376972e45c3096b0fc1b19c1b",
+     "author": {
+      "login": "jubbydev"
+     },
+     "repository": {
+      "nameWithOwner": "jubbydev/jdeocampo99.github.io"
+     },
+     "reviewDecision": null,
+     "mergeable": "CONFLICTING",
+     "mergeStateStatus": "DIRTY",
+     "totalCommentsCount": 0,
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "statusCheckRollup": null
+        }
+       }
+      ]
+     },
+     "latestReviews": {
+      "nodes": []
+     },
+     "reviewRequests": {
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 0,
+      "nodes": []
+     },
+     "comments": {
+      "totalCount": 0,
+      "nodes": []
+     }
+    },
+    {
+     "id": "MDExOlB1bGxSZXF1ZXN0NDQ3MjE4NTU2",
+     "number": 27,
+     "title": "<redacted>",
+     "url": "https://github.com/mstaskauskas/productivity-app/pull/27",
+     "isDraft": false,
+     "updatedAt": "2020-08-23T03:51:38Z",
+     "headRefOid": "971945c5b7d660cfbcc37eb5009b7ca55ba0f8da",
+     "author": {
+      "login": "jubbydev"
+     },
+     "repository": {
+      "nameWithOwner": "mstaskauskas/productivity-app"
+     },
+     "reviewDecision": "APPROVED",
+     "mergeable": "MERGEABLE",
+     "mergeStateStatus": "CLEAN",
+     "totalCommentsCount": 3,
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "statusCheckRollup": null
+        }
+       }
+      ]
+     },
+     "latestReviews": {
+      "nodes": [
+       {
+        "author": {
+         "login": "zakattack9"
+        },
+        "state": "APPROVED",
+        "submittedAt": "2020-07-10T23:13:22Z",
+        "commit": {
+         "oid": "971945c5b7d660cfbcc37eb5009b7ca55ba0f8da"
+        }
+       },
+       {
+        "author": {
+         "login": "mstaskauskas"
+        },
+        "state": "APPROVED",
+        "submittedAt": "2020-08-23T03:51:38Z",
+        "commit": {
+         "oid": "971945c5b7d660cfbcc37eb5009b7ca55ba0f8da"
+        }
+       }
+      ]
+     },
+     "reviewRequests": {
+      "nodes": []
+     },
+     "reviewThreads": {
+      "totalCount": 3,
+      "nodes": [
+       {
+        "isResolved": true
+       },
+       {
+        "isResolved": true
+       },
+       {
+        "isResolved": false
+       }
+      ]
+     },
+     "comments": {
+      "totalCount": 0,
+      "nodes": []
+     }
+    }
+   ]
+  },
+  "requested": {
+   "issueCount": 1,
+   "pageInfo": {
+    "hasNextPage": false,
+    "endCursor": "Y3Vyc29yOjE="
+   },
+   "nodes": [
+    {
+     "id": "PR_kwDORh-wSM7zI-oi",
+     "number": 1098,
+     "title": "<redacted>",
+     "url": "https://github.com/tagalog-learning-app/Tagalingo-App/pull/1098",
+     "isDraft": false,
+     "updatedAt": "2026-07-17T20:47:54Z",
+     "headRefOid": "0c599edb98e9966923edaff040dcc830b178f24b",
+     "author": {
+      "login": "rldavid5"
+     },
+     "repository": {
+      "nameWithOwner": "tagalog-learning-app/Tagalingo-App"
+     },
+     "reviewDecision": null,
+     "mergeable": "MERGEABLE",
+     "mergeStateStatus": "CLEAN",
+     "totalCommentsCount": 9,
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "statusCheckRollup": {
+          "state": "SUCCESS"
+         }
+        }
+       }
+      ]
+     },
+     "latestReviews": {
+      "nodes": [
+       {
+        "author": {
+         "login": "chatgpt-codex-connector"
+        },
+        "state": "COMMENTED",
+        "submittedAt": "2026-07-17T20:25:54Z",
+        "commit": {
+         "oid": "2c537f477abfeeac5e3a4aad5a67b539e99f6b29"
+        }
+       }
+      ]
+     },
+     "reviewRequests": {
+      "nodes": [
+       {
+        "requestedReviewer": {
+         "__typename": "User",
+         "login": "jubbydev"
+        }
+       }
+      ]
+     },
+     "reviewThreads": {
+      "totalCount": 3,
+      "nodes": [
+       {
+        "isResolved": true
+       },
+       {
+        "isResolved": true
+       },
+       {
+        "isResolved": true
+       }
+      ]
+     },
+     "comments": {
+      "totalCount": 2,
+      "nodes": [
+       {
+        "updatedAt": "2026-07-17T20:47:54Z",
+        "author": {
+         "login": "cloudflare-workers-and-pages"
+        }
+       }
+      ]
+     }
+    }
+   ]
+  },
+  "reviewed": {
+   "issueCount": 0,
+   "pageInfo": {
+    "hasNextPage": false,
+    "endCursor": null
+   },
+   "nodes": []
+  }
+ }
+}
