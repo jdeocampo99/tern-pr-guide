@@ -6,6 +6,7 @@ local modules: { { name: string, run: () -> () } } = {
 	{ name = "model_test", run = require("./model_test") },
 	{ name = "github_test", run = require("./github_test") },
 	{ name = "state_test", run = require("./state_test") },
+	{ name = "sync_test", run = require("./sync_test") },
 }
 
 local failed = 0

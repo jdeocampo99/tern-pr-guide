@@ -176,6 +176,13 @@ function M.new(prs: { HubPR }, now: number, saved: any): State
 	return s
 end
 
+-- Swaps in a refresh's pull requests: records the time, clears loading and the error, and rebuilds the board.
+function M.replace(s: State, prs: { HubPR }, now: number, refreshedAt: string?)
+	s.prs, s.now, s.refreshedAt = prs, now, refreshedAt
+	s.loading, s.error = false, nil
+	M.project(s)
+end
+
 -- What a saved state holds, for the block's `save`.
 function M.saved(s: State): { tab: Tab, sort: Sort, repositories: { string }?, folded: { [string]: boolean } }
 	local repositories: { string }? = nil

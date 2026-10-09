@@ -6,19 +6,37 @@ local Agent = require("../agent")
 local Board = require("../view/hub/board")
 local Fetch = require("../fetch")
 local Fields = require("../text-field")
+local Github = require("../github")
 local Keys = require("../keys")
 local Model = require("./model")
 local Paths = require("../view/hub/paths")
 local State = require("./state")
+local Sync = require("./sync")
 
 type State = State.State
 
--- The hub block's own state. Later changes add the GitHub client, the cache and the timers here.
+export type Timers = { probe: TimerHandle?, refresh: TimerHandle?, checks: TimerHandle?, debounce: TimerHandle?, ring: TimerHandle? }
+
+-- What the schedule reads, kept between ticks. Times are seconds since the epoch.
+type Sched = {
+	probedAt: number?, probeChanged: boolean, -- the last probe, and whether it saw a change no refresh has covered
+	focusedAt: number?, -- a focus (or the open) no refresh has covered
+	checksAt: number?,
+	refreshTried: number?, -- the last refresh attempt, kept on failure so a failed refresh never retries at once
+	lastModified: string?, -- the probe's validator
+}
+
+-- The hub block's own state.
 export type Block = {
 	s: State,
+	cache: Sync.Cache?, -- what `hub.cache` last held (or this block last wrote)
 	fixture: string?, -- `fixture=cases`: recorded data, no network, no timers
 	generate: boolean, -- ⏎ opens the PR with the AI guide started
 	agent: Agent.Agent?, -- the reader's own agent, once found (never with a fixture)
+	github: Github.Client, timers: Timers,
+	flights: { refresh: boolean, checks: boolean, probe: boolean }, -- one call of each kind at a time
+	sched: Sched,
+	closed: boolean, -- a render failed: the window is gone, so no timer starts anything
 }
 
 type Handler = (b: Block, cx: BlockCx, value: string) -> ()
@@ -122,7 +140,226 @@ local function pickRow(b: Block, cx: BlockCx, index: number, ACTIONS: { [string]
 	if menu == "agent" then keepAgentChoice(b) end
 end
 
+-- Sync: the cache, the timers and the live data ----------------------------------------------------------
+-- Visibility is not observable from a block, so the hub polls for as long as the block exists (parked or in a
+-- background tab). A closed block is found out by a failing render, which ends every chain.
+
+local KV_CACHE, KV_ADDED = "hub.cache", "hub.added"
+local CACHE_CAP_BYTES = 1024 * 1024
+
+local function kvGet(key: string): any
+	local ok, value = pcall(tern.kv.get, key)
+	return if ok then value else nil
+end
+
+-- The cache other windows (or an earlier run) stored, if it is a valid schema 1.
+local function readCache(): Sync.Cache?
+	return Sync.load(kvGet(KV_CACHE))
+end
+
+-- Facts only this machine knows. `tandem` waits for the Tandem change.
+local function readLocal(): Sync.Local
+	local added: Sync.Added = {}
+	local raw = kvGet(KV_ADDED)
+	if type(raw) == "table" then
+		for key, ref in raw do
+			if type(key) == "string" and type(ref) == "table" and type(ref.repo) == "string" and type(ref.number) == "number" then
+				added[key] = { repo = ref.repo, number = ref.number }
+			end
+		end
+	end
+	return { added = added, tandem = {} }
+end
+
+-- Writes the cache under the size cap. Returns why it failed; memory state stands either way.
+local function persist(b: Block): string?
+	local cache = b.cache
+	if not cache then return nil end
+	local ok, err = pcall(function()
+		tern.kv.set(KV_CACHE, Sync.save(cache, CACHE_CAP_BYTES, function(value: any): number return #tern.json.encode(value) end))
+	end)
+	return if ok then nil else tostring(err)
+end
+
+local function cachedAt(b: Block): number?
+	return if b.cache then Model.epoch(b.cache.refreshedAt) else nil
+end
+
+-- Takes another window's newer cache, so windows share one refresh.
+local function adoptShared(b: Block)
+	local shared = readCache()
+	if not shared then return end
+	local theirs, mine = Model.epoch(shared.refreshedAt), cachedAt(b)
+	if theirs and (mine == nil or theirs > mine) then
+		b.cache = shared
+		State.replace(b.s, shared.prs, os.time(), shared.refreshedAt)
+	end
+end
+
+local function running(b: Block): { string }
+	local ids = {}
+	for _, pr in b.s.prs do
+		if pr.checks.state == "pending" then table.insert(ids, pr.id) end
+	end
+	return ids
+end
+
+-- The reason alone from a "Couldn't …: reason" message; the board adds its own lead-in.
+local function reasonOf(message: string): string
+	return string.match(message, "^Couldn't [^:]*: (.*)$") or message
+end
+
+local onProbe: (b: Block, cx: BlockCx) -> ()
+local onRefresh: (b: Block, cx: BlockCx) -> ()
+local onChecks: (b: Block, cx: BlockCx) -> ()
+
+-- Cancels the named timer's old handle, then arms a one-shot after `seconds` (nil leaves it off).
+local function arm(b: Block, cx: BlockCx, name: "probe" | "refresh" | "checks" | "debounce", seconds: number?, fn: (Block, BlockCx) -> ())
+	local timers = b.timers :: any
+	local old: TimerHandle? = timers[name]
+	if old then old:cancel() end
+	timers[name] = nil
+	if seconds == nil or b.closed then return end
+	timers[name] = tern.timer(math.max(1, math.ceil(seconds * 1000)), function()
+		timers[name] = nil
+		if b.closed then return end
+		fn(b, cx)
+	end)
+end
+
+local function stop(b: Block)
+	b.closed = true
+	local timers = b.timers :: any
+	for _, name in { "probe", "refresh", "checks", "debounce", "ring" } do
+		local handle: TimerHandle? = timers[name]
+		if handle then handle:cancel() end
+		timers[name] = nil
+	end
+end
+
+-- Renders; a render that raises means the block is gone.
+local function draw(b: Block, cx: BlockCx)
+	if b.closed then return end
+	if not pcall(function() cx:render() end) then stop(b) end
+end
+
+-- Arms the probe, refresh (as the debounce while a change or focus waits) and checks timers from the schedule.
+local function rearm(b: Block, cx: BlockCx)
+	if b.fixture or b.closed then return end
+	adoptShared(b)
+	local sched = b.sched
+	local last, tried = cachedAt(b), sched.refreshTried
+	local plan = Sync.schedule({
+		now = os.time(), refreshedAt = if last and tried then math.max(last, tried) else (last or tried),
+		refreshing = b.flights.refresh, probedAt = sched.probedAt, probeChanged = sched.probeChanged,
+		focusedAt = sched.focusedAt, checksAt = sched.checksAt, running = running(b),
+	})
+	local early = sched.probeChanged or sched.focusedAt ~= nil
+	arm(b, cx, "probe", plan.probe, onProbe)
+	arm(b, cx, "refresh", if early then nil else plan.refresh, onRefresh)
+	arm(b, cx, "debounce", if early then plan.refresh else nil, onRefresh)
+	arm(b, cx, "checks", plan.checks, onChecks)
+end
+
+onProbe = function(b, cx)
+	if b.flights.probe then return end
+	b.flights.probe = true
+	b.github.probe(b.sched.lastModified, function(value, err)
+		b.flights.probe = false
+		if b.closed then return end
+		b.sched.probedAt = os.time()
+		-- A failed probe is "no change", never an error on screen and never a retry before the next minute: the
+		-- viewer's gh token often lacks the `notifications` scope, so /notifications answers 404, and the
+		-- five-minute refresh still runs. The first answer only sets the validator.
+		if value then
+			if value.changed and b.sched.lastModified ~= nil then b.sched.probeChanged = true end
+			if value.lastModified then b.sched.lastModified = value.lastModified end
+		end
+		rearm(b, cx)
+		draw(b, cx)
+	end)
+end
+
+local function startRefresh(b: Block, cx: BlockCx)
+	b.flights.refresh = true
+	b.s.loading = true
+	local refs: { Model.PRRef } = {}
+	for _, ref in readLocal().added do table.insert(refs, ref) end
+	b.github.refresh({ added = refs, previous = b.s.prs }, function(fresh, err)
+		b.flights.refresh = false
+		if b.closed then return end
+		local now = os.time()
+		b.sched.refreshTried = now
+		if not fresh then
+			b.s.loading = false
+			b.s.error = { operation = if err then err.operation else "hub", message = reasonOf(if err then err.message else "no answer"), rateLimit = if err then err.rateLimit else nil }
+		else
+			local cache = Sync.merge(fresh, b.cache, readLocal(), now)
+			cache.lastModified = b.sched.lastModified
+			b.cache = cache
+			b.sched.probeChanged, b.sched.focusedAt = false, nil
+			State.replace(b.s, cache.prs, now, cache.refreshedAt)
+			local why = persist(b)
+			if why then b.s.error = { operation = KV_CACHE, message = "the cache couldn't be saved: " .. why } end
+		end
+		rearm(b, cx)
+		draw(b, cx)
+	end)
+	draw(b, cx)
+end
+
+onRefresh = function(b, cx)
+	if b.flights.refresh then return end
+	adoptShared(b)
+	-- Another window refreshed a moment ago: its cache is the answer.
+	local last = cachedAt(b)
+	if last and os.time() - last < Sync.DEBOUNCE then
+		rearm(b, cx)
+		draw(b, cx)
+		return
+	end
+	startRefresh(b, cx)
+end
+
+onChecks = function(b, cx)
+	if b.flights.checks then return end
+	local ids = running(b)
+	if #ids == 0 then return rearm(b, cx) end
+	b.flights.checks = true
+	b.github.checks(ids, function(update, err)
+		b.flights.checks = false
+		if b.closed then return end
+		b.sched.checksAt = os.time()
+		if update then
+			local changed = false
+			for _, pr in b.s.prs do
+				local result = update.byId[pr.id]
+				-- A moved head means the next full refresh knows better.
+				if result and result.headOid == pr.headOid then
+					pr.checks = result.checks
+					changed = true
+				end
+			end
+			if changed then
+				b.s.now = os.time()
+				State.project(b.s)
+				local why = persist(b)
+				if why then b.s.error = { operation = KV_CACHE, message = "the cache couldn't be saved: " .. why } end
+			end
+		end
+		rearm(b, cx)
+		draw(b, cx)
+	end)
+end
+
 local ACTIONS: { [string]: Handler } = {}
+
+-- The window sends this when the hub's pane gains focus; the schedule applies the debounce.
+ACTIONS["hub-focused"] = function(b, cx)
+	if b.fixture then return end
+	b.sched.focusedAt = os.time()
+	rearm(b, cx)
+end
 
 ACTIONS["hub-select"] = function(b, cx, key)
 	State.select(b.s, key)
@@ -261,21 +498,38 @@ local block: BlockDef<Block> = {
 		local now = os.time()
 		local refreshedAt: string? = nil
 		local fixture = if opts then opts.fixture else nil
+		local live = opts ~= nil and fixture == nil
+		local cache: Sync.Cache? = nil
 		if fixture then
 			local data = FIXTURES[fixture]()
 			prs, now, refreshedAt = data.prs, data.asOf, data.asOfIso
+		elseif live then
+			-- Open from the cache with no network wait; the first tick refreshes in the background.
+			cache = readCache()
+			if cache then prs, refreshedAt = cache.prs, cache.refreshedAt end
 		end
 		local s = State.new(prs, now, saved)
 		s.refreshedAt = refreshedAt
+		s.loading = live and cache == nil
 		s.narrow = cx.cols > 0 and cx.cols < NARROW_COLS
 		if problem then s.error = { operation = "hub", message = problem } end
-		local b: Block = { s = s, fixture = fixture, generate = opts ~= nil and opts.generate, agent = nil }
+		local b: Block = {
+			s = s, cache = cache, fixture = fixture, generate = opts ~= nil and opts.generate, agent = nil,
+			github = Github.client(Fetch.runner, tern.json.decode), timers = {},
+			flights = { refresh = false, checks = false, probe = false },
+			sched = {
+				probedAt = now, probeChanged = false, focusedAt = if live then now else nil, checksAt = nil,
+				refreshTried = nil, lastModified = if cache then cache.lastModified else nil,
+			},
+			closed = false,
+		}
 		if fixture then
 			local sample = table.clone(SAMPLE_AGENT)
 			sample.models = table.clone(SAMPLE_AGENT.models)
 			s.agent = sample
-		elseif opts then
+		elseif live then
 			loadAgent(b, cx)
+			rearm(b, cx)
 		end
 		return b
 	end,
