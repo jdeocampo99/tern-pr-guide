@@ -95,7 +95,8 @@ local function nativeRun(fd: Diff.FileDiff, run: Diff.Native): Node
 end
 
 -- The rows of block `blockId` on `fd` showing `show`, uncolored when `plain`, and their estimated
--- height.
+-- height. Each unbroken run of lines scrolls sideways on its own, so long lines can be read while
+-- comment cards and gap bars keep the block's width.
 function M.rows(s: State.State, fd: Diff.FileDiff, blockId: string, show: Diff.Show, plain: boolean, cards: Comments.Cards): ({ Node }, number)
  local path = fd.file.path
  if fd.file.binary then
@@ -105,27 +106,38 @@ function M.rows(s: State.State, fd: Diff.FileDiff, blockId: string, show: Diff.S
  local c = if s.composer and s.composer.file == path then s.composer else nil
  local segments = Diff.layout(fd, show).segments
  local rows, height = {}, 0
+ local lines: { Node }, firstLine = {}, 0
+ local function flush()
+  if #lines == 0 then return end
+  table.insert(rows, el("div", { class = "gp-hscroll", key = "h" .. firstLine }, { el("div", { class = "gp-hlines" }, lines) }))
+  lines = {}
+ end
  for _, segment in segments do
   if segment.kind == "rows" then
    for i = segment.first, segment.last do
     local line = fd.entries[i].row.new
     local selected = c ~= nil and line ~= nil and line >= c.from and line <= c.to
-    table.insert(rows, lineRow(fd, i, plain, selected, hit == i))
+    if #lines == 0 then firstLine = i end
+    table.insert(lines, lineRow(fd, i, plain, selected, hit == i))
     height += ROW_H
     local slot = if line then cards[line] else nil
     if slot then
+     flush()
      for _, node in slot.nodes do table.insert(rows, node) end
      height += slot.height
     end
    end
   elseif segment.kind == "native" then
+   flush()
    table.insert(rows, nativeRun(fd, segment))
    height += (segment.last - segment.first + 1) * ROW_H
   else
+   flush()
    table.insert(rows, gapRow(blockId, segment))
    height += GAP_H
   end
  end
+ flush()
  return rows, height
 end
 
