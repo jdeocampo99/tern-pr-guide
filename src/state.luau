@@ -13,9 +13,9 @@ local Search = require("./search")
 -- Which keys the page listens for: the open text field or panel, else reading.
 export type Mode = "search" | "models" | "composer" | "summary" | "review" | "reading"
 
--- A comment being written on lines from..to of `file`, hung under `to` in the step block keyed
--- `step`, or in the file's own block when no step shows the line.
-export type Composer = { file: string, from: number, to: number, step: string?, field: Fields.Field }
+-- A comment being written on lines from..to of `file`, hung under `to` in the step block `block`,
+-- or in the file's own block when no step shows the line.
+export type Composer = { file: string, from: number, to: number, block: string?, field: Fields.Field }
 
 export type SearchBox = { field: Fields.Field, results: { Search.Result }, selected: number }
 
@@ -62,7 +62,8 @@ export type Place = {
  fileOpen: { [string]: boolean },
 }
 
--- Code blocks are keyed by block id: a step's key, or "f:<path>" for a supporting file. What
+-- Code blocks are keyed by block id: the key of the first step of a run of steps on one file (see
+-- Guide.Step.block), or "f:<path>" for a supporting file. What
 -- `Place` lists belongs to the view shown; the other view's is parked in `other`.
 export type State = {
  review: Review.Review,
@@ -70,6 +71,8 @@ export type State = {
  -- The view not shown, for a page with a guide; nil for one without.
  other: Place?,
  diffs: { [string]: Diff.FileDiff },
+ -- The entries each step of the guide covers, for the code to highlight.
+ spans: { [Guide.Step]: Diff.Interval },
  -- Reviewed step blocks start folded and open on demand; unreviewed ones start open and fold on demand.
  peek: { [string]: boolean },
  folded: { [string]: boolean },
@@ -88,8 +91,10 @@ export type State = {
  fileOpen: { [string]: boolean },
  -- Blocks the reader opened by hand, by block id; the budget never folds them.
  pinned: { [string]: boolean },
- -- The block that flashes after a jump; the count alternates the animation so it replays.
+ -- After a jump, the block that flashes its ring and the step whose lines pulse; the count
+ -- alternates the animation so it replays.
  flash: string?,
+ flashStep: string?,
  flashCount: number,
  composer: Composer?,
  search: SearchBox?,
@@ -129,6 +134,13 @@ function M.new(pr: Pr.PR, guide: Guide.Guide, to: { repo: string?, dryRunPath: s
  local diffs = {}
  for _, file in pr.files do diffs[file.path] = Diff.analyze(file) end
  local review = Review.new(pr, guide)
+ local spans = {}
+ if guide.guided then
+  for _, step in review.steps do
+   local span = Diff.stepSpan(diffs[step.file], step)
+   if span then spans[step] = span end
+  end
+ end
  local other: Place? = nil
  if guide.guided then
   other = {
@@ -138,10 +150,10 @@ function M.new(pr: Pr.PR, guide: Guide.Guide, to: { repo: string?, dryRunPath: s
   }
  end
  return {
-  review = review, view = "guided", other = other, diffs = diffs,
+  review = review, view = "guided", other = other, diffs = diffs, spans = spans,
   peek = {}, folded = {}, reveals = {}, whole = {}, closing = {},
   flowOpen = true, descriptionOpen = not guide.guided, foldedFolders = {}, supportingOpen = false, fileOpen = {}, pinned = {},
-  flash = nil, flashCount = 0,
+  flash = nil, flashStep = nil, flashCount = 0,
   composer = nil, search = nil, hit = nil,
   helpOpen = false, models = nil, reviewOpen = false, reviewCursor = 1, editingSummary = false,
   keyed = false, submit = { repo = to.repo, dryRunPath = to.dryRunPath, confirming = false, sending = false, error = nil }, ai = nil,
@@ -195,12 +207,12 @@ end
 -- The lines of the reader's comments, and of the one being written, that no step's block covers
 -- (written in the file view, where blocks show whole files), as entries the nearest step's block
 -- draws, so every comment is somewhere in the guided view.
-local function strays(s: State, file: string, step: Guide.Step): { Diff.Interval }?
+local function strays(s: State, file: string, blockId: string): { Diff.Interval }?
  local found: { Diff.Interval }? = nil
  local function add(line: number)
   if Review.stepShowing(s.review, file, line) then return end
   local i = M.nearestStep(s, file, line)
-  if i == nil or s.review.steps[i] ~= step then return end
+  if i == nil or s.review.steps[i].block ~= blockId then return end
   for n, entry in s.diffs[file].entries do
    if entry.diff and entry.row.new == line then
     found = found or {}
@@ -217,11 +229,12 @@ local function strays(s: State, file: string, step: Guide.Step): { Diff.Interval
  return found
 end
 
--- What block `blockId` on `file` shows: a step's block when `lines` is the step, else a supporting
--- file's. Lines with cards under them stay drawn when a big file is shown whole.
-function M.show(s: State, file: string, blockId: string, lines: Guide.Step?): Diff.Show
+-- What block `blockId` on `file` shows: a step block's `steps` with their surroundings, else a
+-- supporting file's (`steps` nil). Lines with cards under them stay drawn when a big file is shown
+-- whole.
+function M.show(s: State, file: string, blockId: string, steps: { Guide.Step }?): Diff.Show
  local annotated = {}
- if lines then
+ if steps then
   for _, comment in s.review.guide.comments do
    if comment.file == file then annotated[comment.line] = true end
   end
@@ -230,16 +243,25 @@ function M.show(s: State, file: string, blockId: string, lines: Guide.Step?): Di
   if own.file == file then annotated[own.to] = true end
  end
  local c = s.composer
- if c and c.file == file and (c.step or M.supportingBlock(file)) == blockId then annotated[c.to] = true end
+ if c and c.file == file and (c.block or M.supportingBlock(file)) == blockId then annotated[c.to] = true end
  local hit = if s.hit and s.hit.file == file then s.hit.entry else nil
  local reveals = s.reveals[blockId] or {}
- local extra = if lines then strays(s, file, lines) else nil
+ local spans: { Diff.Interval }? = nil
+ if steps and s.review.guide.guided then
+  spans = {}
+  for _, step in steps do
+   local span = s.spans[step]
+   if span then table.insert(spans :: { Diff.Interval }, span) end
+  end
+  if #(spans :: { Diff.Interval }) == 0 then spans = nil end
+ end
+ local extra = if steps then strays(s, file, blockId) else nil
  if extra then
   local all = table.clone(reveals)
   for _, interval in extra do table.insert(all, interval) end
   reveals = all
  end
- return { lines = lines, whole = s.whole[blockId] == true, annotated = annotated, hit = hit, reveals = reveals }
+ return { spans = spans, whole = s.whole[blockId] == true, annotated = annotated, hit = hit, reveals = reveals }
 end
 
 -- Whether a folded folder of the file tree hides `path`.
@@ -257,16 +279,16 @@ function M.unfoldFoldersOf(s: State, path: string)
  end
 end
 
--- Whether the reader has block `blockId` open, budget aside: unreviewed steps start open and
+-- Whether the reader has block `blockId` open, budget aside: unreviewed blocks start open and
 -- reviewed ones folded until reopened; supporting files open one by one or all at once.
 local function wantsOpen(s: State, blockId: string): boolean
  local path = M.supportingPath(blockId)
  if path then return s.supportingOpen and s.fileOpen[path] == true and not M.inFoldedFolder(s, path) end
- if s.review.reviewed[blockId] then return s.peek[blockId] == true end
+ if Review.blockReviewed(s.review, blockId) then return s.peek[blockId] == true end
  return not s.folded[blockId]
 end
 
-type Candidate = { id: string, file: string, lines: Guide.Step? }
+type Candidate = { id: string, file: string, steps: { Guide.Step }? }
 
 -- Opens `forced` blocks whatever they cost, then `queue` in order until a block doesn't fit;
 -- returns how many of `queue` stay folded.
@@ -275,7 +297,7 @@ local function fill(s: State, plan: Plan, forced: { Candidate }, queue: { Candid
  local function cost(block: Candidate): (number, boolean)
   local fd = s.diffs[block.file]
   if fd.file.binary then return 0, true end
-  local rows = Diff.layout(fd, M.show(s, block.file, block.id, block.lines)).rows
+  local rows = Diff.layout(fd, M.show(s, block.file, block.id, block.steps)).rows
   local plain = not fd.highlighted or rows > PLAIN_OVER
   return rows * (if plain then PLAIN_COST else 1), plain
  end
@@ -293,14 +315,14 @@ local function fill(s: State, plan: Plan, forced: { Candidate }, queue: { Candid
  return 0
 end
 
--- The blocks this render draws open. Blocks the reader opened by hand, the current step and the
--- block holding the comment being written always open. The other open steps follow in reading
--- order from the current step, then the steps before it nearest first, until the rows run out;
+-- The blocks this render draws open. Blocks the reader opened by hand, the current step's block and
+-- the block holding the comment being written always open. The other open blocks follow in reading
+-- order from the current one, then the blocks before it nearest first, until the rows run out;
 -- open supporting files follow in page order under a budget of their own.
 function M.plan(s: State): Plan
  local r = s.review
  local plan: Plan = { open = {}, plain = {}, supportingFolded = 0 }
- local composerBlock = if s.composer then s.composer.step or M.supportingBlock(s.composer.file) else nil
+ local composerBlock = if s.composer then s.composer.block or M.supportingBlock(s.composer.file) else nil
  -- Splits the blocks the reader has open into those that open whatever they cost (`always`, the
  -- pinned ones, the composer's) and the queue.
  local function split(blocks: { Candidate }, always: string?): ({ Candidate }, { Candidate })
@@ -315,14 +337,19 @@ function M.plan(s: State): Plan
   end
   return forced, queue
  end
- local steps: { Candidate } = {}
- local function addStep(i: number)
-  local step = r.steps[i]
-  table.insert(steps, { id = step.key, file = step.file, lines = step })
+ local blocks = Guide.blocks(r.steps)
+ local current = 1
+ for i, block in blocks do
+  if block.id == r.steps[r.cur].block then current = i end
  end
- for i = r.cur, #r.steps do addStep(i) end
- for i = r.cur - 1, 1, -1 do addStep(i) end
- local forced, queue = split(steps, r.steps[r.cur].key)
+ local candidates: { Candidate } = {}
+ local function addBlock(i: number)
+  local block = blocks[i]
+  table.insert(candidates, { id = block.id, file = block.file, steps = block.steps })
+ end
+ for i = current, #blocks do addBlock(i) end
+ for i = current - 1, 1, -1 do addBlock(i) end
+ local forced, queue = split(candidates, r.steps[r.cur].block)
  fill(s, plan, forced, queue)
  if s.supportingOpen then
   local files: { Candidate } = {}
@@ -345,7 +372,7 @@ function M.setOpen(s: State, blockId: string, open: boolean)
    s.supportingOpen = true
    M.unfoldFoldersOf(s, path)
   end
- elseif s.review.reviewed[blockId] then
+ elseif Review.blockReviewed(s.review, blockId) then
   s.peek[blockId] = if open then true else nil
  else
   s.folded[blockId] = if open then nil else true
@@ -354,9 +381,9 @@ end
 
 -- Makes step `i` current, opening its block when it was reviewed and folded.
 function M.visitStep(s: State, i: number)
- local key = s.review.steps[i].key
+ local block = s.review.steps[i].block
  s.review.cur = i
- if s.review.reviewed[key] then s.peek[key] = true end
+ if Review.blockReviewed(s.review, block) then s.peek[block] = true end
 end
 
 function M.openSupportingFile(s: State, path: string)
@@ -390,13 +417,13 @@ function M.toggleWhole(s: State, blockId: string)
  end
 end
 
--- The step on `file` whose range is closest to `line` (the first on it when `line` is nil).
+-- The step on `file` whose place in the new file is closest to `line` (the first on it when `line` is nil).
 function M.nearestStep(s: State, file: string, line: number?): number?
  local best, bestDistance = nil, math.huge
  for i, step in s.review.steps do
   if step.file == file then
-   local distance = if line == nil or (line >= step.from and line <= step.to) then 0
-    else math.min(math.abs(line - step.from), math.abs(line - step.to))
+   local distance = if line == nil or (line >= step.at.from and line <= step.at.to) then 0
+    else math.min(math.abs(line - step.at.from), math.abs(line - step.at.to))
    if distance < bestDistance then best, bestDistance = i, distance end
   end
  end
@@ -415,7 +442,7 @@ function M.showFile(s: State, file: string, entry: number?): (string, boolean)
  local blockId
  if i then
   M.visitStep(s, i)
-  blockId = s.review.steps[i].key
+  blockId = s.review.steps[i].block
   s.folded[blockId] = nil
  else
   M.openSupportingFile(s, file)
@@ -447,16 +474,16 @@ end
 -- already typed; returns the block id.
 function M.openComposer(s: State, file: string, from: number, to: number): string
  local i = M.stepFor(s, file, to)
- local step, blockId = nil, M.supportingBlock(file)
+ local block, blockId = nil, M.supportingBlock(file)
  if i then
   M.visitStep(s, i)
-  step = s.review.steps[i].key
-  blockId = step
+  block = s.review.steps[i].block
+  blockId = block
  else
   M.openSupportingFile(s, file)
  end
  local field = if s.composer then s.composer.field else Fields.create("", true)
- s.composer = { file = file, from = from, to = to, step = step, field = field }
+ s.composer = { file = file, from = from, to = to, block = block, field = field }
  return blockId
 end
 
@@ -465,7 +492,7 @@ local function rehomeComposer(s: State)
  local c = s.composer
  if not c then return end
  local i = M.stepFor(s, c.file, c.to)
- c.step = if i then s.review.steps[i].key else nil
+ c.block = if i then s.review.steps[i].block else nil
 end
 
 local function park(s: State): Place
@@ -482,27 +509,16 @@ local function unpark(s: State, place: Place)
  s.descriptionOpen, s.foldedFolders, s.supportingOpen, s.fileOpen = place.descriptionOpen, place.foldedFolders, place.supportingOpen, place.fileOpen
 end
 
--- Shows the other view, with its own place and the reader's work untouched. It lands on the file
--- the reader was reading: on the view's own step when that is on the file, else on the file's
--- first step, else (a file no step visits) on its supporting block. Returns the block to scroll to.
-function M.switchView(s: State, to: ViewId): string?
+-- Shows the other view, with its own place and the reader's work untouched; false when there is
+-- no other view. Where the page scrolls to is the block's business.
+function M.switchView(s: State, to: ViewId): boolean
  local parked = s.other
- if not parked or s.view == to then return nil end
- local file = M.currentStep(s).file
+ if not parked or s.view == to then return false end
  s.other = park(s)
  unpark(s, parked)
- s.view, s.arrival, s.flash = to, "still", nil
- local blockId
- local i = M.nearestStep(s, file, nil)
- if i then
-  if M.currentStep(s).file ~= file then M.visitStep(s, i) end
-  blockId = M.currentStep(s).key
- else
-  M.openSupportingFile(s, file)
-  blockId = M.supportingBlock(file)
- end
+ s.view, s.arrival, s.flash, s.flashStep = to, "still", nil, nil
  rehomeComposer(s)
- return blockId
+ return true
 end
 
 function M.saveComposer(s: State)

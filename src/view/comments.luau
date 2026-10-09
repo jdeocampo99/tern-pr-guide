@@ -107,7 +107,7 @@ function M.forBlock(s: State.State, motion: Ui.Motion, file: string, blockId: st
   if c.file == file then hang(cards, c.to, own(n, c.from, c.to, c.body, Ui.entering(motion, "card:you" .. n, "gp-enter-card"))) end
  end
  local c = s.composer
- if c and c.file == file and (c.step or State.supportingBlock(file)) == blockId then
+ if c and c.file == file and (c.block or State.supportingBlock(file)) == blockId then
   hang(cards, c.to, composer(c, Ui.entering(motion, "card:composer", "gp-enter-card")), COMPOSER_H)
  end
  return cards

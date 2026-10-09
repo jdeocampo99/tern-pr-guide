@@ -50,9 +50,9 @@ export type FileDiff = {
 
 -- What a code block shows of a file.
 export type Show = {
- -- The step's new-side lines; the block starts with the PR's lines within a couple of lines of
- -- them. Nil starts with every line of the PR's diff.
- lines: { from: number, to: number }?,
+ -- The entries of the steps the block shows (see `stepSpan`); it starts with the PR's lines within
+ -- a couple of lines of them. Nil starts with every line of the PR's diff.
+ spans: { Interval }?,
  -- The whole file was asked for.
  whole: boolean,
  -- New-side lines with cards hung under them.
@@ -70,7 +70,7 @@ end
 
 local LANGUAGES: { [string]: string } = { ts = "ts", tsx = "tsx", js = "js", md = "markdown", json = "json", luau = "lua", css = "css" }
 
--- Lines a step shows on each side of its range.
+-- Entries a step shows on each side of its range.
 local STEP_CONTEXT = 2
 -- Unchanged lines that stay as rows on each side of a change when a big file is shown whole.
 local NEAR = 3
@@ -177,12 +177,15 @@ local function anchorEntries(entries: { Entry })
  end
 end
 
--- Whether a block starts with entry `entry`: a line of the PR's diff, and for a step within a
--- couple of lines of its range. A line with no new side to place it (a deleted file) always shows.
-local function inBase(entry: Entry, lines: { from: number, to: number }?): boolean
- if not entry.diff then return false end
- local anchor = entry.anchor
- return lines == nil or anchor == nil or (anchor >= lines.from - STEP_CONTEXT and anchor <= lines.to + STEP_CONTEXT)
+-- Whether a block starts with entry `i`: a line of the PR's diff, and for a block of steps within a
+-- couple of entries of one of their `spans`.
+local function inBase(entries: { Entry }, i: number, spans: { Interval }?): boolean
+ if not entries[i].diff then return false end
+ if spans == nil then return true end
+ for _, span in spans do
+  if i >= span.first - STEP_CONTEXT and i <= span.last + STEP_CONTEXT then return true end
+ end
+ return false
 end
 
 -- Rows of the entries to draw: every shown entry, and for a big file shown whole only those near
@@ -192,7 +195,7 @@ local function shownEntries(fd: FileDiff, show: Show): ({ boolean }, boolean)
  local total = #entries
  local big = show.whole and total > WHOLE_MAX
  local shown = table.create(total, false)
- for i = 1, total do shown[i] = (show.whole and not big) or inBase(entries[i], show.lines) end
+ for i = 1, total do shown[i] = (show.whole and not big) or inBase(entries, i, show.spans) end
  if big then
   for i, entry in entries do
    if entry.diff then
@@ -299,6 +302,32 @@ function M.analyze(file: Pr.File): FileDiff
  }
 end
 
+-- The entries a step covers, first to last of the lines of the PR's diff in its range: those
+-- numbered within it on its side, and on the new side the removed lines that sit at them. Nil when
+-- the range holds none.
+function M.stepSpan(fd: FileDiff, step: { side: "new" | "old", from: number, to: number }): Interval?
+ local first: number?, last: number? = nil, nil
+ for i, entry in fd.entries do
+  if entry.diff then
+   local row = entry.row
+   local line, within
+   if step.side == "old" then
+    line = row.old
+    within = line ~= nil and line >= step.from and line <= step.to
+   else
+    line = row.new or entry.anchor
+    within = line ~= nil and (row.new ~= nil or row.kind == "del") and line >= step.from and line <= step.to
+   end
+   if within then
+    first = first or i
+    last = i
+   end
+  end
+ end
+ if first and last then return { first = first, last = last } end
+ return nil
+end
+
 -- The part of new-side lines from..to one GitHub review comment can cover: the lines of the PR's
 -- diff in the last hunk that reaches into the range. Nil when no line of the diff is in it.
 function M.commentableRange(fd: FileDiff, from: number, to: number): (number?, number?)
@@ -334,7 +363,12 @@ end
 -- The code block as a sequence of line runs, hidden gaps and native runs, in file order. Each
 -- block's last layout is kept until what it shows changes, so redrawing the page lays out nothing.
 function M.layout(fd: FileDiff, show: Show): Layout
- local base = if show.lines then show.lines.from .. "-" .. show.lines.to else "all"
+ local base = "all"
+ if show.spans then
+  local parts = {}
+  for _, span in show.spans do table.insert(parts, span.first .. "-" .. span.last) end
+  base = table.concat(parts, ",")
+ end
  local key = layoutKey(show)
  local kept = fd.layouts[base]
  if kept and kept.key == key then return kept end

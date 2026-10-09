@@ -155,10 +155,15 @@ function M.workDir(pr: Pr.PR): string
  return "/tmp/prguide-" .. string.gsub(pr.repo, "/", "-") .. "-" .. pr.number
 end
 
--- Every changed file's diff with the new-file line number in front of each line that has one, so
--- the agent can point at lines without counting.
+-- What the first line of the numbered diff says about the columns after it.
+M.DIFF_LEGEND = "Columns: old line number, new line number, then a mark (space = unchanged, + = added, - = removed) and the line. "
+ .. "Added lines have only a new number; removed lines have only an old number."
+
+-- Every changed file's diff with the line numbers in front of each line, so the agent can point at
+-- lines without counting: the old-file number (blank on an added line), the new-file number (blank
+-- on a removed line), the mark and the text.
 function M.numberedDiff(files: { Pr.File }): string
- local out = {}
+ local out = { M.DIFF_LEGEND, "" }
  for _, file in files do
   table.insert(out, "=== " .. file.path .. " (" .. file.status .. ")")
   if file.binary then table.insert(out, "(binary, no lines)") end
@@ -167,8 +172,7 @@ function M.numberedDiff(files: { Pr.File }): string
     table.insert(out, "")
     table.insert(out, "@@ -" .. row.oldStart .. " +" .. row.newStart .. " @@" .. (if row.label then " " .. row.label else ""))
    else
-    local number = if row.kind ~= "del" and row.new then tostring(row.new) else ""
-    table.insert(out, string.format("%6s %s %s", number, MARKS[row.kind], row.text))
+    table.insert(out, string.format("%5s %5s %s %s", if row.old then tostring(row.old) else "", if row.new then tostring(row.new) else "", MARKS[row.kind], row.text))
    end
   end
   table.insert(out, "")

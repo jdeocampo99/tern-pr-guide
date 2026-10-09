@@ -166,6 +166,35 @@ function M.keysOfFile(r: Review, path: string): { string }
  return keys
 end
 
+-- The steps of code block `blockId`, in reading order.
+function M.stepsOfBlock(r: Review, blockId: string): { Guide.Step }
+ local steps = {}
+ for _, step in r.steps do
+  if step.block == blockId then table.insert(steps, step) end
+ end
+ return steps
+end
+
+-- Whether every step of block `blockId` is ticked.
+function M.blockReviewed(r: Review, blockId: string): boolean
+ for _, step in r.steps do
+  if step.block == blockId and not r.reviewed[step.key] then return false end
+ end
+ return true
+end
+
+-- The blocks holding the steps in `keys`, each once.
+function M.blocksOfKeys(r: Review, keys: { string }): { string }
+ local blocks, seen = {}, {}
+ for _, step in r.steps do
+  if not seen[step.block] and table.find(keys, step.key) then
+   seen[step.block] = true
+   table.insert(blocks, step.block)
+  end
+ end
+ return blocks
+end
+
 -- Each file of a change once, in the order its steps visit it.
 function M.filesOfChange(r: Review, change: number): { Pr.File }
  local byPath = {}
@@ -200,13 +229,13 @@ end
 -- The step whose code block shows `line` of `file`.
 function M.stepShowing(r: Review, file: string, line: number): number?
  for i, step in r.steps do
-  if step.file == file and line >= step.from - STEP_BLOCK_CONTEXT and line <= step.to + STEP_BLOCK_CONTEXT then return i end
+  if step.file == file and line >= step.at.from - STEP_BLOCK_CONTEXT and line <= step.at.to + STEP_BLOCK_CONTEXT then return i end
  end
  return nil
 end
 
--- Reviewed state: a step's code block is the unit; a change or a guided file is reviewed when
--- all its blocks are; a supporting file has its own tick.
+-- Reviewed state: a step is the unit; a code block, a change or a guided file is reviewed when all
+-- its steps are; a supporting file has its own tick.
 
 function M.reviewedCount(r: Review, keys: { string }): number
  local n = 0
@@ -267,7 +296,7 @@ end
 function M.suggestionsNear(r: Review, step: Guide.Step): { Guide.Comment }
  local near = {}
  for _, comment in r.guide.comments do
-  if comment.file == step.file and comment.line >= step.from - STEP_REACH and comment.line <= step.to + STEP_REACH then
+  if comment.file == step.file and comment.line >= step.at.from - STEP_REACH and comment.line <= step.at.to + STEP_REACH then
    table.insert(near, comment)
   end
  end

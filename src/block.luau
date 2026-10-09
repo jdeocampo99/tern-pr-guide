@@ -60,18 +60,26 @@ local function frameLater(cx: BlockCx, ops: { any })
  end)
 end
 
--- Moves straight to `path`, flashing the block `flashKey` so a clicked jump reads as intended.
--- Tern's reveal cannot animate and a glide faked from line scrolls stuttered.
-local function jump(s: State, cx: BlockCx, path: string, align: string, flashKey: string?)
- s.flash, s.flashCount = flashKey, s.flashCount + 1
+-- Moves straight to `path`, so a clicked jump reads as intended flashing the ring of block `ring`
+-- or pulsing the lines of the step `step`. Tern's reveal cannot animate and a glide faked from
+-- line scrolls stuttered.
+local function jump(s: State, cx: BlockCx, path: string, align: string, ring: string?, step: string?)
+ s.flash, s.flashStep, s.flashCount = ring, step, s.flashCount + 1
  frameLater(cx, { { "reveal", path, align } })
 end
 
--- Explicit jumps (clicking a step, file, or diagram box) land the block at the top and flash it;
--- j/k only scroll when the next block is off screen, only as far as needed, and never flash.
+-- Explicit jumps (clicking a step, file, or diagram box) land the step's block, or for a shared
+-- block the step's first lines, at the top and flash: the step's lines pulse in a guided block,
+-- the block's ring flashes otherwise. j/k only scroll when the next step is off screen, only as far
+-- as needed, and never flash.
 local function follow(s: State, cx: BlockCx, explicit: boolean)
- local key = State.currentStep(s).key
- jump(s, cx, Page.blockPath(key), if explicit then "start" else "nearest", if explicit then key else nil)
+ local step = State.currentStep(s)
+ local open = State.plan(s).open[step.block] == true
+ local path = Page.blockPath(step.block)
+ local span = s.spans[step]
+ if open and span and #Review.stepsOfBlock(s.review, step.block) > 1 then path = Page.stepPath(step, span.first) end
+ local pulse = explicit and open and span ~= nil
+ jump(s, cx, path, if explicit then "start" else "nearest", if explicit and not pulse then step.block else nil, if pulse then step.key else nil)
 end
 
 -- Plays the closing animation of `ids`, then applies the change that removes them. A key press
@@ -87,25 +95,31 @@ local function closeAfter(s: State, cx: BlockCx, ids: { string }, apply: () -> (
  end)
 end
 
--- Marks the steps `keys` reviewed, folding their code and moving past the last one, or, when all
--- already are, unmarks them. Instant: marking is the most pressed key of a review.
-local function markSteps(s: State, keys: { string })
+-- Marks the steps `keys` reviewed, folding the code of each block that has all its steps reviewed
+-- and moving past the last one, or, when all already are, unmarks them. Instant: marking is the
+-- most pressed key of a review. Moving on within a shared block scrolls to the next step.
+local function markSteps(s: State, cx: BlockCx, keys: { string })
  local r = s.review
  if Review.allReviewed(r, keys) then
   Review.unmark(r, keys)
-  for _, key in keys do s.peek[key] = nil end
+  for _, id in Review.blocksOfKeys(r, keys) do s.peek[id] = nil end
   return
  end
  local last = Review.lastStep(r, keys)
- for _, key in Review.mark(r, keys) do State.setOpen(s, key, false) end
+ local from = r.steps[r.cur]
+ for _, id in Review.blocksOfKeys(r, Review.mark(r, keys)) do
+  if Review.blockReviewed(r, id) then State.setOpen(s, id, false) end
+ end
  if last > 0 then Review.advance(r, last) end
+ local now = r.steps[r.cur]
+ if now ~= from and now.block == from.block and #Review.stepsOfBlock(r, now.block) > 1 then follow(s, cx, false) end
 end
 
-local function markFile(s: State, _: BlockCx, path: string)
+local function markFile(s: State, cx: BlockCx, path: string)
  local r = s.review
  local keys = Review.keysOfFile(r, path)
  if #keys > 0 then
-  markSteps(s, keys)
+  markSteps(s, cx, keys)
  elseif r.filesViewed[path] then
   r.filesViewed[path] = nil
  else
@@ -136,9 +150,9 @@ local function markAll(s: State)
  for _, step in r.steps do table.insert(keys, step.key) end
  if all then
   Review.unmark(r, keys)
-  for _, key in keys do s.peek[key] = nil end
+  for _, id in Review.blocksOfKeys(r, keys) do s.peek[id] = nil end
  else
-  for _, key in Review.mark(r, keys) do State.setOpen(s, key, false) end
+  for _, id in Review.blocksOfKeys(r, Review.mark(r, keys)) do State.setOpen(s, id, false) end
  end
  for _, file in Review.supportingFiles(r) do
   r.filesViewed[file.path] = if all then nil else true
@@ -161,7 +175,7 @@ local function gotoSuggestion(s: State, cx: BlockCx, id: string)
  if not i then return end
  State.visitStep(s, i)
  r.focus = id
- jump(s, cx, Page.suggestionPath(r.steps[i].key, id), "start", nil)
+ jump(s, cx, Page.suggestionPath(r.steps[i].block, id), "start", nil, nil)
 end
 
 local function gotoOwn(s: State, cx: BlockCx, n: number)
@@ -198,7 +212,7 @@ local function searchGo(s: State, cx: BlockCx, n: number)
  elseif go.file then
   local blockId, isStep = State.showFile(s, go.file, go.entry)
   local path = if go.entry then Page.linePath(blockId, go.entry) else Page.blockPath(blockId)
-  jump(s, cx, path, "start", if isStep then blockId else nil)
+  jump(s, cx, path, "start", if isStep then blockId else nil, nil)
  end
 end
 
@@ -232,13 +246,12 @@ local function gotoStep(s: State, cx: BlockCx, i: number, explicit: boolean)
  follow(s, cx, explicit)
 end
 
--- Shows the guided walkthrough or the file view, landing on the file being read. A switch swaps
--- the whole page, so it shows at once, mouse or key.
+-- Shows the guided walkthrough or the file view, each as the reader left it, from its top. A
+-- switch swaps the whole page, so it shows at once, mouse or key.
 local function switchView(s: State, cx: BlockCx, to: State.ViewId)
- local blockId = State.switchView(s, to)
- if not blockId then return end
+ if not State.switchView(s, to) then return end
  s.keyed = true
- jump(s, cx, Page.blockPath(blockId), "start", nil)
+ frameLater(cx, { { "scroll", "main", "start" } })
 end
 
 -- Sends the review once: the page shows it sending, then where it went or why it didn't. A review
@@ -302,8 +315,13 @@ local ACTIONS: { [string]: Handler } = {
  ["toggle-view"] = function(s, cx) switchView(s, cx, if s.view == "guided" then "files" else "guided") end,
 
  -- marking
- ["review-step"] = function(s, _, key) markSteps(s, { key }) end,
- ["mark-change"] = function(s, _, n) markSteps(s, Review.keysOfChange(s.review, tonumber(n) :: number)) end,
+ ["review-step"] = function(s, cx, key) markSteps(s, cx, { key }) end,
+ ["mark-block"] = function(s, cx, id)
+  local keys = {}
+  for _, step in Review.stepsOfBlock(s.review, id) do table.insert(keys, step.key) end
+  markSteps(s, cx, keys)
+ end,
+ ["mark-change"] = function(s, cx, n) markSteps(s, cx, Review.keysOfChange(s.review, tonumber(n) :: number)) end,
  ["mark-file"] = markFile,
  ["mark-supporting"] = markSupporting,
  ["mark-all"] = markAll,
@@ -331,7 +349,7 @@ local ACTIONS: { [string]: Handler } = {
  end,
  ["comment-step"] = function(s, cx)
   local step = State.currentStep(s)
-  local from, to = Diff.commentableRange(s.diffs[step.file], step.from, step.to)
+  local from, to = Diff.commentableRange(s.diffs[step.file], step.at.from, step.at.to)
   if from and to then openComposer(s, cx, step.file, from, to) end
  end,
  ["comment-save"] = function(s) State.saveComposer(s) end,

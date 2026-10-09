@@ -5,6 +5,7 @@ local Change = require("./change")
 local Code = require("./code")
 local Comments = require("./comments")
 local Description = require("./description")
+local Guide = require("../guide")
 local Header = require("./header")
 local Hints = require("./hints")
 local Overview = require("./overview")
@@ -53,7 +54,7 @@ end
 -- page's first change row, so block paths are the same.
 local function split(s: State.State, motion: Ui.Motion, plan: State.Plan): Node
  local blocks = { Description.view(s, motion) }
- for _, step in s.review.steps do table.insert(blocks, Code.step(s, motion, plan, step)) end
+ for _, block in Guide.blocks(s.review.steps) do table.insert(blocks, Code.block(s, motion, plan, block)) end
  local main = {
   Header.view(s, motion),
   el("div", { class = "gp-split-row", key = "ch1" }, {
@@ -74,7 +75,7 @@ function M.view(s: State.State, motion: Ui.Motion): Node
  if overview then table.insert(page, overview) end
  for n, change in s.review.guide.changes do
   local blocks = {}
-  for _, step in change.steps do table.insert(blocks, Code.step(s, motion, plan, step)) end
+  for _, block in Guide.blocks(change.steps) do table.insert(blocks, Code.block(s, motion, plan, block)) end
   table.insert(page, el("div", { class = "gp-guide gp-crow", key = "ch" .. n }, {
    Change.view(s, n),
    el("div", { class = "gp-code-col", key = "code" }, blocks),
@@ -94,6 +95,11 @@ function M.blockPath(blockId: string): string
  local file = State.supportingPath(blockId)
  if file then return PAGE .. ".sup.code.supporting.body." .. Supporting.fileKey(file) end
  return PAGE .. ".ch" .. (string.match(blockId, "^c(%d+)s") :: string) .. ".code." .. blockId
+end
+
+-- The first run of code lines of step `step` in its shared block, which starts at entry `first`.
+function M.stepPath(step: Guide.Step, first: number): string
+ return M.blockPath(step.block) .. ".body.h" .. first
 end
 
 -- The diff line `entry` of a block.

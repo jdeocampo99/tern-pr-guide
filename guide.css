@@ -571,6 +571,29 @@
 .gp-plus { text-align: center; font-size: 13px; font-weight: 700; line-height: 17px; border-radius: 5px; color: #fff; background: light-dark(#2f6fe0, #3b6fd8); opacity: 0; cursor: pointer; transition: opacity 120ms ease, transform 120ms ease; }
 .gp-row:hover .gp-plus { opacity: 1; }
 .gp-plus:hover { transform: scale(1.05); }
+/* the step you are on: its lines get a bar at the left edge and a tint a shade stronger than the
+   added and removed ones; yellow (lines being commented on) still wins. After a jump to the step the
+   tint flashes and settles, a sibling of the block ring above. */
+.gp-on { box-shadow: inset 3px 0 0 light-dark(#4f86e8, #5b8ff0); }
+.gp-ctx.gp-on { background: light-dark(rgba(79, 134, 232, 0.12), rgba(91, 143, 240, 0.17)); }
+.gp-add.gp-on { background: light-dark(rgba(40, 170, 95, 0.27), rgba(40, 190, 90, 0.27)); }
+.gp-del.gp-on { background: light-dark(rgba(225, 70, 70, 0.27), rgba(230, 70, 70, 0.29)); }
+@keyframes gp-steppulse0 { from { box-shadow: inset 3px 0 0 light-dark(#4f86e8, #5b8ff0), inset 0 0 0 60px light-dark(rgba(79, 134, 232, 0.4), rgba(91, 143, 240, 0.45)); } to { box-shadow: inset 3px 0 0 light-dark(#4f86e8, #5b8ff0), inset 0 0 0 60px light-dark(rgba(79, 134, 232, 0), rgba(91, 143, 240, 0)); } }
+@keyframes gp-steppulse1 { from { box-shadow: inset 3px 0 0 light-dark(#4f86e8, #5b8ff0), inset 0 0 0 60px light-dark(rgba(79, 134, 232, 0.4), rgba(91, 143, 240, 0.45)); } to { box-shadow: inset 3px 0 0 light-dark(#4f86e8, #5b8ff0), inset 0 0 0 60px light-dark(rgba(79, 134, 232, 0), rgba(91, 143, 240, 0)); } }
+.gp-pulse0 { animation: gp-steppulse0 600ms var(--gp-ease-out); }
+.gp-pulse1 { animation: gp-steppulse1 600ms var(--gp-ease-out); }
+@media (prefers-reduced-motion: reduce) {
+  .gp-pulse0 { animation: gp-steppulse0 300ms ease; }
+  .gp-pulse1 { animation: gp-steppulse1 300ms ease; }
+}
+/* step numbers in the gutter of a block that holds several steps; the one you are on is filled */
+.gp-mk { width: 16px; flex-shrink: 0; margin: 0 4px 0 7px; }
+.gp-mk-n { height: 15px; margin-top: 2px; border-radius: 8px; text-align: center; font-family: -apple-system, "SF Pro Text", "Helvetica Neue", sans-serif; font-size: 10.5px; font-weight: 700; line-height: 15px; color: light-dark(#3b6fd8, #9bb8f5); background: light-dark(rgba(79, 134, 232, 0.14), rgba(91, 143, 240, 0.22)); cursor: pointer; }
+.gp-mk-n:hover { background: light-dark(rgba(79, 134, 232, 0.28), rgba(91, 143, 240, 0.38)); }
+.gp-mk-here, .gp-mk-here:hover { color: #fff; background: light-dark(#3b6fd8, #4a7ce0); }
+.gp-ol-num { flex-shrink: 0; min-width: 10px; font-size: 12px; font-weight: 650; color: light-dark(#8a8f98, #7d838d); }
+.gp-ol-here .gp-ol-num { color: light-dark(#3b6fd8, #9bb8f5); }
+.gp-ccard .gp-ol-numbered .gp-ol-stepbody { padding-left: 64px; }
 .gp-selected, .gp-selected.gp-add, .gp-selected.gp-del, .gp-selected.gp-ctx { background: light-dark(#fff3c4, #3d3620); }
 .gp-gap-gut { width: 116px; }
 /* your review: the button in the title row and the panel it opens */

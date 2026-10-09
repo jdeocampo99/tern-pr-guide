@@ -20,7 +20,8 @@ as `.git/prguide/<number>.json` in the clone and the plugin picks it up when tha
       "title": "Steps match by number",
       "why": "One sentence on why this change exists.",
       "steps": [
-        { "file": "src/playbooks/progress.ts", "from": 29, "to": 31, "title": "Step items carry their number", "note": "One sentence." }
+        { "file": "src/playbooks/progress.ts", "from": 29, "to": 31, "title": "Step items carry their number", "note": "One sentence." },
+        { "file": "src/playbooks/progress.ts", "side": "old", "from": 40, "to": 42, "title": "Index matching goes", "note": "Points at removed lines." }
       ]
     }
   ],
@@ -42,11 +43,22 @@ as `.git/prguide/<number>.json` in the clone and the plugin picks it up when tha
 - `overview`: a TL;DR of the PR in 2-4 plain sentences, for someone who doesn't know the project.
 - `flow` (optional): a before/after diagram, described below.
 - `changes`: 1-4 changes in reading order. Each has a `title`, a one-sentence `why`, and `steps`.
-- `steps[]`: `file` is a path in the PR; `from`/`to` is an inclusive range of new-file line numbers
-  that touches the diff; `title` and `note` are short plain text (`note` may use `code` spans).
-- `comments[]`: suggested inline comments. `line` is a new-file line in the diff. `kind` is one of
+- `steps[]`: `file` is a path in the PR; `from`/`to` is an inclusive line range; `title` and `note`
+  are short plain text (`note` may use `code` spans). `side` (optional) says which file the range
+  counts in: `"new"` (the default, and what a guide without `side` means) is the file after the PR
+  and the range must contain an added line; `"old"` is the file before it and the range must
+  contain a removed line, which is how a step points at deleted code. A step with no changed line
+  in its range is about untouched code: it is dropped, and its `note` is added to the note of the
+  step before it in the same change when that is on the same file. Consecutive steps on one file in
+  one change are drawn as one code block, each step's lines numbered in the gutter; the step you
+  are on has its lines highlighted.
+- `comments[]`: suggested inline comments. `line` is a new-file line in the diff (removed lines
+  can't take a comment). `kind` is one of
   `problem`, `question`, `suggestion`, `nit`. `id` is unique within the guide.
 - `summary`: the drafted opening comment the reader can edit before submitting.
+
+The diff an agent reads numbers both sides: each line starts with its old-file number, then its
+new-file number (an added line has no old one, a removed line no new one), then its mark.
 
 Changed files that no step visits are shown under "Supporting changes", as a folder tree.
 

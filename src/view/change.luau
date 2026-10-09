@@ -35,12 +35,13 @@ local function stepList(r: Review.Review, change: Guide.Change, current: Guide.S
  for _, step in change.steps do
   local key = step.key
   local here = step == current
-  local row = el("div", { class = "gp-ol-step" .. (if here then " gp-ol-here" else ""), key = "os" .. key }, {
-   el("span", { class = "gp-ol-dot", text = if r.reviewed[key] then "✓" else "○", actions = { click = "review-step=" .. key } }),
-   el("span", { class = "gp-ol-steptitle", text = step.title, actions = { click = "goto-step=" .. step.position } }),
-  })
+  local kids = { el("span", { class = "gp-ol-dot", text = if r.reviewed[key] then "✓" else "○", actions = { click = "review-step=" .. key } }) }
+  -- The number the step has on its lines when a block holds several steps.
+  if #change.steps > 1 then table.insert(kids, span("gp-ol-num", tostring(step.index))) end
+  table.insert(kids, el("span", { class = "gp-ol-steptitle", text = step.title, actions = { click = "goto-step=" .. step.position } }))
+  local row = el("div", { class = "gp-ol-step" .. (if here then " gp-ol-here" else ""), key = "os" .. key }, kids)
   if here then
-   table.insert(steps, el("div", { class = "gp-ol-herebox", key = "hb" .. key }, {
+   table.insert(steps, el("div", { class = "gp-ol-herebox" .. (if #change.steps > 1 then " gp-ol-numbered" else ""), key = "hb" .. key }, {
     row,
     el("div", { class = "gp-ol-stepbody", key = "ob" .. key }, { Ui.rich(step.note) }),
    }))

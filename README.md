@@ -31,12 +31,14 @@ explanation.
 diagram of what the PR changes. The author's own description is one click (or `i`) away.
 
 **Walks you through the code.** Each change has a sticky card on the left with its steps; the code
-for the step you're on sits on the right. `j`/`k` move between steps, `⏎` marks a step reviewed and
+for the step you're on sits on the right with its exact lines highlighted, removed ones included.
+Steps on one file share a single block, each numbered in the gutter. `j`/`k` move between steps, `⏎` marks a step reviewed and
 moves on. **Mark all reviewed** in the header (`m`) ticks every file at once, and pressing it again clears them.
 
 **Two ways to read it.** A PR with a guide opens guided. The **Guided | Files** switch in the header
 (or `t`) flips to the plain GitHub-style file tree, one file at a time, and back. Your comments, drafts,
-summary and ticks are the same in both, and each view remembers where you were.
+summary and ticks are the same in both, and each view remembers the step or file you were on; the
+page itself starts at the top.
 
 ![A step with its code and a suggested comment](docs/screenshots/step.png)
 
