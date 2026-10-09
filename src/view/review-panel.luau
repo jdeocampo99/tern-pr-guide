@@ -16,8 +16,8 @@ type Row = {
  selected: boolean,
  author: string,
  avatarClass: string,
- -- Kind label and its color class, for suggestions.
- kind: { text: string, class: string }?,
+ -- Kind label, its color class and its icon, for suggestions.
+ kind: { text: string, class: string, icon: string? }?,
  note: string?,
  location: string,
  jump: string,
@@ -27,10 +27,10 @@ type Row = {
 local el, span = Ui.el, Ui.span
 
 local YOU = "You"
-local VERDICT_DETAILS: { [Review.VerdictId]: { hint: string, icon: string } } = {
- comment = { hint = "General feedback, no decision", icon = "•" },
- approve = { hint = "Good to merge", icon = "✓" },
- changes = { hint = "Must be fixed before merging", icon = "✕" },
+local VERDICT_DETAILS: { [Review.VerdictId]: { hint: string, icon: string? } } = {
+ comment = { hint = "General feedback, no decision" },
+ approve = { hint = "Good to merge", icon = "check" },
+ changes = { hint = "Must be fixed before merging", icon = "x" },
 }
 
 local M = {}
@@ -43,16 +43,26 @@ function M.rowKey(item: Review.Item): string
  return if item.suggestion then "s-" .. item.suggestion.id else "m-" .. (item.own :: number)
 end
 
+-- A link with the key that does the same, so a panel's own controls teach their keys.
+local function keyedLink(label: string, hint: string, action: string): Node
+ return el("span", { class = "gp-rv-link-keyed", actions = { click = action } }, { span("gp-rv-link", label), Ui.keys(hint) })
+end
+
 -- A tick that includes the comment, who wrote it, its kind, a link to its line, and the full text.
 -- Unticked comments stay in the list, faded.
 local function row(r: Row): Node
  local top = { span("gp-rv-author", r.author) }
- if r.kind then table.insert(top, span("gp-rv-kind gp-rv-kind-" .. r.kind.class, r.kind.text)) end
+ local kind = r.kind
+ if kind then
+  local class = "gp-rv-kind gp-rv-kind-" .. kind.class
+  local icon = kind.icon
+  table.insert(top, if icon then el("span", { class = class }, { Ui.icon(icon), span("", kind.text) }) else span(class, kind.text))
+ end
  if r.note then table.insert(top, span("gp-rv-note-inline", r.note)) end
  table.insert(top, Ui.spacer())
  table.insert(top, el("span", { class = "gp-rv-link", text = r.location, actions = { click = r.jump } }))
  return el("div", { class = "gp-rv-row" .. (if r.included then "" else " gp-rv-row-off") .. (if r.selected then " gp-rv-row-cur" else ""), key = r.key }, {
-  el("span", { class = "gp-rv-tick" .. (if r.included then " gp-rv-tick-on" else ""), text = if r.included then "✓" else "", actions = { click = "toggle-item=" .. r.n } }),
+  el("span", { class = "gp-rv-tick" .. (if r.included then " gp-rv-tick-on" else ""), actions = { click = "toggle-item=" .. r.n } }, if r.included then { Ui.icon("check") } else nil),
   Ui.avatar("gp-avatar-" .. r.avatarClass, r.author),
   el("div", { class = "gp-rv-main" }, { el("div", { class = "gp-rv-top" }, top), el("div", { class = "gp-rv-text" }, { Ui.rich(r.body) }) }),
  })
@@ -67,7 +77,7 @@ local function itemRow(s: State.State, item: Review.Item, n: number): Node
   return row({
    key = key, n = n, included = included, selected = selected,
    author = r.guide.author, avatarClass = "guide",
-   kind = { text = kind.icon .. kind.word, class = comment.kind },
+   kind = { text = kind.word, class = comment.kind, icon = kind.icon },
    note = if r.decisions[comment.id] == nil then "not decided yet" else nil,
    location = "line " .. comment.line, jump = "goto-suggestion=" .. comment.id, body = comment.body,
   })
@@ -89,7 +99,7 @@ local function commentList(s: State.State, included: number): { Node }
    span("gp-rv-sec-count", included .. " of " .. #items .. " included"),
    Ui.spacer(),
    if #items > 0 then el("span", { class = "gp-btn gp-btn-sm gp-btn-keyed", actions = { click = "toggle-all" } }, {
-    span("gp-btn-label", if all then "Exclude all" else "Include all"), span("gp-act-key", "a"),
+    span("gp-btn-label", if all then "Exclude all" else "Include all"), Ui.keys("a"),
    }) else span("", ""),
   }),
   span("gp-rv-sec-explain", "Ticked comments post on their lines. Untick one to leave it out."),
@@ -114,12 +124,13 @@ local function verdicts(s: State.State): { Node }
  local nodes = {}
  for n, verdict in Review.verdicts do
   local details = VERDICT_DETAILS[verdict.id]
+  local verdictIcon = details.icon
   local on = s.review.verdict == verdict.id
   table.insert(nodes, el("div", { class = "gp-rv-verdict gp-rv-verdict-" .. verdict.id .. (if on then " gp-rv-verdict-on" else ""), key = "v-" .. verdict.id, actions = { click = "verdict=" .. verdict.id } }, {
-   span("gp-rv-vicon", details.icon),
+   if verdictIcon then el("span", { class = "gp-rv-vicon" }, { Ui.icon(verdictIcon) }) else span("gp-rv-vicon", "•"),
    el("span", { class = "gp-rv-vtext" }, { span("gp-rv-vname", verdict.label), span("gp-rv-vhint", details.hint) }),
    Ui.spacer(),
-   span("gp-act-key", tostring(n)),
+   Ui.keys(tostring(n)),
   }))
  end
  return nodes
@@ -139,14 +150,14 @@ local function postedArea(posted: Review.Posted, enter: string): { Node }
  local delivery = posted.delivery
  if delivery.kind == "saved" then
   return { el("div", { class = "gp-rv-done " .. enter }, {
-   el("div", { class = "gp-rv-done-title" }, { span("gp-rv-done-tick", "✓"), span("gp-rv-done-label", "Dry run: review saved") }),
+   el("div", { class = "gp-rv-done-title" }, { el("span", { class = "gp-rv-done-tick" }, { Ui.icon("check") }), span("gp-rv-done-label", "Dry run: review saved") }),
    span("gp-rv-done-text", what .. " saved to " .. delivery.path .. ". Nothing was sent to GitHub."),
   }) }
  end
  return { el("div", { class = "gp-rv-done " .. enter }, {
-  el("div", { class = "gp-rv-done-title" }, { span("gp-rv-done-tick", "✓"), span("gp-rv-done-label", "Review posted") }),
+  el("div", { class = "gp-rv-done-title" }, { el("span", { class = "gp-rv-done-tick" }, { Ui.icon("check") }), span("gp-rv-done-label", "Review posted") }),
   span("gp-rv-done-text", what .. "."),
-  el("span", { class = "gp-rv-done-link", text = "Open it on GitHub ↗", actions = { click = "open-posted" } }),
+  el("span", { class = "gp-rv-done-link", actions = { click = "open-posted" } }, { span("", "Open it on GitHub"), Ui.icon("open") }),
  }) }
 end
 
@@ -160,7 +171,7 @@ local function submitArea(s: State.State, motion: Ui.Motion, included: number): 
   elseif submit.dryRunPath then "Save (dry run)  ·  " .. verdict
   else "Submit review  ·  " .. verdict
  local button = { span("gp-rv-submit-label", label) }
- if not confirming then table.insert(button, span("gp-rv-submit-key", "⌘ ⏎")) end
+ if not confirming then table.insert(button, Ui.keys("⌘⏎")) end
  local nodes = {
   el("span", { class = "gp-rv-submit" .. (if confirming then " gp-rv-submit-confirm" else ""), actions = { click = "submit-review" } }, button),
   span("gp-rv-note", if submit.dryRunPath
@@ -179,7 +190,7 @@ local function side(s: State.State, motion: Ui.Motion, included: number): { Node
   el("div", { class = "gp-rv-sec-top" }, {
    span("gp-rv-sec-title", "Summary"),
    Ui.spacer(),
-   el("span", { class = "gp-rv-link", text = if editing then "Done  ⏎" else "Edit  e", actions = { click = if editing then "done-summary" else "edit-summary" } }),
+   keyedLink(if editing then "Done" else "Edit", if editing then "⏎" else "e", if editing then "done-summary" else "edit-summary"),
   }),
   span("gp-rv-sec-explain", "The opening comment of your review." .. (if guide.summary ~= "" then " Drafted by " .. guide.author .. "." else "")),
   el("div", { class = "gp-rv-summary" .. (if editing then " gp-rv-summary-on" else ""), key = "summary", actions = { click = "edit-summary" } }, {
@@ -205,7 +216,7 @@ function M.view(s: State.State, motion: Ui.Motion): Node
      else "Posts one review to PR #" .. number .. ", after you confirm."),
    }),
    Ui.spacer(),
-   el("span", { class = "gp-rv-link", text = "Close  esc", actions = { click = "toggle-review" } }),
+   keyedLink("Close", "esc", "toggle-review"),
   }),
   el("div", { class = "gp-rv-cols", key = "cols" }, {
    el("div", { class = "gp-rv-list", key = "list" }, commentList(s, included)),

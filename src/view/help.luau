@@ -52,7 +52,7 @@ function M.view(closing: boolean, kind: Kind, enter: string): Node
  for _, group in groups(kind) do
   local rows = { span("gp-panel-h", group.title) }
   for _, key in group.keys do
-   table.insert(rows, el("div", { class = "gp-keyrow" }, { span("gp-kbd", key[1]), span("gp-keylabel", key[2]) }))
+   table.insert(rows, el("div", { class = "gp-keyrow" }, { Ui.keys(key[1]), span("gp-keylabel", key[2]) }))
   end
   table.insert(cols, el("div", { class = "gp-keycol" }, rows))
  end

@@ -21,11 +21,11 @@ function M.view(s: State.State, motion: Ui.Motion): Node
  end
  local open = s.descriptionOpen
  local kids = { el("div", { class = "gp-desc-head", key = "head", actions = { click = "toggle-description" } }, {
-  span("gp-caret", if open then "▾" else "▸"),
+  Ui.caret(open),
   span("gp-desc-title", "Description"),
   span("gp-desc-by", if pr.author ~= "" then "by " .. pr.author else ""),
   Ui.spacer(),
-  span("gp-act-key", "i"),
+  Ui.keys("i"),
  }) }
  if open or s.closing.description then
   local _, lines = string.gsub(body, "\n", "")

@@ -31,13 +31,13 @@ local function heading(s: State.State, files: { Pr.File }): Node
  local allViewed = viewed == #files
  return el("div", { class = "gp-sup-row", key = "head" }, {
   el("div", { class = "gp-sup-head", actions = { click = "toggle-group" } }, {
-   span("gp-caret", if s.supportingOpen then "▾" else "▸"),
+   Ui.caret(s.supportingOpen),
    span("gp-sup-title", "Supporting changes"),
    span("gp-sup-sub", #files .. " files that follow from the changes above · " .. viewed .. " reviewed"),
   }),
   Ui.spacer(),
   Ui.actionLink(if allOpen then "Close all" else "Open all", "o", "open-all-supporting", false),
-  Ui.actionLink(if allViewed then "✓  All " .. #files .. " reviewed" else "Mark all " .. #files .. " reviewed", "⇧ S", "mark-supporting", allViewed),
+  Ui.actionLink(if allViewed then "All " .. #files .. " reviewed" else "Mark all " .. #files .. " reviewed", "⇧ S", "mark-supporting", allViewed),
  })
 end
 
@@ -73,8 +73,8 @@ local function groups(s: State.State, motion: Ui.Motion, plan: State.Plan, files
   if row.kind == "folder" then
    local folded = s.foldedFolders[row.path] == true
    table.insert(nodes, el("div", { class = "gp-tree-row gp-tree-folder gp-sup-folder" .. depth, key = "d-" .. Text.keyOf(row.path), actions = { click = "toggle-folder=" .. row.path } }, {
-    span("gp-tree-glyph", if folded then "▸" else "▾"),
-    span("gp-tree-folder-name", row.name),
+    el("span", { class = "gp-tree-glyph" }, { Ui.icon(if folded then "chev-r" else "chev") }),
+    el("span", { class = "gp-tree-go" }, { Ui.icon(if folded then "folder" else "folder-open"), span("gp-tree-folder-name", row.name) }),
    }))
    height += GROUP_H
   else

@@ -1,6 +1,6 @@
 # UI guide
 
-Read this before changing anything in `src/view/` or `guide.css`. Keep the current look and reuse the values already in `guide.css`.
+Read this before changing anything in `src/view/` or `guide.css`. `DESIGN.md` is the visual system: reuse its tokens and components.
 
 ## Laying out new UI
 
@@ -35,8 +35,8 @@ These rules are condensed from the `emil-design-eng` skill. The motion tokens ar
 
 ## Tern's limits
 
-- Layout is flex only. Pinned elements use `position: sticky`; plugins get no scroll events.
-- Every color is a `light-dark()` pair.
-- No SVG. Icons are text glyphs (✓ ✕ • ↗ ⏎ ⌘) or the host's named `icon` strings. Mockups follow the same limits.
-- An action that has a key shows the key beside its label.
+- Layout is flex only. Pinned elements use `position: sticky` with Tern glass (`background: var(--panel)` plus `backdrop-filter`); plugins get no scroll events.
+- Colors are Tern's theme variables, or a pinned `--gp-*` review color from the top of `guide.css` (see `DESIGN.md`). A new pinned color is a `light-dark()` pair.
+- Tern draws the parts it has: keycaps are the native `kbd` node, icons the native `icon` node (Tern's named set), the view switch is `tabs`, and popovers are an `overlay` in the view's `layer`. No SVG of the plugin's own. Mockups follow the same limits.
+- An action that has a key shows its `kbd` beside its label.
 - Check `tern.d.luau`, written by `tern plugin types .`, before assuming the host offers something.

@@ -48,7 +48,7 @@ end
 
 local function flow(s: State.State, motion: Ui.Motion, diagram: Guide.Flow): Node
  local kids = { el("div", { class = "gp-flow-head", key = "head", actions = { click = "toggle-flow" } }, {
-  span("gp-caret", if s.flowOpen then "▾" else "▸"),
+  Ui.caret(s.flowOpen),
   span("gp-flow-title", diagram.title),
   Ui.spacer(),
   span("gp-flow-legend", "+ added   ~ changed   − removed"),

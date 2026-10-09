@@ -1,0 +1,302 @@
+---
+name: PR Guide
+description: GitHub pull request review inside Tern, read as an annotated story.
+colors:
+  ink: "var(--t1)"
+  ink-secondary: "var(--t2)"
+  ink-muted: "var(--t3)"
+  ink-faint: "var(--t4)"
+  line-faint: "var(--l1)"
+  line: "var(--l2)"
+  line-strong: "var(--l3)"
+  line-hover: "var(--l4)"
+  pane-glass: "var(--panel)"
+  card: "var(--card)"
+  chip: "var(--chip-bg)"
+  shade: "var(--sf-shade)"
+  gp-blue: "light-dark(#2f6fe0, #8ab4ff)"
+  gp-blue-line: "light-dark(#4f86e8, #5b8ff0)"
+  gp-blue-fill: "light-dark(#3b6fd8, #4a7ce0)"
+  gp-blue-wash: "light-dark(#e9f0fc, #22304a)"
+  gp-blue-wash-line: "light-dark(#c4d6f6, #34507e)"
+  gp-blue-ink: "light-dark(#0b1f44, #ffffff)"
+  gp-merge: "light-dark(#1f883d, #238636)"
+  gp-merge-hover: "light-dark(#1a7f37, #2ea043)"
+  gp-added: "light-dark(#1a7f37, #6fdd8b)"
+  gp-success-wash: "light-dark(#eef8f0, #1d2e22)"
+  gp-success-wash-line: "light-dark(#a6dcb4, #2f5a3a)"
+  gp-removed: "light-dark(#cf222e, #ff7b72)"
+  gp-danger-fill: "light-dark(#cf222e, #da3633)"
+  gp-danger-text: "light-dark(#a40e26, #ff9a92)"
+  gp-danger-wash: "light-dark(#fdf0ef, #33201f)"
+  gp-danger-wash-line: "light-dark(#f0b4ae, #6b2f2b)"
+  gp-changed: "light-dark(#9a6700, #e3b341)"
+  gp-changed-wash: "light-dark(#fdf6e7, #332c1d)"
+  gp-changed-wash-line: "light-dark(#ecd8a8, #5c4c2a)"
+  gp-confirm: "light-dark(#bc4c00, #c9510c)"
+  gp-suggestion: "light-dark(#8250df, #c297ff)"
+  gp-question: "light-dark(#0969da, #79b8ff)"
+  gp-marker: "light-dark(#fff3c4, #3d3620)"
+  guide-amber: "#d9822b"
+  diff-added-row: "rgba(60,160,90,0.14)"
+  diff-removed-row: "rgba(210,70,70,0.14)"
+  diff-added-word: "rgba(40,190,90,0.40)"
+  diff-removed-word: "rgba(230,60,60,0.40)"
+  on-fill: "#ffffff"
+typography:
+  display:
+    fontFamily: "var(--sans)"
+    fontSize: "26px"
+    fontWeight: 650
+    lineHeight: 1.25
+  headline:
+    fontFamily: "var(--sans)"
+    fontSize: "21px"
+    fontWeight: 650
+  display-sm:
+    fontFamily: "var(--sans)"
+    fontSize: "24px"
+    fontWeight: 650
+  headline-sm:
+    fontFamily: "var(--sans)"
+    fontSize: "20px"
+    fontWeight: 650
+  title:
+    fontFamily: "var(--sans)"
+    fontSize: "15px"
+    fontWeight: 650
+  body:
+    fontFamily: "var(--sans)"
+    fontSize: "15.5px"
+    fontWeight: 400
+    lineHeight: 1.55
+  body-md:
+    fontFamily: "var(--sans)"
+    fontSize: "14px"
+    fontWeight: 400
+    lineHeight: 1.5
+  body-sm:
+    fontFamily: "var(--sans)"
+    fontSize: "13px"
+    fontWeight: 400
+  label:
+    fontFamily: "var(--sans)"
+    fontSize: "11.5px"
+    fontWeight: 600
+    letterSpacing: "0.06em"
+  code:
+    fontFamily: "inherit (Tern's terminal font)"
+    fontSize: "12.5px"
+    lineHeight: "19px"
+rounded:
+  mark: "2px"
+  box: "4px"
+  keycap: "5px"
+  pill: "10px"
+  chip: "var(--r-chip)"
+  control: "var(--r-ctl)"
+  card: "var(--r-card)"
+spacing:
+  hair: "2px"
+  xs: "4px"
+  sm: "8px"
+  md: "12px"
+  lg: "16px"
+  xl: "24px"
+  gutter: "28px"
+  section: "36px"
+components:
+  button:
+    backgroundColor: "{colors.chip}"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.control}"
+    padding: "4px 12px"
+  button-hover:
+    backgroundColor: "{colors.line}"
+  button-submit:
+    backgroundColor: "{colors.gp-merge}"
+    textColor: "#ffffff"
+    rounded: "{rounded.control}"
+    padding: "6px 8px 6px 14px"
+  button-submit-hover:
+    backgroundColor: "{colors.gp-merge-hover}"
+  button-submit-confirm:
+    backgroundColor: "{colors.gp-confirm}"
+  card:
+    backgroundColor: "{colors.card}"
+    rounded: "{rounded.card}"
+    padding: "16px 20px"
+  row-current:
+    backgroundColor: "{colors.gp-blue-wash}"
+    textColor: "{colors.gp-blue-ink}"
+    rounded: "{rounded.control}"
+  search-field:
+    backgroundColor: "{colors.card}"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.control}"
+    padding: "6px 10px"
+  step-marker:
+    backgroundColor: "{colors.gp-blue-fill}"
+    textColor: "#ffffff"
+    rounded: "8px"
+    size: "15px"
+---
+
+# Design System: PR Guide
+
+## Overview
+
+**Creative North Star: "The Annotated Diff"**
+
+PR Guide is a GitHub review that lives inside Tern. The frame belongs to Tern: its glass pane, its neutrals, its sans for prose and terminal font for code, its keycaps, tabs, icons and popovers. Inside that frame, GitHub's review meaning comes through unchanged. Blue marks where the reader is, green marks what was added and what gets submitted, red marks what was removed or is a problem, and orange asks for a second press before posting. The annotations come first: an overview and a margin of steps beside the code. The diff carries them.
+
+The page is a reading instrument, not a dashboard. Text sits in a calm column on the left, code on the right, and color appears only where something needs the reader. Everything theme-dependent comes from Tern's variables, so the page follows any Tern theme the reader picks while staying recognizably a GitHub review.
+
+Rejected looks: SaaS marketing gloss (gradients, decorative glass, glowing cards), IDE chrome overload (every toolbar and panel at equal weight), and off-brand GitHub (any color that contradicts what a GitHub reviewer expects, such as a non-green submit or a red approve).
+
+**Key Characteristics:**
+- Tern frame, GitHub meaning: two sources of color with a hard border between them.
+- Neutrals are borrowed, never invented: text, lines and surfaces are Tern variables.
+- Prose in Tern's sans, code in Tern's terminal font, never swapped.
+- Flat by default. Depth comes from Tern glass on pinned surfaces and Tern's own overlay.
+- Every action shows its key, drawn with Tern's keycaps.
+
+## Colors
+
+Two palettes with separate jobs: Tern's theme variables for everything structural, and a small pinned set of GitHub review colors for meaning. Each pinned color is a `light-dark()` pair declared once on `.gp-root` in `guide.css` as `--<key>` (the key below, e.g. `--gp-blue`).
+
+### Primary
+- **Review Blue** (`--gp-blue`, with `-line`, `-fill`, `-wash`, `-wash-line` and `-ink` variants): where the reader is. The current step's left bar and tint, the filled step number in the gutter, the current file's border and header wash, the selected search row, the "you" avatar, the comment `+`, the text caret and selection, and the jump ring. It stays this blue under every Tern theme. That's deliberate: a teal or orange theme accent must not move the reader's "you are here" mark.
+
+### Secondary
+- **Merge Green** (`gp-merge`, `gp-merge-hover`): the two things GitHub makes green, the Submit review button and the submit action. A ticked comment checkbox and a reviewed file's meter cell use it too.
+- **Added Green** (`gp-added`, `gp-success-wash`, `gp-success-wash-line`): added-line counts, "added" state text, the posted-review notice, and the approve verdict once chosen.
+
+### Tertiary
+- **Removed Red** (`gp-removed`, `gp-danger-fill`, `gp-danger-text`, `gp-danger-wash`, `gp-danger-wash-line`): removed-line counts, the Problem comment kind, the request-changes verdict, and error notices (`gp-danger-text` on `gp-danger-wash`, for contrast).
+- **Changed Amber** (`gp-changed`, `gp-changed-wash`, `gp-changed-wash-line`): the "changed" box in the before/after diagram only.
+- **Confirm Orange** (`gp-confirm`): the submit button's second state, "Post to GitHub? Press ⌘⏎ again". Nothing else.
+- **Comment kinds**: `gp-question` for Question and `gp-suggestion` for Suggestion, GitHub's own label hues. Nit uses `ink-muted`.
+- **Marker Yellow** (`gp-marker`): lines being commented on and search hits in code. It overrides the add/remove tints.
+- **Guide Amber** (`#d9822b`): the AI reviewer's avatar, as an identity color.
+
+### Neutral
+- **Ink** (`--t1`): titles, body, code, and hover text.
+- **Ink Secondary** (`--t2`): supporting prose such as status text, step notes and the change "why".
+- **Ink Muted** (`--t3`): labels, paths, line ranges, counts, gutters, and placeholder copy.
+- **Ink Faint** (`--t4`): separators, dim hints, and checkbox outlines.
+- **Lines** (`--l1` to `--l4`): `--l1` for hover fills, `--l2` for hairlines and pressed fills, `--l3` for control borders, `--l4` for hovered control borders.
+- **Pane Glass** (`--panel`, with backdrop blur): every pinned surface, meaning the header, file headers and hint bar.
+- **Card** (`--card`): panels, comment cards, the review side panel and the search field.
+- **Chip** (`--chip-bg`): button rest fill and inline code.
+- **Shade** (`--sf-shade`): quiet strips such as hidden-lines bars and the description header.
+- **Syntax** (`--tk-keyword`, `--tk-string`, `--tk-function`, `--tk-type`, `--tk-number`, `--tk-comment`, `--tk-punct`): code tokens in diffs, the same palette Tern uses in its own code blocks.
+- **Diff rows**: added `rgba(60,160,90,0.14)` and removed `rgba(210,70,70,0.14)`. Word-level changes are 0.40 alpha, and the current step's rows about 0.27. Translucent so they sit on any theme.
+
+### Named Rules
+**The Two Accents Rule.** Tern's accent is only for Tern's own parts: the tab underline and native list selection. Review meaning (current, added, removed, submit, confirm) is GitHub-pinned. Never put `--accent` on a review state or a GitHub color on Tern chrome.
+
+**The Borrowed Neutrals Rule.** No hex gray in `guide.css`. A text, line or surface color is a Tern variable, or it is a pinned review color from the list above.
+
+**The Spent Color Rule.** Color marks state: current, added, removed, needs action. Everything at rest is neutral.
+
+## Typography
+
+**Body Font:** `var(--sans)`, Tern's UI sans (Geist, then the system sans)
+**Code Font:** the reader's terminal font: inherited from the Tern surface, or `var(--tv-font)` where code sits inside sans prose (inline code in the PR description)
+**Label Font:** the body sans, uppercase and tracked
+
+**Character:** a quiet UI sans for explanation beside the reader's own terminal font for code. Paths, counts, line ranges and diagram boxes keep the terminal font because they're code-adjacent data.
+
+### Hierarchy
+- **Display** (650, 26px, 1.25): the change title in the sticky change card. The overview heading is 24px.
+- **Headline** (650, 21px): the PR title. Panel titles such as "Finish your review" are 20px.
+- **Title** (650, 15px): section titles in panels, the description head, and diagram titles at 16px.
+- **Body** (400, 15.5px, 1.55): the change "why", capped at 820px. The overview summary is 16px at 1.5, and comment text is 14.5px at 1.5.
+- **Body small** (400, 13–14px): status rows, file rows, list rows, notes, and hint bar labels at 12.5px.
+- **Label** (600, 11.5–12px, 0.06em, uppercase): in-panel section labels such as "STEPS", "FILES CHANGED" and "CHANGE 1 OF 3".
+- **Code** (terminal font, 12.5px, 19px rows): diff rows, gutters, and inline code.
+
+### Named Rules
+**The Two Voices Rule.** Explanation is sans and code is the terminal font. A string of code inside prose becomes an inline code chip, never a font switch in the middle of a word.
+
+**The No Second Sans Rule.** Never declare a font stack. Prose uses `var(--sans)`, and code inherits.
+
+## Layout
+
+Flex only; Tern has no grid or floats. The guided page is two columns under a pinned header. On the left is the sticky change card (380px), holding the change title, why, files and steps. On the right, the code column flexes and stacks excerpts 36px apart. The columns sit 28px apart. The Files view reuses that split with a pinned file tree, which scrolls on its own.
+
+Spacing steps are 2, 4, 8, 12, 16, 24, 28 and 36px. Gaps inside a group are 2–8px, and gaps between groups are 16–36px. Rows that repeat (files, steps, search results, comments) are one line each, with counts in fixed right-aligned tabular columns. The page draws about 600 lines of code at most. Steps further away show just their file header.
+
+Pinned surfaces: the header at the top of the page, file headers at 92px, the hint bar at the bottom, and the change card at 92px.
+
+## Elevation & Depth
+
+Flat by default. Depth comes from two places only, both Tern's. Pinned surfaces are Tern glass, meaning `--panel` with `backdrop-filter: blur(24px) saturate(1.2)`, so code scrolling underneath stays readable as a blur. Floating panels (the model and lens menu) are Tern's own `overlay` card, with Tern's shadow and pop. Everything else separates by spacing first, then hairlines (`--l2`), then a card fill.
+
+### Named Rules
+**The Glass Pin Rule.** Anything `position: sticky` gets Tern glass, never an opaque color picked to match.
+
+**The No Homemade Float Rule.** Popovers are Tern overlays. The plugin draws no drop shadows of its own except the 1px lift on a chosen segment.
+
+## Shapes
+
+Gently rounded and consistent with Tern: `--r-chip` (6px) for chips, keycaps and small hover targets; `--r-ctl` (8px) for buttons, rows and fields; `--r-card` (12px) for panels, cards and the diagram. Smaller literal radii are reserved for marks: 2px for word highlights and meter cells, 4px for checkboxes and diagram counters. Avatars and step markers are full circles. Borders are 1px hairlines; the only thicker line is the current step's 3px inset bar, which is a state mark, not decoration.
+
+## Components
+
+### Buttons
+Quiet and tactile, like Tern's own controls.
+- **Shape:** control radius (`--r-ctl`).
+- **Default:** chip fill (`--chip-bg`) with an `--l2` hairline, ink text, padding 4px 12px, 13px sans. Hover fills `--l2`.
+- **Strong:** the same with weight 600, for the one primary action in a row, such as "Generate AI Guided Review".
+- **Submit review:** Merge Green with white text, a count pill and its keycap. The confirm state turns Confirm Orange.
+- **Press:** every pressable shares `scale(0.97)` over 120ms with `--gp-ease-out`.
+
+### Keycaps
+Tern's native `kbd` node, beside every action that has a key. Single letters show upper-case, modifiers show glyphs (⇧ ⌘ ⏎ ⌃). Keycaps on the green submit button invert to white at 35% opacity.
+
+### View switch (Guided | Files)
+Tern's native `tabs` node, with the `t` keycap beside it. Its underline is Tern's accent, the one place the theme accent appears.
+
+### Cards and panels
+- **Corner style:** `--r-card`.
+- **Background:** `--card`, with an `--l2` hairline.
+- **Padding:** 16px 20px (help and review panels at 20px 24px).
+- **Comment card:** inset from the gutter (60px left), avatar plus the author line ("Tandem left a nit"), body at 14.5px, and a foot row of actions with their keys. Added cards take a success hairline, problem cards a danger hairline, the focused card a Review Blue hairline, and dismissed cards drop to 60% opacity.
+
+### Code excerpt (signature)
+A file block: a glass sticky header (caret, dimmed directory plus bold file name, line range, `+n −n` counts, "Show whole file", and a Reviewed check), then diff rows. Rows are a 40px gutter of old and new numbers, a sign, and code in the terminal font. Added and removed rows take the translucent diff tints, and word-level changes take a stronger tint with a 2px radius. Hidden runs collapse into a dashed shade bar ("26 unchanged lines"). The current excerpt takes a Review Blue border and a blue-washed header. The current step's rows get a 3px Review Blue inset bar.
+
+### Step outline (signature)
+The left column's list of steps: a circle tick, the number, and the title. The current step sits in a Review Blue wash box with its note under it. Steps in a shared block also show a 15px numbered marker in the code gutter, filled Review Blue for the current one.
+
+### Before / after diagram
+A card of boxes joined by labeled arrows, in the terminal font. A box's state is its wash and line color: Added Green, Changed Amber, or Removed Red with strike-through text. Unchanged boxes are card-colored. A two-digit counter links each box to its change.
+
+### Review panel
+A two-column card. On the left, comments grouped under file names: one row per comment with a tick, avatar, kind label, line link and text, and unticked rows at 50% opacity. On the right, a shade side card with the summary field, three verdict rows (Comment, Approve, Request changes, each with a colored circle icon and a keycap), and the Submit button. Chosen verdicts take their meaning color as a wash plus hairline.
+
+### Search and picker rows
+One-line rows at `--r-ctl`, hover `--l1`, selected Review Blue wash. Search rows lead with a fixed 70px kind column. Picker rows keep fixed number, stat and time columns.
+
+### Model and lens menu
+Tern's native `overlay`, anchored under the model button. It holds a search field, grouped model rows, and a footer with effort and lens segments. Segments are chip fills, and the chosen one is a card fill with a 1px lift.
+
+## Do's and Don'ts
+
+### Do:
+- **Do** take every neutral from Tern: `--t1`–`--t4`, `--l1`–`--l4`, `--card`, `--chip-bg`, `--panel`, `--sf-shade`.
+- **Do** keep review meaning on the pinned GitHub colors, identical under every Tern theme.
+- **Do** make sticky surfaces Tern glass: `--panel` plus a backdrop blur.
+- **Do** use Tern's native `kbd`, `icon`, `tabs` and `overlay` instead of drawing look-alikes.
+- **Do** check every change in light and dark, and under a non-default Tern theme.
+- **Do** keep code, paths and counts in the inherited terminal font, with tabular numbers in count columns.
+
+### Don't:
+- **Don't** write a hex gray, a font stack, or an opaque sticky background.
+- **Don't** put `--accent` on a review state or a GitHub color on Tern chrome (The Two Accents Rule).
+- **Don't** add gradients, decorative glass, glows, or drop shadows.
+- **Don't** use text glyphs as icons where Tern has an icon (`check`, `chev`, `open`, `sparkle`, `warn`, `search`, file kinds).
+- **Don't** stack panels at equal weight. A surface has one primary element, and the rest stays muted.
+- **Don't** append override blocks (`v2`, `v3`). Change the rule where it lives.

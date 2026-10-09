@@ -120,7 +120,7 @@ function M.view(p: Picker.Picker, root: string?): Node
  }
  local hints = { span("gp-hb-mode", "Pick a pull request"), Ui.spacer() }
  for _, key in KEYS do
-  table.insert(hints, el("span", { class = "gp-hb-item" }, { span("gp-hb-key", key[1]), span("gp-hb-label", key[2]) }))
+  table.insert(hints, el("span", { class = "gp-hb-item" }, { Ui.keys(key[1]), span("gp-hb-label", key[2]) }))
  end
  return el("div", {}, { el("div", { class = "gp-root gp-page", key = "page" }, {
   el("div", { class = "gp-header", key = "header" }, {

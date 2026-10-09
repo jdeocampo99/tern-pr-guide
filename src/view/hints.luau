@@ -41,9 +41,9 @@ function M.view(s: State.State): Node
  if fixed then title, keys = fixed.title, fixed.keys else title, keys = readingKeys(s) end
  local kids = { span("gp-hb-mode", title), Ui.spacer() }
  for _, key in keys do
-  table.insert(kids, el("span", { class = "gp-hb-item" }, { span("gp-hb-key", key[1]), span("gp-hb-label", key[2]) }))
+  table.insert(kids, el("span", { class = "gp-hb-item" }, { Ui.keys(key[1]), span("gp-hb-label", key[2]) }))
  end
- table.insert(kids, el("span", { class = "gp-hb-item gp-hb-more", actions = { click = "toggle-help" } }, { span("gp-hb-key", "?"), span("gp-hb-label", "all shortcuts") }))
+ table.insert(kids, el("span", { class = "gp-hb-item gp-hb-more", actions = { click = "toggle-help" } }, { Ui.keys("?"), span("gp-hb-label", "all shortcuts") }))
  return el("div", { class = "gp-hintbar", key = "hints" }, kids)
 end
 

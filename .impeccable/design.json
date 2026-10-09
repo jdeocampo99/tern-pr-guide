@@ -1,0 +1,701 @@
+{
+ "schemaVersion": 2,
+ "generatedAt": "2026-10-09T14:16:59.009042+00:00",
+ "title": "Design System: PR Guide",
+ "extensions": {
+  "colorMeta": {
+   "ink": {
+    "role": "neutral",
+    "displayName": "Ink",
+    "canonical": "var(--t1)",
+    "measured": "#3b3b3b / #d4d8e4",
+    "source": "Tern theme variable --t1"
+   },
+   "ink-secondary": {
+    "role": "neutral",
+    "displayName": "Ink Secondary",
+    "canonical": "var(--t2)",
+    "measured": "#656565 / #a5a8b3",
+    "source": "Tern theme variable --t2"
+   },
+   "ink-muted": {
+    "role": "neutral",
+    "displayName": "Ink Muted",
+    "canonical": "var(--t3)",
+    "measured": "#6c6c6c / #9ca3b5",
+    "source": "Tern theme variable --t3"
+   },
+   "ink-faint": {
+    "role": "neutral",
+    "displayName": "Ink Faint",
+    "canonical": "var(--t4)",
+    "measured": "#767676 / #6b7280",
+    "source": "Tern theme variable --t4"
+   },
+   "line-faint": {
+    "role": "neutral",
+    "displayName": "Line Faint",
+    "canonical": "var(--l1)",
+    "measured": "ink 6%",
+    "source": "Tern theme variable --l1"
+   },
+   "line": {
+    "role": "neutral",
+    "displayName": "Line",
+    "canonical": "var(--l2)",
+    "measured": "ink 9%",
+    "source": "Tern theme variable --l2"
+   },
+   "line-strong": {
+    "role": "neutral",
+    "displayName": "Line Strong",
+    "canonical": "var(--l3)",
+    "measured": "ink 14%",
+    "source": "Tern theme variable --l3"
+   },
+   "line-hover": {
+    "role": "neutral",
+    "displayName": "Line Hover",
+    "canonical": "var(--l4)",
+    "measured": "ink 22%",
+    "source": "Tern theme variable --l4"
+   },
+   "pane-glass": {
+    "role": "neutral",
+    "displayName": "Pane Glass",
+    "canonical": "var(--panel)",
+    "measured": "rgba(248,248,248,.825) / rgba(18,20,25,.65)",
+    "source": "Tern theme variable --panel"
+   },
+   "card": {
+    "role": "neutral",
+    "displayName": "Card",
+    "canonical": "var(--card)",
+    "measured": "#ffffff / #1c1e23",
+    "source": "Tern theme variable --card"
+   },
+   "chip": {
+    "role": "neutral",
+    "displayName": "Chip",
+    "canonical": "var(--chip-bg)",
+    "measured": "ink 5.5%",
+    "source": "Tern theme variable --chip-bg"
+   },
+   "shade": {
+    "role": "neutral",
+    "displayName": "Shade",
+    "canonical": "var(--sf-shade)",
+    "measured": "ink 2.8%",
+    "source": "Tern theme variable --sf-shade"
+   },
+   "gp-blue": {
+    "role": "primary",
+    "displayName": "Blue",
+    "canonical": "light-dark(#2f6fe0, #8ab4ff)",
+    "tonalRamp": [
+     "#0a1e43",
+     "#11336f",
+     "#17479b",
+     "#1e5bc8",
+     "#3775e1",
+     "#719dea",
+     "#afc8f3",
+     "#e9f0fc"
+    ]
+   },
+   "gp-blue-line": {
+    "role": "primary",
+    "displayName": "Blue Line",
+    "canonical": "light-dark(#4f86e8, #5b8ff0)",
+    "tonalRamp": [
+     "#091e44",
+     "#0f3271",
+     "#15469e",
+     "#1b5acb",
+     "#3473e4",
+     "#6f9cec",
+     "#aec7f4",
+     "#e8effc"
+    ]
+   },
+   "gp-blue-fill": {
+    "role": "primary",
+    "displayName": "Blue Fill",
+    "canonical": "light-dark(#3b6fd8, #4a7ce0)",
+    "tonalRamp": [
+     "#0d1e40",
+     "#15316a",
+     "#1e4595",
+     "#2659bf",
+     "#4072d9",
+     "#779be4",
+     "#b2c7f0",
+     "#eaeffb"
+    ]
+   },
+   "gp-blue-wash": {
+    "role": "primary",
+    "displayName": "Blue Wash",
+    "canonical": "light-dark(#e9f0fc, #22304a)",
+    "tonalRamp": [
+     "#091f43",
+     "#0f3370",
+     "#15479d",
+     "#1c5cca",
+     "#3575e3",
+     "#6f9deb",
+     "#aec8f4",
+     "#e9f0fc"
+    ]
+   },
+   "gp-blue-wash-line": {
+    "role": "primary",
+    "displayName": "Blue Wash Line",
+    "canonical": "light-dark(#c4d6f6, #34507e)",
+    "tonalRamp": [
+     "#0a1e42",
+     "#11336f",
+     "#18479b",
+     "#1e5bc7",
+     "#3875e1",
+     "#719de9",
+     "#afc8f3",
+     "#e9f0fc"
+    ]
+   },
+   "gp-blue-ink": {
+    "role": "primary",
+    "displayName": "Blue Ink",
+    "canonical": "light-dark(#0b1f44, #ffffff)",
+    "tonalRamp": [
+     "#0b1e42",
+     "#12326e",
+     "#19469a",
+     "#205ac6",
+     "#3974df",
+     "#739ce8",
+     "#b0c7f2",
+     "#e9f0fb"
+    ]
+   },
+   "gp-merge": {
+    "role": "secondary",
+    "displayName": "Merge",
+    "canonical": "light-dark(#1f883d, #238636)",
+    "tonalRamp": [
+     "#0e3e1c",
+     "#18682f",
+     "#219141",
+     "#2bbb54",
+     "#44d46d",
+     "#7ae197",
+     "#b4eec5",
+     "#eafaef"
+    ]
+   },
+   "gp-merge-hover": {
+    "role": "secondary",
+    "displayName": "Merge Hover",
+    "canonical": "light-dark(#1a7f37, #2ea043)",
+    "tonalRamp": [
+     "#0d401c",
+     "#166a2e",
+     "#1e9440",
+     "#27be53",
+     "#40d86c",
+     "#78e396",
+     "#b3efc4",
+     "#eafbef"
+    ]
+   },
+   "gp-added": {
+    "role": "secondary",
+    "displayName": "Added",
+    "canonical": "light-dark(#1a7f37, #6fdd8b)",
+    "tonalRamp": [
+     "#0d401c",
+     "#166a2e",
+     "#1e9440",
+     "#27be53",
+     "#40d86c",
+     "#78e396",
+     "#b3efc4",
+     "#eafbef"
+    ]
+   },
+   "gp-success-wash": {
+    "role": "secondary",
+    "displayName": "Success Wash",
+    "canonical": "light-dark(#eef8f0, #1d2e22)",
+    "tonalRamp": [
+     "#16361d",
+     "#255a30",
+     "#347e43",
+     "#43a356",
+     "#5cbc70",
+     "#8bcf99",
+     "#bee4c6",
+     "#edf8ef"
+    ]
+   },
+   "gp-success-wash-line": {
+    "role": "secondary",
+    "displayName": "Success Wash Line",
+    "canonical": "light-dark(#a6dcb4, #2f5a3a)",
+    "tonalRamp": [
+     "#16371e",
+     "#245c32",
+     "#328047",
+     "#41a55b",
+     "#5abe74",
+     "#8ad19c",
+     "#bde5c7",
+     "#edf8f0"
+    ]
+   },
+   "gp-removed": {
+    "role": "tertiary",
+    "displayName": "Removed",
+    "canonical": "light-dark(#cf222e, #ff7b72)",
+    "tonalRamp": [
+     "#420b0f",
+     "#6e1218",
+     "#991922",
+     "#c5202c",
+     "#df3a45",
+     "#e8737b",
+     "#f2b0b5",
+     "#fbe9ea"
+    ]
+   },
+   "gp-danger-fill": {
+    "role": "tertiary",
+    "displayName": "Danger Fill",
+    "canonical": "light-dark(#cf222e, #da3633)",
+    "tonalRamp": [
+     "#420b0f",
+     "#6e1218",
+     "#991922",
+     "#c5202c",
+     "#df3a45",
+     "#e8737b",
+     "#f2b0b5",
+     "#fbe9ea"
+    ]
+   },
+   "gp-danger-text": {
+    "role": "tertiary",
+    "displayName": "Danger Text",
+    "canonical": "light-dark(#a40e26, #ff9a92)",
+    "tonalRamp": [
+     "#460610",
+     "#750a1b",
+     "#a40e26",
+     "#d31231",
+     "#ed2c4a",
+     "#f2697f",
+     "#f8aab7",
+     "#fde8eb"
+    ]
+   },
+   "gp-danger-wash": {
+    "role": "tertiary",
+    "displayName": "Danger Wash",
+    "canonical": "light-dark(#fdf0ef, #33201f)",
+    "tonalRamp": [
+     "#440d08",
+     "#71150e",
+     "#9f1e14",
+     "#cc2619",
+     "#e64033",
+     "#ed776e",
+     "#f5b2ad",
+     "#fceae8"
+    ]
+   },
+   "gp-danger-wash-line": {
+    "role": "tertiary",
+    "displayName": "Danger Wash Line",
+    "canonical": "light-dark(#f0b4ae, #6b2f2b)",
+    "tonalRamp": [
+     "#41110c",
+     "#6c1c14",
+     "#97271c",
+     "#c23224",
+     "#db4c3d",
+     "#e58075",
+     "#f1b7b2",
+     "#fbebe9"
+    ]
+   },
+   "gp-changed": {
+    "role": "tertiary",
+    "displayName": "Changed",
+    "canonical": "light-dark(#9a6700, #e3b341)",
+    "tonalRamp": [
+     "#4c3300",
+     "#805500",
+     "#b27700",
+     "#e69900",
+     "#ffb31a",
+     "#ffc95c",
+     "#ffe1a3",
+     "#fff7e5"
+    ]
+   },
+   "gp-changed-wash": {
+    "role": "tertiary",
+    "displayName": "Changed Wash",
+    "canonical": "light-dark(#fdf6e7, #332c1d)",
+    "tonalRamp": [
+     "#473206",
+     "#76530a",
+     "#a5750e",
+     "#d49612",
+     "#edb02b",
+     "#f2c768",
+     "#f8dfaa",
+     "#fdf6e7"
+    ]
+   },
+   "gp-changed-wash-line": {
+    "role": "tertiary",
+    "displayName": "Changed Wash Line",
+    "canonical": "light-dark(#ecd8a8, #5c4c2a)",
+    "tonalRamp": [
+     "#3f300e",
+     "#695117",
+     "#937120",
+     "#bc9129",
+     "#d6ab43",
+     "#e2c379",
+     "#efddb4",
+     "#faf6ea"
+    ]
+   },
+   "gp-confirm": {
+    "role": "tertiary",
+    "displayName": "Confirm",
+    "canonical": "light-dark(#bc4c00, #c9510c)",
+    "tonalRamp": [
+     "#4c1f00",
+     "#803400",
+     "#b24800",
+     "#e65d00",
+     "#ff761a",
+     "#ff9e5c",
+     "#ffc8a3",
+     "#fff0e5"
+    ]
+   },
+   "gp-suggestion": {
+    "role": "tertiary",
+    "displayName": "Suggestion",
+    "canonical": "light-dark(#8250df, #c297ff)",
+    "tonalRamp": [
+     "#1e0c41",
+     "#33146c",
+     "#471c97",
+     "#5b23c2",
+     "#743ddc",
+     "#9c75e6",
+     "#c8b1f1",
+     "#f0e9fb"
+    ]
+   },
+   "gp-question": {
+    "role": "tertiary",
+    "displayName": "Question",
+    "canonical": "light-dark(#0969da, #79b8ff)",
+    "tonalRamp": [
+     "#032349",
+     "#053b7a",
+     "#0753ab",
+     "#096adc",
+     "#2384f6",
+     "#62a7f9",
+     "#a7cefb",
+     "#e7f1fe"
+    ]
+   },
+   "gp-marker": {
+    "role": "tertiary",
+    "displayName": "Marker",
+    "canonical": "light-dark(#fff3c4, #3d3620)",
+    "tonalRamp": [
+     "#4c3d00",
+     "#806600",
+     "#b28e00",
+     "#e6b700",
+     "#ffd01a",
+     "#ffde5c",
+     "#ffeca3",
+     "#fffae5"
+    ]
+   },
+   "guide-amber": {
+    "role": "tertiary",
+    "displayName": "Guide Amber",
+    "canonical": "#d9822b",
+    "tonalRamp": [
+     "#41260c",
+     "#6c4013",
+     "#97591b",
+     "#c37323",
+     "#dc8c3c",
+     "#e6ad75",
+     "#f1d1b1",
+     "#fbf2e9"
+    ]
+   },
+   "diff-added-row": {
+    "role": "tertiary",
+    "displayName": "Diff Added Row",
+    "canonical": "rgba(60,160,90,0.14)",
+    "tonalRamp": []
+   },
+   "diff-removed-row": {
+    "role": "tertiary",
+    "displayName": "Diff Removed Row",
+    "canonical": "rgba(210,70,70,0.14)",
+    "tonalRamp": []
+   },
+   "diff-added-word": {
+    "role": "tertiary",
+    "displayName": "Diff Added Word",
+    "canonical": "rgba(40,190,90,0.40)",
+    "tonalRamp": []
+   },
+   "diff-removed-word": {
+    "role": "tertiary",
+    "displayName": "Diff Removed Word",
+    "canonical": "rgba(230,60,60,0.40)",
+    "tonalRamp": []
+   },
+   "on-fill": {
+    "role": "tertiary",
+    "displayName": "On Fill",
+    "canonical": "#ffffff",
+    "tonalRamp": [
+     "#262626",
+     "#404040",
+     "#595959",
+     "#737373",
+     "#8c8c8c",
+     "#adadad",
+     "#d1d1d1",
+     "#f2f2f2"
+    ]
+   }
+  },
+  "typographyMeta": {
+   "display": {
+    "displayName": "Display",
+    "purpose": "Change title in the sticky change card; overview heading at 24px."
+   },
+   "headline": {
+    "displayName": "Headline",
+    "purpose": "PR title; panel titles at 20px."
+   },
+   "title": {
+    "displayName": "Title",
+    "purpose": "Section titles in panels."
+   },
+   "body": {
+    "displayName": "Body",
+    "purpose": "Change \"why\", overview summary, comment text."
+   },
+   "body-sm": {
+    "displayName": "Body small",
+    "purpose": "Status, rows, notes."
+   },
+   "label": {
+    "displayName": "Label",
+    "purpose": "Uppercase in-panel section labels."
+   },
+   "code": {
+    "displayName": "Code",
+    "purpose": "Diff rows and code-adjacent data in Tern's terminal font."
+   },
+   "display-sm": {
+    "displayName": "Display small",
+    "purpose": "Overview heading."
+   },
+   "headline-sm": {
+    "displayName": "Headline small",
+    "purpose": "Panel titles such as \"Finish your review\"."
+   },
+   "body-md": {
+    "displayName": "Body medium",
+    "purpose": "Rows, review text, search and summary fields."
+   }
+  },
+  "shadows": [
+   {
+    "name": "segment-lift",
+    "value": "0 1px 2px light-dark(rgba(16,24,40,.12), rgba(0,0,0,.4))",
+    "purpose": "The chosen effort/lens segment in the model menu."
+   },
+   {
+    "name": "glass-pin",
+    "value": "background: var(--panel); backdrop-filter: blur(24px) saturate(1.2)",
+    "purpose": "Every sticky surface: header, file headers, hint bar."
+   }
+  ],
+  "motion": [
+   {
+    "name": "gp-ease-out",
+    "value": "cubic-bezier(0.23, 1, 0.32, 1)",
+    "purpose": "Anything entering or leaving."
+   },
+   {
+    "name": "gp-ease-in-out",
+    "value": "cubic-bezier(0.77, 0, 0.175, 1)",
+    "purpose": "Movement that stays on screen."
+   },
+   {
+    "name": "gp-dur-press",
+    "value": "120ms",
+    "purpose": "Press feedback scale(0.97)."
+   },
+   {
+    "name": "gp-dur-out",
+    "value": "150ms",
+    "purpose": "Exits."
+   },
+   {
+    "name": "gp-dur-in",
+    "value": "200ms",
+    "purpose": "Entrances."
+   },
+   {
+    "name": "gp-dur-rare",
+    "value": "320ms",
+    "purpose": "A guide arriving, a review sent."
+   }
+  ],
+  "breakpoints": []
+ },
+ "components": [
+  {
+   "name": "Button",
+   "kind": "button",
+   "refersTo": "button",
+   "description": "Default action: chip fill, hairline, control radius.",
+   "html": "<button class=\"ds-btn\">Show whole file</button>",
+   "css": ".ds-btn { font: 13px var(--sans, Geist, system-ui, sans-serif); color: var(--t1, #3b3b3b); background: var(--chip-bg, rgba(59,59,59,.055)); border: 1px solid var(--l2, rgba(59,59,59,.09)); border-radius: var(--r-ctl, 8px); padding: 4px 12px; cursor: pointer; transition: transform 120ms cubic-bezier(0.23,1,0.32,1), background-color 160ms ease; } .ds-btn:hover { background: var(--l2, rgba(59,59,59,.09)); } .ds-btn:active { transform: scale(0.97); } .ds-btn:focus-visible { outline: 2px solid light-dark(#4f86e8,#5b8ff0); outline-offset: 2px; }"
+  },
+  {
+   "name": "Submit review",
+   "kind": "button",
+   "refersTo": "button-submit",
+   "description": "The one green action: posts the review. Second press state turns orange.",
+   "html": "<button class=\"ds-submit\">Submit review <span class=\"ds-count\">1</span><span class=\"ds-cap\">R</span></button>",
+   "css": ".ds-submit { display: inline-flex; gap: 8px; align-items: center; font: 600 14px var(--sans, Geist, system-ui, sans-serif); color: #fff; background: light-dark(#1f883d,#238636); border: 1px solid light-dark(rgba(31,35,40,.15),rgba(240,246,252,.1)); border-radius: var(--r-ctl, 8px); padding: 6px 8px 6px 14px; cursor: pointer; transition: transform 120ms cubic-bezier(0.23,1,0.32,1), filter 140ms ease; } .ds-submit:hover { background: light-dark(#1a7f37,#2ea043); } .ds-submit:active { transform: scale(0.97); } .ds-count { font-size: 12px; padding: 0 7px; border-radius: 10px; background: rgba(255,255,255,.2); } .ds-cap { font: 500 10.5px ui-monospace, monospace; padding: 1px 5px; border-radius: 5px; border: 1px solid rgba(255,255,255,.35); color: rgba(255,255,255,.85); }"
+  },
+  {
+   "name": "Keycap",
+   "kind": "chip",
+   "refersTo": "kbd",
+   "description": "Tern's native kbd: shown beside every action that has a key.",
+   "html": "<span class=\"ds-kbd\"><span>⇧</span><span>M</span></span>",
+   "css": ".ds-kbd { display: inline-flex; gap: 3px; } .ds-kbd span { min-width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; font: 500 10.5px ui-monospace, monospace; color: var(--t2, #656565); background: var(--l1, rgba(59,59,59,.06)); box-shadow: inset 0 0 0 1px var(--l2, rgba(59,59,59,.09)); border-radius: 5px; padding: 0 4px; }"
+  },
+  {
+   "name": "Current step row",
+   "kind": "card",
+   "refersTo": "row-current",
+   "description": "The step the reader is on, in the left outline: Review Blue wash.",
+   "html": "<div class=\"ds-step\"><span class=\"ds-n\">4</span><div><div class=\"ds-t\">Worker uses the shared message</div><div class=\"ds-b\">The inline rejection string moves into progress.ts.</div></div></div>",
+   "css": ".ds-step { display: flex; gap: 10px; padding: 6px 8px; border-radius: var(--r-ctl, 8px); background: light-dark(#e9f0fc,#22304a); border: 1px solid light-dark(#c4d6f6,#34507e); font-family: var(--sans, Geist, system-ui, sans-serif); } .ds-n { font: 650 12px var(--sans, Geist, system-ui, sans-serif); color: light-dark(#2f6fe0,#8ab4ff); } .ds-t { font-size: 14.5px; font-weight: 650; color: light-dark(#0b1f44,#fff); } .ds-b { font-size: 13.5px; color: var(--t2, #656565); }"
+  },
+  {
+   "name": "Search field",
+   "kind": "input",
+   "refersTo": "search-field",
+   "description": "Search box: card fill with a Review Blue focus line.",
+   "html": "<label class=\"ds-search\"><span>/</span><input placeholder=\"Search steps, files, comments and code\"></label>",
+   "css": ".ds-search { display: flex; gap: 10px; align-items: center; padding: 6px 10px; border-radius: var(--r-ctl, 8px); border: 1px solid var(--l3, rgba(59,59,59,.14)); background: var(--card, #fff); font: 15px var(--sans, Geist, system-ui, sans-serif); } .ds-search:focus-within { border-color: light-dark(#4f86e8,#5b8ff0); } .ds-search span { color: var(--t3, #6c6c6c); } .ds-search input { flex: 1; border: 0; outline: 0; background: transparent; font: inherit; color: var(--t1, #3b3b3b); caret-color: light-dark(#2f6fe0,#8ab4ff); }"
+  },
+  {
+   "name": "Code excerpt header",
+   "kind": "custom",
+   "refersTo": "code-excerpt",
+   "description": "Sticky file header on Tern glass, with counts in tabular figures.",
+   "html": "<div class=\"ds-fhead\"><span class=\"ds-dir\">src/playbooks/</span><b>progress.ts</b><span class=\"ds-dim\">lines 29–31</span><span class=\"ds-sp\"></span><span class=\"ds-add\">+41</span><span class=\"ds-del\">−5</span></div>",
+   "css": ".ds-fhead { display: flex; gap: 12px; align-items: center; padding: 8px 12px; background: var(--panel, rgba(248,248,248,.825)); backdrop-filter: blur(24px) saturate(1.2); border: 1px solid var(--l2, rgba(59,59,59,.09)); border-radius: var(--r-ctl, 8px) var(--r-ctl, 8px) 0 0; font: 13.5px ui-monospace, monospace; } .ds-dir, .ds-dim { color: var(--t3, #6c6c6c); font-size: 12.5px; } .ds-sp { flex: 1; } .ds-add { color: light-dark(#1a7f37,#6fdd8b); font-variant-numeric: tabular-nums; } .ds-del { color: light-dark(#cf222e,#ff7b72); font-variant-numeric: tabular-nums; }"
+  },
+  {
+   "name": "View switch",
+   "kind": "nav",
+   "refersTo": "tabs",
+   "description": "Tern's native tabs for Guided | Files: the one place the theme accent appears.",
+   "html": "<div class=\"ds-tabs\"><span class=\"on\">Guided</span><span>Files</span></div>",
+   "css": ".ds-tabs { display: flex; gap: 2px; font: 12px var(--sans, Geist, system-ui, sans-serif); box-shadow: inset 0 -1px 0 var(--l2, rgba(59,59,59,.09)); } .ds-tabs span { padding: 5px 10px; color: var(--t3, #6c6c6c); cursor: pointer; } .ds-tabs span:hover { background: var(--l1, rgba(59,59,59,.06)); } .ds-tabs .on { color: var(--t1, #3b3b3b); box-shadow: inset 0 -2px 0 var(--accent, #5a8080); }"
+  }
+ ],
+ "narrative": {
+  "northStar": "The Annotated Diff",
+  "overview": "PR Guide is a GitHub review that lives inside Tern. The frame belongs to Tern: its glass pane, its neutrals, its sans for prose and terminal font for code, its keycaps, tabs, icons and popovers. Inside that frame, GitHub's review meaning comes through unchanged. Blue marks where the reader is, green marks what was added and what gets submitted, red marks what was removed or is a problem, and orange asks for a second press before posting. The annotations come first: an overview and a margin of steps beside the code. The diff carries them.\n\nThe page is a reading instrument, not a dashboard. Text sits in a calm column on the left, code on the right, and color appears only where something needs the reader. Everything theme-dependent comes from Tern's variables, so the page follows any Tern theme the reader picks while staying recognizably a GitHub review.\n\nRejected looks: SaaS marketing gloss (gradients, decorative glass, glowing cards), IDE chrome overload (every toolbar and panel at equal weight), and off-brand GitHub (any color that contradicts what a GitHub reviewer expects, such as a non-green submit or a red approve).",
+  "keyCharacteristics": [
+   "Tern frame, GitHub meaning: two sources of color with a hard border between them.",
+   "Neutrals are borrowed, never invented: text, lines and surfaces are Tern variables.",
+   "Prose in Tern's sans, code in Tern's terminal font, never swapped.",
+   "Flat by default. Depth comes from Tern glass on pinned surfaces and Tern's own overlay.",
+   "Every action shows its key, drawn with Tern's keycaps."
+  ],
+  "rules": [
+   {
+    "name": "The Two Accents Rule",
+    "body": "Tern's accent is only for Tern's own parts: the tab underline and native list selection. Review meaning (current, added, removed, submit, confirm) is GitHub-pinned. Never put `--accent` on a review state or a GitHub color on Tern chrome.",
+    "section": "colors"
+   },
+   {
+    "name": "The Borrowed Neutrals Rule",
+    "body": "No hex gray in `guide.css`. A text, line or surface color is a Tern variable, or it is a pinned review color from the list above.",
+    "section": "colors"
+   },
+   {
+    "name": "The Spent Color Rule",
+    "body": "Color marks state: current, added, removed, needs action. Everything at rest is neutral.",
+    "section": "colors"
+   },
+   {
+    "name": "The Two Voices Rule",
+    "body": "Explanation is sans and code is the terminal font. A string of code inside prose becomes an inline code chip, never a font switch in the middle of a word.",
+    "section": "typography"
+   },
+   {
+    "name": "The No Second Sans Rule",
+    "body": "Never declare a font stack. Prose uses `var(--sans)`, and code inherits.",
+    "section": "typography"
+   },
+   {
+    "name": "The Glass Pin Rule",
+    "body": "Anything `position: sticky` gets Tern glass, never an opaque color picked to match.",
+    "section": "elevation"
+   },
+   {
+    "name": "The No Homemade Float Rule",
+    "body": "Popovers are Tern overlays. The plugin draws no drop shadows of its own except the 1px lift on a chosen segment.",
+    "section": "elevation"
+   }
+  ],
+  "dos": [
+   "**Do** take every neutral from Tern: `--t1`–`--t4`, `--l1`–`--l4`, `--card`, `--chip-bg`, `--panel`, `--sf-shade`.",
+   "**Do** keep review meaning on the pinned GitHub colors, identical under every Tern theme.",
+   "**Do** make sticky surfaces Tern glass: `--panel` plus a backdrop blur.",
+   "**Do** use Tern's native `kbd`, `icon`, `tabs` and `overlay` instead of drawing look-alikes.",
+   "**Do** check every change in light and dark, and under a non-default Tern theme.",
+   "**Do** keep code, paths and counts in the inherited terminal font, with tabular numbers in count columns."
+  ],
+  "donts": [
+   "**Don't** write a hex gray, a font stack, or an opaque sticky background.",
+   "**Don't** put `--accent` on a review state or a GitHub color on Tern chrome (The Two Accents Rule).",
+   "**Don't** add gradients, decorative glass, glows, or drop shadows.",
+   "**Don't** use text glyphs as icons where Tern has an icon (`check`, `chev`, `open`, `sparkle`, `warn`, `search`, file kinds).",
+   "**Don't** stack panels at equal weight. A surface has one primary element, and the rest stays muted.",
+   "**Don't** append override blocks (`v2`, `v3`). Change the rule where it lives."
+  ]
+ }
+}

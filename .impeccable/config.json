@@ -1,0 +1,18 @@
+{
+  "buildPath": "comp",
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "guide.css"
+        ],
+        "createdAt": "2026-10-09T14:16:52.851Z",
+        "reason": "agent judgment: the 3px inset bar on .gp-on marks the current review step on diff rows (code lines, not cards), GitHub/IDE current-line convention; predates this session and is documented in DESIGN.md Shapes"
+      }
+    ]
+  }
+}

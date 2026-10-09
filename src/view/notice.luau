@@ -41,7 +41,7 @@ end
 
 local function stage(n: number, text: string, finished: boolean): Node
  return el("div", { class = "gp-st" .. (if finished then " gp-st-done" else " gp-st-now"), key = "s" .. n }, {
-  if finished then span("gp-st-tick", "✓") else span("gp-st-spin", ""),
+  if finished then el("span", { class = "gp-st-tick" }, { Ui.icon("check") }) else span("gp-st-spin", ""),
   span("gp-st-text", text),
  })
 end

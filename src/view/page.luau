@@ -8,6 +8,7 @@ local Description = require("./description")
 local Guide = require("../guide")
 local Header = require("./header")
 local Hints = require("./hints")
+local ModelPanel = require("./model-panel")
 local Overview = require("./overview")
 local Review = require("../review")
 local ReviewPanel = require("./review-panel")
@@ -120,7 +121,25 @@ function M.composerFieldPath(blockId: string): string
 end
 
 M.searchFieldPath = PAGE .. ".header.search.box.field"
-M.modelFieldPath = PAGE .. ".header.ai.anchor.models.box.field"
+
+-- The Guided | Files tabs in the title row; their select events carry this id.
+M.viewTabsPath = PAGE .. ".header.title.views.tabs"
+
+-- The layer region's nodes sit under "layer", as the page's sit under "main".
+local LAYER = "layer"
+local MODEL_BUTTON = PAGE .. ".header.ai.model"
+M.modelFieldPath = LAYER .. ".models.body.box.field"
+
+-- The layer: while the model menu is open, a scrim that closes it on a click anywhere outside, and
+-- the menu as an overlay under the model button.
+function M.layer(s: State.State): Node?
+ local run, box = s.ai, s.models
+ if not run or not box or run.running then return nil end
+ return el("div", {}, {
+  el("div", { class = "gp-md-scrim", key = "scrim", actions = { click = "toggle-models" } }),
+  ModelPanel.view(box, run.agent, MODEL_BUTTON, not s.keyed),
+ })
+end
 
 M.summaryFieldPath = PAGE .. ".header.review.cols.side.summary.field"
 

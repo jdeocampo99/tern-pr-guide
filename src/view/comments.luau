@@ -20,10 +20,12 @@ local COMPOSER_H = 150
 
 local M = {}
 
-local function head(avatarClass: string, name: string, who: string, action: string, where: string): Node
+local function head(avatarClass: string, name: string, who: string, action: string, where: string, icon: string?): Node
+ local line = { span("gp-card-who", who), span("gp-card-action", action) }
+ if icon then table.insert(line, 1, Ui.icon(icon)) end
  return el("div", { class = "gp-card-head" }, {
   Ui.avatar(avatarClass, name),
-  el("span", { class = "gp-card-line" }, { span("gp-card-who", who), span("gp-card-action", action) }),
+  el("span", { class = "gp-card-line" }, line),
   span("gp-card-where", where),
  })
 end
@@ -34,11 +36,12 @@ local function suggestionFoot(id: string, decision: string?): { Node }
    Ui.button("gp-btn-primary", "Add to review", "decide=" .. id .. "|added"),
    Ui.button("", "Dismiss", "decide=" .. id .. "|dismissed"),
    Ui.spacer(),
-   span("gp-card-keys", "a add  ·  d dismiss"),
+   Ui.keyLine("gp-card-keys", { { "a", "add" }, { "d", "dismiss" } }),
   }
  end
  return {
-  span("gp-card-state gp-card-state-" .. decision, if decision == "added" then "✓  Will be posted with your review" else "Dismissed  ·  won't be posted"),
+  if decision == "added" then el("span", { class = "gp-card-state gp-card-state-added" }, { Ui.icon("check"), span("gp-card-state-text", "Will be posted with your review") })
+   else span("gp-card-state gp-card-state-dismissed", "Dismissed  ·  won't be posted"),
   Ui.spacer(),
   Ui.button("gp-btn-ghost", if decision == "added" then "Remove" else "Undo", "decide=" .. id .. "|undo"),
  }
@@ -48,7 +51,7 @@ local function suggestion(s: State.State, comment: Guide.Comment): (Node, number
  local author = s.review.guide.author
  local decision = s.review.decisions[comment.id]
  local kind = Ui.kinds[comment.kind]
- local children = { head("gp-avatar-guide", author, kind.icon .. author, kind.verb, "line " .. comment.line) }
+ local children = { head("gp-avatar-guide", author, author, kind.verb, "line " .. comment.line, kind.icon) }
  if decision ~= "dismissed" then table.insert(children, el("div", { class = "gp-card-body" }, { Ui.rich(comment.body) })) end
  table.insert(children, el("div", { class = "gp-card-foot" }, suggestionFoot(comment.id, decision)))
  local class = "gp-card gp-card-" .. (decision or "open")
@@ -71,7 +74,7 @@ local function composer(c: State.Composer, enter: string): Node
   head("gp-avatar-you", YOU, YOU, "are commenting", Text.lineSpan(c.from, c.to) .. (if c.from == c.to then "  ·  click another + to cover a range" else "")),
   el("div", { class = "gp-card-body", key = "body" }, { Fields.node(c.field, "field", "Leave a comment…") }),
   el("div", { class = "gp-card-foot" }, {
-   span("gp-card-keys", "⏎ comment  ·  ⇧⏎ new line  ·  esc cancel"),
+   Ui.keyLine("gp-card-keys", { { "⏎", "comment" }, { "⇧⏎", "new line" }, { "esc", "cancel" } }),
    Ui.spacer(),
    Ui.button("gp-btn-ghost", "Cancel", "comment-cancel"),
    Ui.button("gp-btn-primary", "Comment", "comment-save"),

@@ -9,13 +9,13 @@ Each module's header comment names its one job. Put new code in the module that 
 - **Boundary:** only `src/fetch.luau` reaches outside the plugin: `gh`, `git`, `omp`, `tern.kv`, and files.
 - **Glue:** only `src/block.luau` does window effects: scrolling, focus, timers, toasts. A new action is one `ACTIONS` entry, sent by both clicks and `keys.luau`.
 - **Views:** `src/view/*.luau` turn state into nodes and nothing else. Build them with `Ui.el` and `Ui.span`.
-- **Styles:** `guide.css` only, with `gp-` classes. To change a look, edit the rule where it lives. The review panel's appended `v2`/`v3` blocks are sediment to remove, not copy.
+- **Styles:** `guide.css` only, with `gp-` classes and the color tokens `DESIGN.md` names. To change a look, edit the rule where it lives.
 - `GUIDE.md`, `prompts/guide.md` and `src/guide.luau` change together.
 - Mockups and scratch files go in `/tmp`. `docs/screenshots/` is only for README images.
 
 ## UI
 
-Read `docs/ui.md` before any change to `src/view/` or `guide.css`, and before making a mockup. It covers how to lay out new components, motion, and what Tern can't render.
+Read `DESIGN.md` and `docs/ui.md` before any change to `src/view/` or `guide.css`, and before making a mockup. `DESIGN.md` is the visual system: tokens, components, and which colors come from Tern versus GitHub. `docs/ui.md` covers how to lay out new components, motion, and what Tern can't render.
 
 ## Copy
 

@@ -370,7 +370,7 @@ local ACTIONS: { [string]: Handler } = {
  ["toggle-models"] = function(s, cx)
   local run = s.ai
   if s.models then
-   if not s.closing.models then closeAfter(s, cx, { "models" }, function() s.models = nil end) end
+   s.models = nil
    return
   end
   if not run or run.running then return end
@@ -675,6 +675,14 @@ local function pickerKey(b: Block, p: Picker.Picker, key: Key, cx: BlockCx): boo
  return true
 end
 
+-- The action a click or a pick in the view stands for: a control's own action, or the view tabs'
+-- choice, which is the `view=<id>` the old segments sent.
+local function actionOf(b: Block, ev: UiEvent): Keys.Action?
+ if ev.ev == "action" then return { act = ev.act, value = ev.value } end
+ if ev.ev == "select" and b.page and ev.id == Page.viewTabsPath and ev.item then return { act = "view", value = ev.item } end
+ return nil
+end
+
 local block: BlockDef<Block> = {
  init = function(cx: BlockCx, args: { string }): Block
   local opts, problem = options(args)
@@ -732,11 +740,11 @@ local block: BlockDef<Block> = {
   local motion = { born = s.born, next = {}, booted = s.booted, animate = not s.keyed }
   local main = Page.view(s, motion)
   s.born, s.booted = motion.next, true
-  return { main = main }
+  return { main = main, layer = Page.layer(s) }
  end,
  event = function(b: Block, ev: UiEvent, cx: BlockCx)
-  if ev.ev ~= "action" then return end
-  local action = { act = ev.act, value = ev.value }
+  local action = actionOf(b, ev)
+  if not action then return end
   if b.page then b.page.keyed = false end
   if action.act == "generate-guide" then
    generate(b, cx)

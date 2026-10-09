@@ -1,6 +1,7 @@
 --!strict
--- The model dropdown, a popover under the model button: a filter, the models matching it grouped by
--- provider, the efforts the highlighted model takes as one segmented control, and the review lens.
+-- The model dropdown, Tern's overlay under the model button: a filter, the models matching it
+-- grouped by provider, the efforts the highlighted model takes as one segmented control, and the
+-- review lens.
 local Agent = require("../agent")
 local Fields = require("../text-field")
 local State = require("../state")
@@ -33,7 +34,7 @@ local function efforts(box: State.ModelBox, model: Agent.Model?): Node?
   span("gp-md-label", "Effort"),
   el("div", { class = "gp-md-segs" }, segments),
   Ui.spacer(),
-  span("gp-act-key", "← →"),
+  Ui.keys("← →"),
  })
 end
 
@@ -54,13 +55,13 @@ local function lenses(agent: Agent.Agent): Node
   el("div", { class = "gp-md-lens-row", key = "pick" }, {
    span("gp-md-label", "Lens"),
    el("div", { class = "gp-md-segs gp-md-segs-wrap", key = "segs" }, segments),
-   span("gp-act-key", "⇧← →"),
+   Ui.keys("⇧← →"),
   }),
   el("div", { class = "gp-md-lens-row", key = "about" }, {
    span("gp-md-lens-desc", current.description),
    el("span", { class = "gp-md-edit", key = "edit", actions = { click = "edit-lenses" } }, {
     span("gp-md-edit-label", "Edit lenses…"),
-    span("gp-act-key", "⌃E"),
+    Ui.keys("⌃E"),
    }),
   }),
  })
@@ -68,7 +69,9 @@ end
 
 -- The list starts at match `box.top`, under a row offering the ones above it. Its key changes with
 -- `top`, so the list draws as a fresh scroller at its own start and the wheel scrolls it freely.
-function M.view(box: State.ModelBox, agent: Agent.Agent, enter: string, closing: boolean): Node
+-- `anchor` is the full node id of the button the card opens under. The rows fade between states only
+-- under `soft`, as on the page: a key never animates.
+function M.view(box: State.ModelBox, agent: Agent.Agent, anchor: string, soft: boolean): Node
  local choices = State.modelChoices(box, agent)
  local rows, group = {}, nil
  if box.top > 1 then
@@ -85,7 +88,7 @@ function M.view(box: State.ModelBox, agent: Agent.Agent, enter: string, closing:
   table.insert(rows, el("div", { class = "gp-md-row" .. (if n == box.selected then " gp-md-row-on" else ""), key = "m" .. n, actions = { click = "model-row=" .. n } }, {
    span("gp-md-name", model.name),
    Ui.spacer(),
-   span("gp-md-check", if model.selector == agent.model then "✓" else ""),
+   el("span", { class = "gp-md-check" }, if model.selector == agent.model then { Ui.icon("check") } else nil),
   }))
  end
  if #agent.models == 0 then
@@ -94,13 +97,14 @@ function M.view(box: State.ModelBox, agent: Agent.Agent, enter: string, closing:
   table.insert(rows, span("gp-md-empty", "Nothing matches “" .. box.field.text .. "”"))
  end
  local kids = {
-  el("div", { class = "gp-md-search", key = "box" }, { span("gp-md-glass", "⌕"), Fields.node(box.field, "field", "Search models") }),
+  el("div", { class = "gp-md-search", key = "box" }, { Ui.icon("search"), Fields.node(box.field, "field", "Search models") }),
   el("div", { class = "gp-md-list", key = "list" .. box.top }, rows),
  }
  local foot = efforts(box, choices[box.selected])
  if foot then table.insert(kids, foot) end
  table.insert(kids, lenses(agent))
- return el("div", { class = "gp-md-pop " .. enter .. (if closing then " gp-closing-pop" else ""), key = "models" }, kids)
+ local body = el("div", { class = "gp-md" .. (if soft then " gp-soft" else ""), key = "body" }, kids)
+ return { k = "overlay", p = { key = "models", role = "gp.models", aria = "Model and lens", anchor = { node = anchor, side = "below" }, size = "md" }, c = { body } } :: any
 end
 
 return M

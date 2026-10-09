@@ -14,6 +14,12 @@ local el, span = Ui.el, Ui.span
 
 local M = {}
 
+-- A step's tick: a check once reviewed, an empty circle until then.
+local function tick(reviewed: boolean, class: string, action: string): Node
+ if reviewed then return el("span", { class = class, actions = { click = action } }, { Ui.icon("check") }) end
+ return el("span", { class = class, text = "○", actions = { click = action } })
+end
+
 local function fileList(r: Review.Review, change: number): { Node }
  local list = {}
  for _, file in Review.filesOfChange(r, change) do
@@ -35,7 +41,7 @@ local function stepList(r: Review.Review, change: Guide.Change, current: Guide.S
  for _, step in change.steps do
   local key = step.key
   local here = step == current
-  local kids = { el("span", { class = "gp-ol-dot", text = if r.reviewed[key] then "✓" else "○", actions = { click = "review-step=" .. key } }) }
+  local kids = { tick(r.reviewed[key] == true, "gp-ol-dot", "review-step=" .. key) }
   -- The number the step has on its lines when a block holds several steps.
   if #change.steps > 1 then table.insert(kids, span("gp-ol-num", tostring(step.index))) end
   table.insert(kids, el("span", { class = "gp-ol-steptitle", text = step.title, actions = { click = "goto-step=" .. step.position } }))
@@ -74,15 +80,15 @@ local function fileTree(s: State.State): Node
    if folded then hiddenBelow = row.depth end
    local holds = folded and string.sub(current.file, 1, #row.path + 1) == row.path .. "/"
    table.insert(rows, el("div", { class = "gp-tree-row gp-tree-folder" .. depth .. (if holds then " gp-tree-holds" else ""), key = "td-" .. Text.keyOf(row.path), actions = { click = "toggle-folder=" .. row.path } }, {
-    span("gp-tree-glyph", if folded then "▸" else "▾"),
-    span("gp-tree-folder-name", row.name),
+    el("span", { class = "gp-tree-glyph" }, { Ui.icon(if folded then "chev-r" else "chev") }),
+    el("span", { class = "gp-tree-go" }, { Ui.icon(if folded then "folder" else "folder-open"), span("gp-tree-folder-name", row.name) }),
    }))
   else
    local file = row.file
    local step = stepOf[file.path]
    local here = step == current
    table.insert(rows, el("div", { class = "gp-tree-row gp-tree-file" .. depth .. (if here then " gp-tree-here" else ""), key = "tf-" .. Text.keyOf(file.path) }, {
-    el("span", { class = "gp-tree-glyph gp-tree-tick", text = if r.reviewed[step.key] then "✓" else "○", actions = { click = "review-step=" .. step.key } }),
+    tick(r.reviewed[step.key] == true, "gp-tree-glyph gp-tree-tick", "review-step=" .. step.key),
     el("span", { class = "gp-tree-go", actions = { click = "goto-step=" .. step.position } }, {
      Ui.fileIcon(file.path),
      span("gp-cfile-name", Text.baseName(file.path)),
@@ -108,7 +114,7 @@ function M.view(s: State.State, n: number): Node
  local all = done == #keys
  local meta = { Ui.check(all, "Reviewed", "mark-change=" .. n) }
  if not all and #keys > 1 then table.insert(meta, span("gp-band-steps", done .. " of " .. #keys .. " steps done")) end
- table.insert(meta, span("gp-act-key", "⇧ ⏎"))
+ table.insert(meta, Ui.keys("⇧ ⏎"))
  return el("div", { class = "gp-outline gp-sticky gp-ccard", key = "outline" }, {
   span("gp-band-label", "Change " .. n .. " of " .. #r.guide.changes),
   span("gp-band-title", change.title),
