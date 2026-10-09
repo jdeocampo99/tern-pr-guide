@@ -450,6 +450,8 @@ M.commands = {
 
 ### `src/hub/sync.luau` (pure; cache shapes, diff, schedule)
 
+Luau has no literal types, so `schema` is a `number` in code and `load` accepts only 1. A PR missing from the old cache never arrives in `diff` (it is new or evicted, and nothing says which). `merge` sets `counts.flashAt` to `now` when the Needs fixes count rose. A refresh in flight turns `schedule`'s `refresh` off (nil).
+
 ```luau
 export type Counts = { toReview: number, needFixes: number, flashAt: number? }   -- what the status segment reads; flashAt is a time
 export type Cache = {
@@ -626,6 +628,7 @@ export type State = {
 }
 
 function M.new(prs: { HubPR }, now: number, saved: any): State
+function M.replace(s: State, prs: { HubPR }, now: number, refreshedAt: string?)   -- a refresh's PRs: sets time, clears loading and error, re-projects
 function M.project(s: State)                 -- recomputes s.board from s.prs and the inputs
 function M.mode(s: State): Mode
 function M.reviewed(fix: AgentFix.Fix, reviewed: { [string]: boolean }): boolean
@@ -656,6 +659,7 @@ export type Block = {
 	flights: { refresh: boolean, checks: boolean, probe: boolean },   -- one call of each kind at a time
 	fixture: string?,                 -- `fixture=cases`: no network, no timers
 	generate: boolean,                -- ⏎ opens the PR with the AI guide started
+	sched: { probedAt: number?, probeChanged: boolean, focusedAt: number?, checksAt: number?, refreshTried: number?, lastModified: string? },   -- what `Sync.schedule` reads; `refreshTried` keeps a failed refresh from retrying at once
 	closed: boolean,
 }
 export type Saved = { tab: Tab, sort: Sort, repositories: { string }?, folded: { [string]: boolean } }
