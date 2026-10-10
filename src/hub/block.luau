@@ -792,6 +792,7 @@ local function adoptShared(b: Block, cx: BlockCx)
 		announce(b, cx, b.cache, prs, now)
 		b.cache = shared
 		State.replace(b.s, prs, now, shared.refreshedAt)
+		reconcileFlight(b, cx)
 		if moved then
 			recount(b)
 			persist(b)
