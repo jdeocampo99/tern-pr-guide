@@ -515,6 +515,11 @@ export type Changes = {
 }
 function M.diff(old: Cache?, fresh: { HubPR }, now: number, suppressed: { [string]: boolean }): Changes
 	-- `suppressed` holds the keys the viewer just acted on. Inactive PRs never arrive.
+export type Alerts = { toast: { text: string, sub: string? }?, rings: { string }, good: { string } }
+function M.alerts(changes: Changes): Alerts   -- what the block shows: the one toast, the keys to ring red, the keys to wash green
+	-- The block sets `state.ringed[key]` to "bad" or "good", holds it (about 1.4 s), switches it to "bad-out" or "good-out"
+	-- (the CSS transition, `--gp-dur-rare`) and clears it. The toast's level is "error" (Tern has no "warning").
+	-- ⌘R is `hub-refresh`: live, a refresh now; in `fixture=cases`, the next `refreshes` entry, wrapping to the first after the last.
 
 export type ScheduleInput = {
 	now: number,

@@ -39,6 +39,7 @@ export type Block = {
 	closed: boolean, -- a render failed: the window is gone, so no timer starts anything
 	refetch: boolean, -- a refresh was asked for while one was running: run another when it ends
 	show: Model.PRRef?, -- a pull request just added by link: select it when the refresh brings it
+	step: number, -- fixture only: how many `refreshes` entries ⌘R has applied
 }
 
 type Handler = (b: Block, cx: BlockCx, value: string) -> ()
@@ -232,17 +233,6 @@ local function cachedAt(b: Block): number?
 	return if b.cache then Model.epoch(b.cache.refreshedAt) else nil
 end
 
--- Takes another window's newer cache, so windows share one refresh.
-local function adoptShared(b: Block)
-	local shared = readCache()
-	if not shared then return end
-	local theirs, mine = Model.epoch(shared.refreshedAt), cachedAt(b)
-	if theirs and (mine == nil or theirs > mine) then
-		b.cache = shared
-		State.replace(b.s, shared.prs, os.time(), shared.refreshedAt)
-	end
-end
-
 local function running(b: Block): { string }
 	local ids = {}
 	for _, pr in b.s.prs do
@@ -290,10 +280,59 @@ local function draw(b: Block, cx: BlockCx)
 	if not pcall(function() cx:render() end) then stop(b) end
 end
 
+-- How long an arrival's ring or wash is held before it fades, and how long the fade takes (--gp-dur-rare, plus a
+-- little slack so the class outlives the transition).
+local RING_HOLD_MS, RING_FADE_MS = 1400, 360
+
+-- Alerts for one refresh: `fresh` against `old` (nil on a first load, which shows nothing). Sets the rings
+-- and washes the next projection paints, shows the one toast, and starts the timers that fade and then end
+-- the ring. The viewer's own actions (`s.acted`) are skipped and then forgotten. Call before `State.replace`.
+local function announce(b: Block, cx: BlockCx, old: Sync.Cache?, fresh: { Model.HubPR }, now: number)
+	local s = b.s
+	local alerts = Sync.alerts(Sync.diff(old, fresh, now, s.acted))
+	s.acted = {}
+	if alerts.toast then cx:toast("error", alerts.toast.text, alerts.toast.sub) end
+	if #alerts.rings + #alerts.good == 0 then return end
+	s.ringed = {}
+	for _, key in alerts.rings do s.ringed[key] = "bad" end
+	for _, key in alerts.good do s.ringed[key] = "good" end
+	-- A background refresh is not a key press: the arrival may animate.
+	s.keyed = false
+	local timers = b.timers :: any
+	local running: TimerHandle? = timers.ring
+	if running then running:cancel() end
+	local function after(ms: number, fn: () -> ())
+		timers.ring = tern.timer(ms, function()
+			timers.ring = nil
+			if b.closed then return end
+			fn()
+			State.project(b.s)
+			draw(b, cx)
+		end)
+	end
+	after(RING_HOLD_MS, function()
+		for key, kind in b.s.ringed do b.s.ringed[key] = (kind .. "-out") :: any end
+		after(RING_FADE_MS, function() b.s.ringed = {} end)
+	end)
+end
+
+-- Takes another window's newer cache, so windows share one refresh.
+local function adoptShared(b: Block, cx: BlockCx)
+	local shared = readCache()
+	if not shared then return end
+	local theirs, mine = Model.epoch(shared.refreshedAt), cachedAt(b)
+	if theirs and (mine == nil or theirs > mine) then
+		local now = os.time()
+		announce(b, cx, b.cache, shared.prs, now)
+		b.cache = shared
+		State.replace(b.s, shared.prs, now, shared.refreshedAt)
+	end
+end
+
 -- Arms the probe, refresh (as the debounce while a change or focus waits) and checks timers from the schedule.
 local function rearm(b: Block, cx: BlockCx)
 	if b.fixture or b.closed then return end
-	adoptShared(b)
+	adoptShared(b, cx)
 	local sched = b.sched
 	local last, tried = cachedAt(b), sched.refreshTried
 	local plan = Sync.schedule({
@@ -372,6 +411,7 @@ startRefresh = function(b: Block, cx: BlockCx)
 			if moved then writeAdded(canon) end
 			local cache = Sync.merge(fresh, b.cache, readLocal(), now)
 			cache.lastModified = b.sched.lastModified
+			announce(b, cx, b.cache, cache.prs, now)
 			b.cache = cache
 			b.sched.probeChanged, b.sched.focusedAt = false, nil
 			State.replace(b.s, cache.prs, now, cache.refreshedAt)
@@ -391,7 +431,7 @@ end
 
 onRefresh = function(b, cx)
 	if b.flights.refresh then return end
-	adoptShared(b)
+	adoptShared(b, cx)
 	-- Another window refreshed a moment ago: its cache is the answer.
 	local last = cachedAt(b)
 	if last and os.time() - last < Sync.DEBOUNCE then
@@ -563,6 +603,62 @@ local function refetchSoon(b: Block, cx: BlockCx)
 	tern.timer(3000, function()
 		if not b.closed then refetch(b, cx) end
 	end)
+end
+
+-- The sample board's ⌘R: applies the next `refreshes` entry (after the last, the first again) through the same
+-- announce path as a live refresh. The entry's earlier board shows first, so the arrival is seen.
+local SETTLE_MS = 450
+
+local function fixtureRefresh(prs: { Model.HubPR }): Model.Refresh
+	return { prs = prs, viewer = "", rateLimit = nil, calls = {}, truncated = false, partial = nil } :: any
+end
+
+local function stepFixture(b: Block, cx: BlockCx)
+	if b.flights.refresh then return end
+	local data = FIXTURES[b.fixture :: string]()
+	local list = data.refreshes
+	if not list or #list == 0 then return end
+	b.step = b.step % #list + 1
+	local entry = list[b.step]
+	local none: Sync.Local = { added = {}, tandem = {} }
+	local before: Sync.Cache? = nil
+	if entry.previous then
+		local built = Sync.merge(fixtureRefresh(entry.previous), nil, none, data.asOf)
+		built.prs = entry.previous
+		before = built
+	end
+	local function apply()
+		b.flights.refresh = false
+		if b.closed then return end
+		local cache = Sync.merge(fixtureRefresh(entry.prs), before, none, data.asOf)
+		cache.prs = entry.prs
+		-- merge stamps the fixture's frozen time; the status segment reads the real clock.
+		if cache.counts.flashAt then cache.counts.flashAt = os.time() end
+		local acted: { [string]: boolean } = {}
+		for key in entry.suppressed do acted[key] = true end
+		b.s.acted = acted
+		announce(b, cx, before, entry.prs, data.asOf)
+		b.cache = cache
+		State.replace(b.s, entry.prs, data.asOf, data.asOfIso)
+		writeStatus(cache)
+		draw(b, cx)
+	end
+	local timers = b.timers :: any
+	local running: TimerHandle? = timers.ring
+	if running then running:cancel() end
+	timers.ring = nil
+	b.s.ringed = {}
+	if not before then return apply() end
+	b.flights.refresh = true
+	State.replace(b.s, entry.previous, data.asOf, data.asOfIso)
+	draw(b, cx)
+	tern.timer(SETTLE_MS, apply)
+end
+
+-- ⌘R: refresh now. The sample board steps through its `refreshes` instead of asking GitHub.
+ACTIONS["hub-refresh"] = function(b, cx)
+	if b.fixture then return stepFixture(b, cx) end
+	refetch(b, cx)
 end
 
 -- Keeps the cache in step with a change the viewer just made to the board.
@@ -768,7 +864,7 @@ local block: BlockDef<Block> = {
 				probedAt = now, probeChanged = false, focusedAt = if live then now else nil, checksAt = nil,
 				refreshTried = nil, lastModified = if cache then cache.lastModified else nil,
 			},
-			closed = false, refetch = false, show = nil,
+			closed = false, refetch = false, show = nil, step = 0,
 		}
 		if fixture then
 			local sample = table.clone(SAMPLE_AGENT)
@@ -798,7 +894,11 @@ local block: BlockDef<Block> = {
 	end,
 	key = function(b: Block, key: Key, cx: BlockCx): boolean?
 		local s = b.s
+		-- ⌘R is not in Keys (its file is not this change's); it sends the same ACTIONS entry a click would.
 		local action = Keys.hubAction(s, key)
+		if not action and s.mode == "board" and key.name == "r" and (key.meta or key.ctrl) then
+			action = { act = "hub-refresh", value = nil }
+		end
 		if action then
 			s.keyed = true
 			dispatch(b, cx, action)

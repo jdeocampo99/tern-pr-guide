@@ -1007,7 +1007,6 @@
   .gp-st-spin { border-top-color: var(--l3); background: var(--gp-blue); animation: gp-pulse 1600ms ease-in-out infinite; }
   .gp-st-sweep { width: 100%; animation: gp-pulse 1600ms ease-in-out infinite; }
   .gp-btn:active, .gp-rv-button:active, .gp-rv-submit:active { transform: none; }
-  .gp-hc-ring-bad, .gp-hc-ring-good { animation: gp-fade-in var(--gp-dur-in) ease; }
   .gp-hc-spin { animation: none; border-color: var(--gp-changed); }
   .gp-hub-ctl:active, .gp-sb-main:active { transform: none; }
 }
@@ -1120,10 +1119,17 @@
 .gp-hc-ask { font-family: var(--sans); font-size: 12.5px; font-weight: 600; color: var(--t1); overflow: hidden; text-overflow: ellipsis; }
 .gp-hc-confirm { display: inline-flex; gap: 6px; align-items: center; }
 .gp-hc-busy { display: inline-flex; gap: 6px; align-items: center; font-family: var(--sans); font-size: 12px; color: var(--t2); white-space: nowrap; }
-.gp-hc-ring-bad { animation: gp-hc-ring-bad 1600ms ease; }
-.gp-hc-ring-good { animation: gp-hc-ring-good 1600ms ease; }
-@keyframes gp-hc-ring-bad { from { box-shadow: 0 0 0 3px light-dark(rgba(207, 34, 46, 0.45), rgba(255, 123, 114, 0.45)); } to { box-shadow: 0 0 0 0 transparent; } }
-@keyframes gp-hc-ring-good { from { box-shadow: 0 0 0 3px light-dark(rgba(26, 127, 55, 0.4), rgba(111, 221, 139, 0.4)); } to { box-shadow: 0 0 0 0 transparent; } }
+/* Arrival alerts. The ring (red) and wash (green) appear at once and are held; the "-out" classes carry the fade as a
+   transition, so a refresh mid-fade retargets instead of restarting. Under no .gp-soft (a key drove it) they just end. */
+.gp-hc.gp-hc-ring-bad, .gp-hc.gp-hc-ring-bad:hover { box-shadow: 0 0 0 3px light-dark(rgba(207, 34, 46, 0.45), rgba(255, 123, 114, 0.45)); }
+.gp-hc.gp-hc-ring-good, .gp-hc.gp-hc-ring-good:hover { background: var(--gp-success-wash); border-color: var(--gp-success-wash-line); }
+.gp-hc.gp-hc-ring-bad-out, .gp-hc.gp-hc-ring-bad-out:hover { box-shadow: 0 0 0 3px transparent; }
+.gp-soft .gp-hc.gp-hc-ring-bad, .gp-soft .gp-hc.gp-hc-ring-good { transition: none; }
+.gp-soft .gp-hc.gp-hc-ring-bad-out { transition: box-shadow var(--gp-dur-rare) var(--gp-ease-out); }
+.gp-soft .gp-hc.gp-hc-ring-good-out { transition: background-color var(--gp-dur-rare) var(--gp-ease-out), border-color var(--gp-dur-rare) var(--gp-ease-out); }
+@media (prefers-reduced-motion: reduce) {
+  .gp-soft .gp-hc.gp-hc-ring-bad-out, .gp-soft .gp-hc.gp-hc-ring-good-out { transition-duration: var(--gp-dur-in); transition-timing-function: ease; }
+}
 
 /* the split button: the card's main action, quiet while hovered, filled with its key while selected; ▾ holds the alternatives */
 .gp-sb { display: inline-flex; gap: 1px; align-items: center; }
