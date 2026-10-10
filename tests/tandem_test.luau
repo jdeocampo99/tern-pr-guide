@@ -3503,6 +3503,146 @@ local function fixture()
 	end)
 end
 
+-- Local edits a store could not take, and the actions that make them. A replay keeps the stamp the edit was made with; an
+-- edit applies only on the head its action began on; a refresh that was out when the edit was made cannot bring the PR back.
+local function replayedEdits()
+	local KEY = "acme/api#109"
+	local function iso(at: number): string
+		return os.date("!%Y-%m-%dT%H:%M:%SZ", at) :: string
+	end
+	local function holdCache(w: any, b: any)
+		w.shared = true
+		w.kv["hub.cache"] = storedCache({ WEB, API114 }, Cases.asOf)
+		b.cache = Sync.load(copy(w.kv["hub.cache"]))
+		assert(b.cache ~= nil, "this window holds a cache of the store's stamp")
+	end
+	-- Another window's newer cache, at `Cases.asOf + 60`, with `patch` applied to KEY's stored PR.
+	local function theirs(w: any, patch: ((any) -> ())?): any
+		local cache = storedCache({ WEB, API114 }, Cases.asOf + 60)
+		cache.writeId = "other-window#1"
+		for _, cached in cache.prs do
+			if cached.key == KEY and patch then patch(cached) end
+		end
+		w.kv["hub.cache"] = cache
+		return cache
+	end
+	local function stored(cache: any): any
+		for _, cached in cache.prs do
+			if cached.key == KEY then return cached end
+		end
+		return nil
+	end
+	local function freshAnswer(): any
+		return { viewer = "jubbydev", prs = copy(Cases.prs), rateLimit = nil, calls = {}, truncated = false }
+	end
+	local function board(w: any, Fetch: any, Block: any): any
+		local b = agentBoard(w, Fetch, Block)
+		holdCache(w, b)
+		w.runs = {}
+		b.github.run = function(command: any, done: any) table.insert(w.runs, { command = command, done = done }) end
+		b.s.merges["acme/api"] = { method = { kind = "comment", command = "/merge" }, source = "declared", ask = false }
+		b.s.autoMerge["acme/api"] = true
+		State.project(b.s)
+		return b
+	end
+	local function auto(w: any, Block: any, b: any): any
+		Block.event(b, { ev = "action", act = "card-auto", value = KEY } :: any, w.cx)
+		assert(#w.runs == 1, "the command is out")
+		return w.runs[1]
+	end
+	local function closeBatch(w: any, Block: any, b: any): any
+		w.runs = {}
+		b.s.confirm = { kind = "batch-close", keys = { KEY } } :: any
+		Block.event(b, { ev = "action", act = "hub-confirm", value = "" } :: any, w.cx)
+		assert(#w.runs == 1, "the close is out")
+		return w.runs[1]
+	end
+	local function holds(b: any, key: string): boolean
+		return State.prOf(b.s, key) ~= nil
+	end
+
+	-- A comment merge succeeds at T0 and its save fails; a bot rejects it at T1; recovery at T2 replays the edit. The pending
+	-- record keeps T0, so the rejection (after T0) still counts, on the board and in what is stored.
+	withWorld(function(w, Fetch, Block)
+		local b = board(w, Fetch, Block)
+		local run = auto(w, Block, b)
+		local t0 = w.now
+		local t1, t2 = t0 + 60, t0 + 120
+		local failed = false
+		w.failWhen = function(key: string): boolean
+			if key ~= "hub.cache" or failed then return false end
+			failed = true
+			return true
+		end
+		run.done(nil, nil)
+		w.failWhen = nil
+		assert(failed and #b.replays == 1, "the save failed and the edit is retained")
+		assert(State.prOf(b.s, KEY).pending.at == iso(t0), "the merge is pending since T0")
+
+		w.now = t2
+		theirs(w, nil)
+		local answer: any = nil
+		b.github = quietGithub(function(_, done) answer = done end)
+		Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+		assert(answer ~= nil, "the refresh is out")
+		answer(freshAnswer(), nil)
+		assert(#b.replays == 0, "the stored write holds the edit")
+		for _, at in { State.prOf(b.s, KEY).pending.at, stored(w.kv["hub.cache"]).pending.at } do
+			assert(at == iso(t0) and at < iso(t1), "replay at T2 kept T0, so a rejection at T1 is after it")
+		end
+	end)
+
+	-- A merge action began on H1 and another window stored H2 before the answer. The edit applies on neither the board nor the
+	-- store, and nothing is retained for a later replay; on H1 it applies (the control).
+	for _, act in { "auto", "close" } do
+		for _, moved in { false, true } do
+			withWorld(function(w, Fetch, Block)
+				local what = act .. (if moved then " on a moved head" else " on the same head")
+				local b = board(w, Fetch, Block)
+				local run = if act == "auto" then auto(w, Block, b) else closeBatch(w, Block, b)
+				theirs(w, function(cached: any) if moved then cached.headOid = "moved-head" end end)
+				run.done(nil, nil)
+				local applied = if act == "auto" then State.prOf(b.s, KEY).pending ~= nil else not holds(b, KEY)
+				assert(applied == not moved, what .. ": the board")
+				local there = stored(w.kv["hub.cache"])
+				assert((if act == "auto" then there.pending ~= nil else there == nil) == not moved, what .. ": the store")
+				assert(#b.replays == 0 or not moved, what .. ": no stale replay is retained")
+				if moved then
+					assert(State.prOf(b.s, KEY).headOid == "moved-head" and #b.replays == 0, what .. ": H2 stands")
+				end
+			end)
+		end
+	end
+
+	-- A close succeeds while a refresh is out, and the unreadable store retains its removal. When reads recover the adoption
+	-- replays it; the older refresh result then brings the same-head PR back through the merge. It is removed again before the
+	-- counts and the write, so the stored cache and its counts lack it.
+	withWorld(function(w, Fetch, Block)
+		local b = board(w, Fetch, Block)
+		local answer: any = nil
+		b.github.refresh = function(_, done) answer = done end
+		Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+		assert(answer ~= nil and b.flights.refresh, "the refresh is out")
+		local run = closeBatch(w, Block, b)
+		w.failGets = 1
+		run.done(nil, nil)
+		assert(w.failGets == 0 and not holds(b, KEY) and #b.replays == 1, "the removal is retained: the store could not be read")
+		assert(stored(w.kv["hub.cache"]) ~= nil, "and the store still holds the PR")
+
+		theirs(w, nil)
+		local sets = w.cacheSets or 0
+		answer(freshAnswer(), nil)
+		assert(not holds(b, KEY) and stored(b.cache) == nil, "the answer did not bring the PR back")
+		assert((w.cacheSets or 0) == sets + 1 and stored(w.kv["hub.cache"]) == nil and #b.replays == 0, "the one write lacks it, and clears the replay")
+		assert(w.kv["hub.cache"].counts.toReview == b.cache.counts.toReview and b.cache.prs == b.s.prs, "the counts follow the board")
+		local count = 0
+		for _, pr in b.s.prs do
+			if Model.classify(pr, b.s.now) == "needs_fixes" then count += 1 end
+		end
+		assert(b.cache.counts.needFixes == count, "and so do the Needs fixes")
+	end)
+end
+
 return function()
 	parser()
 	placement()
@@ -3527,5 +3667,6 @@ return function()
 	queuedMerge()
 	sharedOwnership()
 	wholeBoard()
+	replayedEdits()
 	fixture()
 end

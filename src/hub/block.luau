@@ -1334,6 +1334,9 @@ startRefresh = function(b: Block, cx: BlockCx)
 			b.cache = cache
 			b.sched.probeChanged, b.sched.focusedAt = false, nil
 			State.replace(b.s, cache.prs, now, cache.refreshedAt)
+			-- This answer may predate a local edit no write has stored (a close whose save failed): it lays that PR back, so the
+			-- still-valid retained edits apply again before the counts and the write, which then store their effects.
+			if replayEdits(b) then recount(b) end
 			reconcileFlight(b, cx)
 			-- The redraw may have closed the block: nothing is stored, read, queued or armed after that.
 			if b.closed then return end
@@ -1727,17 +1730,21 @@ end
 -- stored strictly newer than this block's own becomes the board first, with its stamp and its ownership, and `edit`
 -- lands on it: the write never lowers `refreshedAt` and never lays this block's older PR snapshot over newer data. The
 -- change says nothing about Tandem, so ownership stored at this stamp or later joins and is never written back as false.
--- An `edit` that no write stores (the store could not be read, or the save failed) is kept with the head of PR `key`, and
+-- `head` is the head of PR `key` the action began on, taken before its external effect. The edit applies only while the board's
+-- PR still has that head: an adopted cache that moved it knows better, and the stale edit is neither applied nor kept.
+-- An `edit` that no write stores (the store could not be read, or the save failed) is kept with that head, and
 -- `adoptShared` applies it to the cache it adopts later, while that head stands.
-local function keepCache(b: Block, cx: BlockCx, edit: (() -> ())?, key: string?)
+local function keepCache(b: Block, cx: BlockCx, edit: (() -> ())?, key: string?, head: string?)
 	local safe = true
 	if b.cache and not b.fixture then safe = adoptShared(b, cx) end
 	-- Adopting a cache redraws, and the redraw may have closed the block: no edit and no write follow.
 	if b.closed then return end
 	if edit then
 		local pr = if key then State.prOf(b.s, key) else nil
-		edit()
-		if pr and b.cache and not b.fixture then table.insert(b.replays, { key = pr.key, head = pr.headOid, edit = edit }) end
+		if not (pr and head and pr.headOid ~= head) then
+			edit()
+			if pr and head and b.cache and not b.fixture then table.insert(b.replays, { key = pr.key, head = head, edit = edit }) end
+		end
 	end
 	if b.cache then
 		joinShared(b)
@@ -1856,6 +1863,7 @@ local function runMerge(b: Block, cx: BlockCx, pr: Model.HubPR, done: ((err: str
 		return cx:toast("error", "Couldn't merge #" .. pr.number .. ": " .. TANDEM_OWNS, pr.repo)
 	end
 	local method = methodOf(b, pr)
+	local head = pr.headOid
 	State.setBusy(s, pr.key, MERGE_BUSY[method.kind] or "Merging…")
 	b.github.run(Github.commands.merge(pr, method), function(_, err)
 		if b.closed then return end
@@ -1870,7 +1878,7 @@ local function runMerge(b: Block, cx: BlockCx, pr: Model.HubPR, done: ((err: str
 			keepCache(b, cx, function()
 				s.acted[pr.key] = true
 				State.dropPr(s, pr.key)
-			end, pr.key)
+			end, pr.key, head)
 			-- Adopting another window's cache may have drawn, and the draw closed the block: nothing goes on from here.
 			if b.closed then return end
 			if done then done(nil) else
@@ -1879,7 +1887,9 @@ local function runMerge(b: Block, cx: BlockCx, pr: Model.HubPR, done: ((err: str
 			end
 		else
 			State.setBusy(s, pr.key, nil)
-			keepCache(b, cx, function() State.setPending(s, pr.key, { method = method.kind, at = isoNow() }) end, pr.key)
+			-- One stamp for every application of the edit: a replay must not move it past a bot's later rejection.
+			local at = isoNow()
+			keepCache(b, cx, function() State.setPending(s, pr.key, { method = method.kind, at = at }) end, pr.key, head)
 			if b.closed then return end
 			if done then done(nil) else
 				toastDone(cx, pr, method)
@@ -1925,6 +1935,7 @@ ACTIONS["card-cancel"] = function(b, cx, key)
 	if not ok or method.kind ~= pending.method then
 		return cx:toast("error", "Couldn't cancel the merge of #" .. pr.number .. ": " .. pr.repo .. " has no way to cancel it", pr.title)
 	end
+	local head = pr.headOid
 	State.setBusy(s, key, "Cancelling…")
 	b.github.run(command :: Github.Command, function(_, err)
 		if b.closed then return end
@@ -1932,7 +1943,7 @@ ACTIONS["card-cancel"] = function(b, cx, key)
 		if err then
 			cx:toast("error", "Couldn't cancel the merge of #" .. pr.number .. ": " .. reasonOf(err.message), pr.repo)
 		else
-			keepCache(b, cx, function() State.setPending(s, key, nil) end, key)
+			keepCache(b, cx, function() State.setPending(s, key, nil) end, key, head)
 			if b.closed then return end
 			if method.kind == "comment" then
 				cx:toast("success", "Commented " .. (method.cancel or "") .. " on #" .. pr.number, pr.title)
@@ -1962,6 +1973,7 @@ ACTIONS["card-auto"] = function(b, cx, key)
 		return cx:toast("error", "Couldn't set #" .. pr.number .. " to merge when ready: " .. pr.repo .. " doesn't allow auto-merge", pr.title)
 	end
 	local method = methodOf(b, pr)
+	local head = pr.headOid
 	State.setBusy(s, key, MERGE_BUSY[method.kind] or "Setting…")
 	b.github.run(Github.commands.autoMerge(pr, method), function(_, err)
 		if b.closed then return end
@@ -1970,7 +1982,8 @@ ACTIONS["card-auto"] = function(b, cx, key)
 			cx:toast("error", "Couldn't set #" .. pr.number .. " to merge when ready: " .. reasonOf(err.message), pr.repo)
 		else
 			local kind = if method.kind == "comment" or method.kind == "label" then method.kind else "queue"
-			keepCache(b, cx, function() State.setPending(s, key, { method = kind, at = isoNow() }) end, key)
+			local at = isoNow()
+			keepCache(b, cx, function() State.setPending(s, key, { method = kind, at = at }) end, key, head)
 			if b.closed then return end
 			cx:toast("success", "#" .. pr.number .. " will merge when ready", pr.title)
 			refetchSoon(b, cx)
@@ -1990,6 +2003,7 @@ ACTIONS["card-rerequest"] = function(b, cx, key)
 	State.select(s, key)
 	if b.fixture then return cx:toast("info", "The sample board doesn't ask for reviews", pr.key) end
 	local logins = again.ask
+	local head = pr.headOid
 	State.setBusy(s, key, "Requesting…")
 	b.github.run(Github.commands.requestReview(pr, table.concat(logins, ",")), function(_, err)
 		if b.closed then return end
@@ -1997,7 +2011,7 @@ ACTIONS["card-rerequest"] = function(b, cx, key)
 		if err then
 			cx:toast("error", "Couldn't re-request review on #" .. pr.number .. ": " .. reasonOf(err.message), pr.repo)
 		else
-			keepCache(b, cx, function() State.reRequested(s, key, logins) end, key)
+			keepCache(b, cx, function() State.reRequested(s, key, logins) end, key, head)
 			if b.closed then return end
 			cx:toast("success", "Asked " .. Model.reviewerList(logins) .. " to review #" .. pr.number .. " again", pr.title)
 			refetchSoon(b, cx)
@@ -2136,6 +2150,7 @@ local function runBatch(b: Block, cx: BlockCx, keys: { string }, merge: boolean)
 			runMerge(b, cx, pr, after)
 			return
 		end
+		local head = pr.headOid
 		State.setBusy(s, pr.key, "Closing…")
 		b.github.run(Github.commands.close(pr), function(_, err)
 			if b.closed then return end
@@ -2144,7 +2159,7 @@ local function runBatch(b: Block, cx: BlockCx, keys: { string }, merge: boolean)
 			keepCache(b, cx, function()
 				s.acted[pr.key] = true
 				State.dropPr(s, pr.key)
-			end, pr.key)
+			end, pr.key, head)
 			after(nil)
 		end)
 	end
@@ -2192,6 +2207,7 @@ ACTIONS["card-update"] = function(b, cx, key)
 	if pr.tandem then return cx:toast("error", "Couldn't update #" .. pr.number .. ": " .. TANDEM_OWNS, pr.repo) end
 	if not pr.behind or pr.conflicts then return cx:toast("info", "#" .. pr.number .. " isn't behind " .. pr.baseBranch, pr.key) end
 	if b.fixture then return cx:toast("info", "The sample board doesn't update branches", pr.key) end
+	local head = pr.headOid
 	State.setBusy(s, key, "Updating…")
 	b.github.run(Github.commands.updateBranch(pr), function(_, err)
 		if b.closed then return end
@@ -2202,7 +2218,7 @@ ACTIONS["card-update"] = function(b, cx, key)
 			keepCache(b, cx, function()
 				s.acted[key] = true
 				State.branchUpdated(s, key)
-			end, key)
+			end, key, head)
 			if b.closed then return end
 			cx:toast("success", "Updated #" .. pr.number .. " with " .. pr.baseBranch)
 			refetchSoon(b, cx)
@@ -2315,7 +2331,7 @@ ACTIONS["card-remove"] = function(b, cx, key)
 		local why = writeAdded(added)
 		if why then return cx:toast("error", "Couldn't remove #" .. pr.number .. ": " .. why, pr.repo) end
 	end
-	keepCache(b, cx, function() State.unadd(s, key) end, key)
+	keepCache(b, cx, function() State.unadd(s, key) end, key, pr.headOid)
 	if b.closed then return end
 	cx:toast("info", "Removed #" .. pr.number .. " from Review requests", pr.repo)
 	refetch(b, cx)
