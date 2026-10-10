@@ -17,6 +17,7 @@ local ReviewFix = require("./review-fix")
 local ReviewFixPage = require("../view/hub/review-fix")
 local State = require("./state")
 local Sync = require("./sync")
+local Summary = require("./summary")
 
 type State = State.State
 
@@ -35,7 +36,7 @@ type Sched = {
 -- completion before Fetch.startAgentFix returns its handle.
 type AgentFlight = {
 	key: string, engine: AgentFix.Engine?, settled: boolean, stopping: boolean,
-	cancel: (() -> ())?, releasing: boolean, starting: boolean?, fixtureStep: number?,
+	input: AgentFix.Input?, bot: boolean?, cancel: (() -> ())?, releasing: boolean, starting: boolean?, fixtureStep: number?,
 }
 
 -- The hub block's own state.
@@ -46,6 +47,7 @@ export type Block = {
 	generate: boolean, -- ⏎ opens the PR with the AI guide started
 	agent: Agent.Agent?, -- the reader's own agent, once found (never with a fixture)
 	agentFlight: AgentFlight?, -- lookup, engine and retained lease; never serialized
+	botKeys: { [string]: boolean }, -- retains the bot input kind across clone/stop/retry, never saved
 	github: Github.Client, timers: Timers,
 	flights: { refresh: boolean, checks: boolean, probe: boolean, flake: boolean }, -- one call of each kind at a time
 	sched: Sched,
@@ -61,11 +63,12 @@ export type Block = {
 
 type Handler = (b: Block, cx: BlockCx, value: string) -> ()
 
-local ARGS = "generate=true|false and fixture=<name> (cases, rereview, agent-cards, review-fix)"
+local ARGS = "generate=true|false and fixture=<name> (cases, rereview, agent-cards, review-fix, summary)"
 
 -- Fixtures by name, loaded only when asked for. `cases` is the rules' recorded pull requests.
 local FIXTURES: { [string]: () -> any } = {
 	cases = function() return require("../../fixtures/hub/cases") end,
+	summary = function() return require("../../fixtures/hub/summary") end,
 	rereview = function() return require("../../fixtures/hub/rereview") end,
 	["agent-cards"] = function() return require("../../fixtures/hub/agent-cards") end,
 	["review-fix"] = function() return require("../../fixtures/hub/review-fix") end,
@@ -152,6 +155,7 @@ local function openPr(b: Block, cx: BlockCx, slug: string, number: number, gener
 	end)
 end
 
+local sampleDetails: (pr: Model.HubPR) -> Fixes.FixDetails
 local openFixes: (b: Block, cx: BlockCx, key: string) -> ()
 local openReviewFix: (b: Block, cx: BlockCx, key: string) -> ()
 
@@ -412,6 +416,31 @@ local function settleAgent(b: Block, cx: BlockCx, flight: AgentFlight, outcome: 
 	if not b.closed then draw(b, cx) end
 end
 
+-- Feedback consumers share #12's details, without opening a checkout or reading annotated code.
+local function readFeedback(b: Block, pr: Model.HubPR, done: (Fixes.FixDetails?, string?) -> ())
+	local known = b.s.details[pr.key]
+	if known and known.headOid == pr.headOid then return done(known, nil) end
+	if b.fixture then
+		local d = sampleDetails(pr)
+		State.setDetails(b.s, d)
+		return done(d, nil)
+	end
+	local called = false
+	local function received(d: Fixes.FixDetails?, err: Model.Error?)
+		if called then return end
+		called = true
+		if b.closed then return end
+		local latest = State.prOf(b.s, pr.key)
+		if not latest or latest.headOid ~= pr.headOid or not d or d.headOid ~= pr.headOid then
+			return done(nil, if err then err.message else "Feedback changed or is unavailable; refresh the board")
+		end
+		State.setDetails(b.s, d)
+		done(d, nil)
+	end
+	local ok, err = pcall(b.github.details, pr, received)
+	if not ok then received(nil, { operation = "details", message = tostring(err) }) end
+end
+
 local function startAgentEngine(b: Block, cx: BlockCx, flight: AgentFlight, clone: string, checkout: string, pr: Model.HubPR)
 	if not currentFlight(b, flight) then return end
 	-- HubPR has baseBranch and headOid, but no head branch. Read and revalidate all three
@@ -451,7 +480,7 @@ local function startAgentEngine(b: Block, cx: BlockCx, flight: AgentFlight, clon
 		flight.starting = true
 		local started, engine = pcall(Fetch.startAgentFix, {
 			key = pr.key, clone = clone, checkout = checkout, branch = meta.headRefName,
-			base = pr.baseBranch, headOid = pr.headOid, number = pr.number,
+			base = pr.baseBranch, headOid = pr.headOid, number = pr.number, input = flight.input,
 		}, b.agent :: Agent.Agent, b.s.now, function(outcome) settleAgent(b, cx, flight, outcome) end, completed)
 		if started then flight.engine = engine else completed(nil, tostring(engine)) end
 		flight.starting = false
@@ -465,14 +494,32 @@ local function startAgentEngine(b: Block, cx: BlockCx, flight: AgentFlight, clon
 		end
 		if not b.closed then draw(b, cx) end
 	end
-	local ok, err = pcall(Fetch.runner, { "gh", "pr", "view", tostring(pr.number), "--repo", pr.repo, "--json", "headRefName,baseRefName,headRefOid" }, { timeout_ms = 30_000 }, metadata)
-	if not ok then metadata({ status = -1, stdout = "", stderr = tostring(err), timed_out = false }) end
+	local function refs()
+		if not currentFlight(b, flight) then return end
+		local ok, err = pcall(Fetch.runner, { "gh", "pr", "view", tostring(pr.number), "--repo", pr.repo, "--json", "headRefName,baseRefName,headRefOid" }, { timeout_ms = 30_000 }, metadata)
+		if not ok then metadata({ status = -1, stdout = "", stderr = tostring(err), timed_out = false }) end
+	end
+	if flight.bot then
+		readFeedback(b, pr, function(details, err)
+			if not currentFlight(b, flight) then return end
+			local authors: { string } = {}
+			local latest = State.prOf(b.s, pr.key)
+			for _, review in (if latest then latest.reviews.latest else {}) do
+				if review.bot and not table.find(authors, review.author) then table.insert(authors, review.author) end
+			end
+			if not details or not AgentFix.hasBotFeedback(details, authors) then
+				return settleAgent(b, cx, flight, { kind = "failed", reason = err or "No bot feedback bodies are available" })
+			end
+			flight.input = { kind = "bot", details = details, authors = authors }
+			refs()
+		end)
+	else refs() end
 end
 
 local function beginAgent(b: Block, cx: BlockCx, key: string, mode: "fix" | "clone" | "folder")
 	if b.closed then return end
 	local pr = State.prOf(b.s, if key ~= "" then key else b.s.selected or "")
-	if not pr then return end
+	if not pr or b.s.busy[pr.key] then return end
 	if b.agentFlight then forgetReturned(b, b.agentFlight) end
 	if b.agentFlight or State.agentRunning(b.s) then return cx:toast("info", "One fix at a time") end
 	local existing = b.s.agents[pr.key]
@@ -487,13 +534,14 @@ local function beginAgent(b: Block, cx: BlockCx, key: string, mode: "fix" | "clo
 	end
 	b.s.now = if b.fixture then b.s.now else os.time()
 	if not State.beginAgent(b.s, pr.key, b.s.now) then return cx:toast("info", "One fix at a time") end
-	local flight: AgentFlight = { key = pr.key, settled = false, stopping = false, releasing = false }
+	local flight: AgentFlight = { key = pr.key, settled = false, stopping = false, releasing = false, bot = b.botKeys[pr.key] == true }
 	b.agentFlight = flight
 	draw(b, cx)
 	if not currentFlight(b, flight) then return end
 	if b.fixture then
 		-- Even ordinary sample boards stay entirely local. ⌘R advances one recorded event.
 		local data: any = FIXTURES["agent-cards"]()
+		if flight.bot then data = require("../../fixtures/hub/summary") end
 		b.s.agents[pr.key] = { kind = "running", run = AgentFix.bind(AgentFix.start(pr.key, b.s.now), data.spec(pr.key)) }
 		flight.fixtureStep = 0
 		State.project(b.s)
@@ -566,7 +614,7 @@ end
 local function advanceAgentFixture(b: Block, cx: BlockCx): boolean
 	local flight = b.agentFlight
 	if not flight or flight.fixtureStep == nil or flight.settled then return false end
-	local data: any = FIXTURES["agent-cards"]()
+	local data: any = if flight.bot then require("../../fixtures/hub/summary") else FIXTURES["agent-cards"]()
 	flight.fixtureStep += 1
 	local event = data.events()[flight.fixtureStep]
 	local current = b.s.agents[flight.key]
@@ -1040,7 +1088,12 @@ ACTIONS["hub-help-close"] = function(b)
 end
 
 -- Card actions: shown with their labels and keys; their effects arrive with the changes that build them.
-ACTIONS["card-agent"] = function(b, cx, key) beginAgent(b, cx, key, "fix") end
+ACTIONS["card-agent"] = function(b, cx, key)
+	local pr = State.prOf(b.s, if key ~= "" then key else b.s.selected or "")
+	if not pr then return end
+	b.botKeys[pr.key] = Model.classify(pr, b.s.now) == "in_review" and Model.botFeedback(pr)
+	beginAgent(b, cx, pr.key, "fix")
+end
 ACTIONS["card-agent-clone"] = function(b, cx, key) beginAgent(b, cx, key, "clone") end
 ACTIONS["card-agent-folder"] = function(b, cx, key) beginAgent(b, cx, key, "folder") end
 ACTIONS["card-agent-stop"] = function(b, cx, key)
@@ -1097,7 +1150,34 @@ ACTIONS["card-agent-worktree"] = function(b, cx, key)
 	if not ok then opened({ status = -1, stdout = "", stderr = tostring(err), timed_out = false }) end
 end
 ACTIONS["card-handoff"] = notYet("Hand off to Tandem")
-ACTIONS["card-summarize"] = notYet("Summarize")
+ACTIONS["card-summarize"] = function(b, cx, key)
+	local s = b.s
+	local pr = State.prOf(s, if key ~= "" then key else s.selected or "")
+	if b.closed or not pr or s.busy[pr.key] or s.agents[pr.key] then return end
+	if not b.fixture and not b.agent then return cx:toast("error", "Couldn't summarize feedback: no agent is available") end
+	State.setBusy(s, pr.key, State.SUMMARIZING)
+	draw(b, cx)
+	readFeedback(b, pr, function(details, problem)
+		if b.closed then return end
+		local function complete(text: string?, err: string?)
+			if b.closed then return end
+			State.setBusy(s, pr.key, nil)
+			if not text or not details or not State.installSummary(s, details, text) then
+				cx:toast("error", "Couldn't summarize feedback: " .. reasonOf(err or "The answer is incomplete or feedback changed"))
+			end
+			draw(b, cx)
+		end
+		if not details then return complete(nil, problem) end
+		if #Summary.authors(details) == 0 then return complete(nil, "No feedback is available") end
+		if b.fixture then
+			local fixture: any = require("../../fixtures/hub/summary")
+			return complete(fixture.answer(details), nil)
+		end
+		local agent = b.agent :: Agent.Agent
+		local argv = Summary.argv(agent.command, agent.model, agent.effort, Summary.prompt(details))
+		Fetch.summarizeFeedback(argv, complete)
+	end)
+end
 ACTIONS["card-method"] = function(b, cx, key)
 	if not State.card(b.s, key) then return end
 	State.select(b.s, key)
@@ -1691,7 +1771,8 @@ openReviewFix = function(b: Block, cx: BlockCx, key: string)
 	end
 	if b.fixture then
 		local data: any = FIXTURES["review-fix"]()
-		local files = if data.fix.commit == fix.commit then data.files else nil
+		local bot = fix.hunks[1] and string.sub(fix.hunks[1].id, 1, 4) == "bot:"
+		local files = if not bot and data.fix.commit == fix.commit then data.files else nil
 		-- Other lifecycle samples have captured resolutions but no commit files. Assemble a
 		-- recorded preview without running git; the dedicated sample carries actual file text.
 		if not files then
@@ -1872,7 +1953,17 @@ local function readGit(b: Block, cx: BlockCx, pr: Model.HubPR, d: Fixes.FixDetai
 end
 
 -- The sample board's details: the fixture for the card's key, with the recorded git output for its conflicts.
-local function sampleDetails(pr: Model.HubPR): Fixes.FixDetails
+sampleDetails = function(pr: Model.HubPR): Fixes.FixDetails
+	local summaries: any = require("../../fixtures/hub/summary")
+	for _, details in summaries.details do
+		if details.key == pr.key then return table.clone(details) end
+	end
+	if Model.botFeedback(pr) then
+		local fixture = summaries
+		local d = table.clone(fixture.details.bot)
+		d.key, d.headOid = pr.key, pr.headOid
+		return d
+	end
 	local fixture: any = require("../../fixtures/hub/fixes")
 	local kind = fixture.sample[pr.key]
 	local source: Fixes.FixDetails = if kind then fixture.details[kind] else fixture.details.failure
@@ -2107,7 +2198,7 @@ local block: BlockDef<Block> = {
 		s.loading = live and cache == nil
 		if problem then s.error = { operation = "hub", message = problem } end
 		local b: Block = {
-			s = s, cache = cache, fixture = fixture, generate = opts ~= nil and opts.generate, agent = nil, agentFlight = nil,
+			s = s, cache = cache, fixture = fixture, generate = opts ~= nil and opts.generate, agent = nil, agentFlight = nil, botKeys = {},
 			github = Github.client(Fetch.runner, tern.json.decode), timers = {},
 			flights = { refresh = false, checks = false, probe = false, flake = false },
 			sched = {

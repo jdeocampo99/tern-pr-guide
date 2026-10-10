@@ -152,10 +152,10 @@ local function fixesKey(s: HubState.State, key: Key): Action?
 	if label == "G" then return act("fixes-github") end
 	if label == "B" then return act("fixes-bots") end
 	local main = HubState.fixMain(s)
-	if main and label ~= nil and main.key == label and s.route then return act(main.act, s.route.key) end
+	if main and label ~= nil and s.route and (main.key == label or (label == "⇧A" and main.act == "card-summarize")) then return act(main.act, s.route.key) end
 	-- When Re-run moved first, the agent is the card's alternative and keeps its key.
 	local card = if s.route then HubState.card(s, s.route.key) else nil
-	if card and (label == "A" or label == "O") and s.route then
+	if card and (label == "A" or label == "⇧A" or label == "O") and s.route then
 		for _, more in card.more do
 			if more.key == label then return act(more.act, s.route.key) end
 		end
@@ -196,7 +196,7 @@ local function hubBoardKey(s: HubState.State, key: Key): Action?
 	local card = HubState.selectedCard(s)
 	if card and label then
 		local main = card.main
-		if main and main.key == label then return act(main.act, card.pr.key) end
+		if main and (main.key == label or (label == "⇧A" and main.act == "card-summarize")) then return act(main.act, card.pr.key) end
 		for _, more in card.more do
 			if more.key == label then return act(more.act, card.pr.key) end
 		end

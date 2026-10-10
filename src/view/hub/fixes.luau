@@ -57,6 +57,16 @@ local function header(s: State.State, pr: Model.HubPR, steps: { Step }): Node
 			span("gp-fx-btn-label", main.label), Ui.keys(main.key or "A"),
 		}))
 	end
+	local card = State.card(s, pr.key)
+	if card then
+		for _, more in card.more do
+			if more.act == "card-summarize" then
+				table.insert(actions, el("button", { class = "gp-btn gp-btn-keyed", key = "summarize", actions = { click = more.act .. "=" .. pr.key } }, {
+					span("gp-fx-btn-label", more.label), Ui.keys(more.key or "⇧A"),
+				}))
+			end
+		end
+	end
 	local title: { Node } = {
 		el("span", { class = "gp-hdr-act", key = "back", actions = { click = "fixes-close" } }, { span("gp-hdr-act-label", "Pull requests"), Ui.keys("esc") }),
 		span("gp-title-num", "#" .. pr.number),
@@ -67,13 +77,14 @@ local function header(s: State.State, pr: Model.HubPR, steps: { Step }): Node
 	local status: { Node } = {}
 	-- The card's own chips, so the page and the board never disagree; a card off the board falls back to the steps'.
 	local chips: { string } = {}
-	local card = State.card(s, pr.key)
 	if card then
 		for _, chip in card.chips do table.insert(chips, chip.text) end
 	else
 		chips = Fixes.chips(steps)
 	end
-	if route.error then
+	if card and card.busy then
+		table.insert(status, span("gp-status-text", card.busy))
+	elseif route.error then
 		table.insert(status, span("gp-fx-error", route.error))
 	elseif #chips > 0 then
 		for _, chip in chips do table.insert(status, span("gp-fx-chip", chip)) end
@@ -515,6 +526,11 @@ local function hints(s: State.State, steps: { Step }): Node
 		if main and main.act == "card-rerun" and card then
 			for _, more in card.more do
 				if more.act == "card-agent" or more.act == "card-handoff" then table.insert(kids, item(more.key or "A", string.lower(more.label))) end
+			end
+		end
+		if card then
+			for _, more in card.more do
+				if more.act == "card-summarize" then table.insert(kids, item(more.key or "⇧A", "summarize")) end
 			end
 		end
 		if step then table.insert(kids, item("G", if step.group == "conflict" then "resolve on GitHub" else "open on GitHub")) end

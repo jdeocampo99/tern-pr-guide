@@ -108,7 +108,10 @@ function M.view(card: State.Card, now: number): Node
 		meta[1] = el("span", { class = "gp-hc-lead", key = "lead" }, { span("gp-hc-ask", card.asking) })
 		table.insert(meta, el("span", { class = "gp-hc-acts", key = "acts" }, { confirmButtons(card) }))
 	elseif card.busy then
-		table.insert(meta, el("span", { class = "gp-hc-acts", key = "acts" }, { el("span", { class = "gp-hc-busy" }, { span("gp-hc-spin", ""), span("gp-hc-busy-text", card.busy) }) }))
+		local status: { Node } = {}
+		if card.busy ~= State.SUMMARIZING then table.insert(status, span("gp-hc-spin", "")) end
+		table.insert(status, span("gp-hc-busy-text", card.busy))
+		table.insert(meta, el("span", { class = "gp-hc-acts", key = "acts" }, { el("span", { class = "gp-hc-busy" }, status) }))
 	elseif main then
 		table.insert(meta, el("span", { class = "gp-hc-acts", key = "acts" }, { splitButton(card, main) }))
 	end
@@ -125,15 +128,27 @@ function M.view(card: State.Card, now: number): Node
 		table.insert(body, span("gp-hc-title", pr.title))
 	end
 	local summary = card.summary
-	if card.agentSlot then
-		local message = card.agentMessage or (if summary then summary.verdict else card.note or card.flake or "")
-		local second = card.agentPath or (if card.agent then "" elseif summary then card.note or card.flake or "" elseif card.note then card.flake or "" else "")
+	if summary then
+		-- Each commenter gets one existing, single-line note row. Two rows reuse the reserved
+		-- region; longer feedback adds only the rows needed, with no entrance or height motion.
+		local rows: { Node } = {}
+		for _, comment in summary.comments do
+			table.insert(rows, span("gp-hc-note gp-hc-agent-message", "@" .. comment.author .. " · " .. comment.text))
+		end
+		if #rows <= 2 and card.agentSlot then
+			if #rows == 1 then table.insert(rows, span("gp-hc-agent-message", "")) end
+			table.insert(body, el("div", { class = "gp-hc-agent-note", key = "summary" }, rows))
+		else
+			for _, row in rows do table.insert(body, row) end
+		end
+	elseif card.agentSlot then
+		local message = card.agentMessage or card.note or card.flake or ""
+		local second = card.agentPath or (if card.agent then "" elseif card.note then card.flake or "" else "")
 		table.insert(body, el("div", { class = "gp-hc-agent-note", key = "agent" }, {
 			span("gp-hc-note gp-hc-agent-message", message),
 			span(if card.agent then "gp-hc-agent-path" else "gp-hc-note gp-hc-agent-message", second),
 		}))
 	else
-		if summary then table.insert(body, span("gp-hc-note", summary.verdict)) end
 		if card.note then table.insert(body, span("gp-hc-note", card.note)) end
 		if card.flake then table.insert(body, span("gp-hc-note", card.flake)) end
 	end
