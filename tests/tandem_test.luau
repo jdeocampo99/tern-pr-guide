@@ -3520,6 +3520,8 @@ local function replayedEdits()
 	local function theirs(w: any, patch: ((any) -> ())?): any
 		local cache = storedCache({ WEB, API114 }, Cases.asOf + 60)
 		cache.writeId = "other-window#1"
+		-- A refresh that began after the edit's snapshot was stamped: its heads are the later word on them.
+		cache.sinceAt = Cases.asOf + 30
 		for _, cached in cache.prs do
 			if cached.key == KEY and patch then patch(cached) end
 		end
@@ -3643,8 +3645,9 @@ local function replayedEdits()
 		assert(b.cache.counts.needFixes == count, "and so do the Needs fixes")
 	end)
 
-	-- An edit retained after a failed save is dropped for good once an adoption sees the PR at another head, so a refresh
-	-- that was out from before and answers on the old head neither replays it nor stores it.
+	-- An edit retained after a failed save is dropped for good once an adoption sees the PR at another head in a snapshot
+	-- requested after the edit's own, so a refresh that was out from before and answers on the old head neither replays it nor
+	-- stores it.
 	for _, act in { "auto", "close" } do
 		withWorld(function(w, Fetch, Block)
 			local what = act .. " retained on H1, adopted H2, then the older refresh"
@@ -3677,6 +3680,132 @@ local function replayedEdits()
 			assert(holds(b, KEY) == (stored(b.cache) ~= nil), what .. ": the board and the cache agree")
 		end)
 	end
+
+	-- This window saw KEY on H2 (the recorded head) and keeps an H2 edit after a failed save. Another window's refresh carries
+	-- H1 and is stamped later, but its request began before this window's snapshot, or says when it began nowhere: the stamp
+	-- proves nothing about the head, so adopting it drops nothing. The next answer on H2 applies the edit and stores it.
+	for _, variant in { "a delayed request", "no request time", "a request in the same second" } do
+		withWorld(function(w, Fetch, Block)
+			local b = board(w, Fetch, Block)
+			local run = auto(w, Block, b)
+			local failed = false
+			w.failWhen = function(key: string): boolean
+				if key ~= "hub.cache" or failed then return false end
+				failed = true
+				return true
+			end
+			run.done(nil, nil)
+			w.failWhen = nil
+			local t0 = w.now
+			assert(failed and #b.replays == 1 and b.replays[1].at == Cases.asOf, variant .. ": retained, seen by the snapshot's stamp")
+			local h2 = State.prOf(b.s, KEY).headOid
+
+			local delayed = theirs(w, function(cached: any) cached.headOid = "h1-delayed" end)
+			if variant == "a delayed request" then
+				delayed.sinceAt = Cases.asOf - 10
+			elseif variant == "no request time" then
+				delayed.sinceAt = nil
+			else
+				delayed.sinceAt = Cases.asOf
+			end
+			assert(delayed.refreshedAt > b.cache.refreshedAt, variant .. ": its stamp is later")
+			Block.event(b, { ev = "action", act = "hub-focused", value = "" } :: any, w.cx)
+			assert(State.prOf(b.s, KEY).headOid == "h1-delayed" and b.cache.refreshedAt == delayed.refreshedAt, variant .. ": it is adopted")
+			assert(#b.replays == 1 and b.replays[1].head == h2 and not b.replays[1].applied, variant .. ": the H2 edit waits")
+			assert(State.prOf(b.s, KEY).pending == nil, variant .. ": and is not applied to H1")
+
+			w.now += 120
+			local answer: any = nil
+			b.github = quietGithub(function(_, done) answer = done end)
+			Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+			assert(answer ~= nil, variant .. ": the refresh is out")
+			local requested = w.now
+			answer(freshAnswer(), nil)
+			assert(State.prOf(b.s, KEY).headOid == h2 and State.prOf(b.s, KEY).pending.at == iso(t0), variant .. ": H2 comes back with its edit")
+			assert(#b.replays == 0 and stored(w.kv["hub.cache"]).pending.at == iso(t0), variant .. ": the write holds it")
+			assert(w.kv["hub.cache"].sinceAt == requested, variant .. ": and says when its request began")
+		end)
+	end
+
+	-- An edit retained on H1 stays through a successful write that does not hold it: a capped cache another window stored omits
+	-- the PR (absence proves nothing about its head), an unrelated hand-off then stores the board, and the replay is still
+	-- there when a refresh returns the PR on H1, which gets its pending merge back.
+	withWorld(function(w, Fetch, Block)
+		local b = board(w, Fetch, Block)
+		local run = auto(w, Block, b)
+		local failed = false
+		w.failWhen = function(key: string): boolean
+			if key ~= "hub.cache" or failed then return false end
+			failed = true
+			return true
+		end
+		run.done(nil, nil)
+		w.failWhen = nil
+		local t0 = w.now
+		assert(failed and #b.replays == 1, "the save failed and the edit is retained")
+
+		local capped = theirs(w, nil)
+		local kept: { any } = {}
+		for _, cached in capped.prs do
+			if cached.key ~= KEY then table.insert(kept, cached) end
+		end
+		capped.prs = kept
+		Block.event(b, { ev = "action", act = "hub-focused", value = "" } :: any, w.cx)
+		assert(not holds(b, KEY) and b.cache.refreshedAt == capped.refreshedAt, "the capped cache is adopted")
+		assert(#b.replays == 1 and not b.replays[1].applied, "its absence neither applies nor drops the edit")
+
+		local sets = w.cacheSets or 0
+		Block.event(b, { ev = "action", act = "card-handoff", value = WEB } :: any, w.cx)
+		assert(#handoffs(w) == 1, "the hand-off is out")
+		handoffs(w)[1].done(out("DONE"))
+		assert((w.cacheSets or 0) == sets + 1 and w.kv["hub.cache"].writeId == b.held, "the hand-off stored the board")
+		assert(not holds(b, KEY) and stored(w.kv["hub.cache"]) == nil, "and that board lacks the PR")
+		assert(#b.replays == 1, "the write held no effect of the edit, so it stays")
+
+		w.now += 120
+		local answer: any = nil
+		b.github = quietGithub(function(_, done) answer = done end)
+		Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+		assert(answer ~= nil, "the refresh is out")
+		answer(freshAnswer(), nil)
+		assert(holds(b, KEY) and State.prOf(b.s, KEY).pending.at == iso(t0), "the PR returns on H1 with its pending merge")
+		assert(stored(w.kv["hub.cache"]).pending.at == iso(t0) and #b.replays == 0, "which the write stores and clears")
+	end)
+
+	-- Another window stores a complete cache with a pending merge and an ownership between this action's first adoption and
+	-- its last read before the write. The write is built on that cache: it keeps what it holds, with this window's edit on it.
+	withWorld(function(w, Fetch, Block)
+		local b = board(w, Fetch, Block)
+		local run = auto(w, Block, b)
+		local external = storedCache({ WEB, API114, TARGET }, Cases.asOf + 60)
+		external.writeId = "other-window#1"
+		for _, cached in external.prs do
+			if cached.key == TARGET then cached.pending = { method = "comment", at = iso(Cases.asOf + 50) } end
+		end
+		w.onGet = function()
+			-- The edit lands after the first adoption, so this is the read that decides the write.
+			local mine = State.prOf(b.s, KEY)
+			if mine and mine.pending ~= nil then
+				w.onGet = nil
+				w.kv["hub.cache"] = external
+			end
+		end
+		local sets = w.cacheSets or 0
+		run.done(nil, nil)
+		assert(w.onGet == nil, "the other window wrote before the final read")
+		local there = w.kv["hub.cache"]
+		assert((w.cacheSets or 0) == sets + 1 and there.writeId == b.held and there.writeId ~= "other-window#1", "one write built on it")
+		assert(there.refreshedAt == external.refreshedAt, "the stamp never goes down")
+		local other, own
+		for _, cached in there.prs do
+			if cached.key == TARGET then other = cached end
+			if cached.key == KEY then own = cached end
+		end
+		assert(other and other.pending and other.pending.at == iso(Cases.asOf + 50), "the other window's pending merge survives")
+		assert(other.tandem == true and b.watched[TARGET] == true and State.prOf(b.s, TARGET).tandem, "and so does its ownership")
+		assert(own and own.pending and State.prOf(b.s, KEY).pending ~= nil, "this window's edit is on it")
+		assert(#b.replays == 0 and not b.unsaved and b.cache.prs == b.s.prs, "the write holds it all")
+	end)
 end
 
 return function()
