@@ -1041,6 +1041,7 @@ local function loadTandem(b: Block, cx: BlockCx)
 		replied = true
 		b.flights.tandem = false
 		if b.closed then return end
+		joinShared(b)
 		-- A hand-off Tandem took while this read was out is newer than the read, which could not name that PR: drop it and read again.
 		if b.handoffs ~= epoch then return loadTandem(b, cx) end
 		if watched then b.watched = watched end
