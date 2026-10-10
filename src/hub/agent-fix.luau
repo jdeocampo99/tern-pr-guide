@@ -436,10 +436,10 @@ function M.engine(spec: Spec, deps: Dependencies, now: number, changed: (Outcome
     checked = true
     pending = false
     if same ~= false then
-     -- Never return a path that might be the reader's checkout. Preserve it for reconciliation.
-     lease = nil
-     emit({ kind = "failed", reason = err or "Treehouse returned the reader's checkout" })
-     return finish(nil, err or "Treehouse returned the reader's checkout; lease needs reconciliation")
+     -- The valid lease can be returned with its exact guards. No Git effect has run,
+     -- so release must leave the reader's checkout untouched.
+     reconciling = false
+     return fail(err or "Treehouse returned the reader's checkout")
     end
     reconciling = false
     emit({ kind = "worktree", path = raw.path })

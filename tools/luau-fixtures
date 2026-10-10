@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Turns each fixtures/hub/raw-*.json into a raw-*.luau twin (`return { ... }`).
+"""Turns fixtures/hub/raw-*.json and fixtures/hub/agent/*.json into Luau twins (`return { ... }`).
 
 `luau` has no file I/O, so tests read the twins. Null members are dropped, as tern.json.decode
 drops them (a null array item is dropped too). Output is deterministic: keys keep JSON order.
@@ -108,7 +108,9 @@ def stale_queries():
 def main(argv):
     check = "--check" in argv
     problems = []
-    for path in sorted(glob.glob(os.path.join(FIXTURES, "raw-*.json"))):
+    paths = glob.glob(os.path.join(FIXTURES, "raw-*.json"))
+    paths += glob.glob(os.path.join(FIXTURES, "agent", "*.json"))
+    for path in sorted(paths):
         out = path[: -len(".json")] + ".luau"
         wanted = twin(path)
         current = None

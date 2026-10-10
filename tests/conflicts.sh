@@ -103,6 +103,45 @@ USAGE=$?
 set -e
 [ "$UNKNOWN" -eq 1 ] && [ "$USAGE" -eq 2 ]
 
+# A new merge of the same commits must discard the resolved journal from the first run.
+# No tool command runs between abort and merge, as when the pool cleans a returned tree.
+MERGE_ID=$(git rev-parse HEAD MERGE_HEAD)
+git merge --abort
+git clean -fd
+if git merge --no-commit main >"$SANDBOX/repeat-merge.log" 2>&1; then
+ echo 'Expected the repeated merge to conflict' >&2; exit 1
+fi
+[ "$(git rev-parse HEAD MERGE_HEAD)" = "$MERGE_ID" ]
+"$TOOL" list >"$SANDBOX/repeat-list.json"
+python3 - "$SANDBOX" <<'PY'
+import json,sys
+from pathlib import Path
+p=Path(sys.argv[1])
+assert json.loads((p/'repeat-list.json').read_text()) == json.loads((p/'list.json').read_text())
+PY
+"$TOOL" show h1 >"$SANDBOX/repeat-show.json"
+python3 - "$SANDBOX" <<'PY'
+import json,sys
+from pathlib import Path
+p=Path(sys.argv[1])
+assert json.loads((p/'repeat-show.json').read_text()) == json.loads((p/'show.json').read_text())
+PY
+"$TOOL" take h1 ours >"$SANDBOX/repeat-take.json"
+"$TOOL" list >"$SANDBOX/repeat-after.json"
+python3 - "$SANDBOX/repeat-after.json" <<'PY'
+import json,sys
+assert [h['id'] for h in json.load(open(sys.argv[1]))['hunks']] == ['h2','h3','h4']
+PY
+printf 'combined second\n' | "$TOOL" write h2 >"$SANDBOX/repeat-write.json"
+"$TOOL" take h3 both >"$SANDBOX/repeat-both.json"
+"$TOOL" take h4 theirs >"$SANDBOX/repeat-theirs.json"
+"$TOOL" check >"$SANDBOX/repeat-check.json"
+python3 - "$SANDBOX/repeat-check.json" <<'PY'
+import json,sys
+assert json.load(open(sys.argv[1])) == {'remaining':0}
+PY
+[ -z "$(git diff --name-only --diff-filter=U)" ]
+
 # The journal resets on a different merge; malformed markers and invalid JSON never pass.
 git commit -qm 'Resolve the first merge'
 git switch -qc next

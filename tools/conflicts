@@ -139,13 +139,22 @@ def journal():
     head = text(git('rev-parse', 'HEAD').stdout).strip()
     merge = git('rev-parse', '--verify', 'MERGE_HEAD', required=False)
     merge_head = text(merge.stdout).strip() if merge.returncode == 0 else ''
-    location = Path(text(git('rev-parse', '--absolute-git-dir').stdout).strip()) / 'prguide-conflicts.json'
+    private = Path(text(git('rev-parse', '--absolute-git-dir').stdout).strip())
+    location = private / 'prguide-conflicts.json'
     identity = head + ':' + merge_head
+    # Git recreates MERGE_HEAD for each merge, including a retry of the same commits.
+    # Its file identity stays fixed while hunks are resolved and the index is staged.
+    # Include nanosecond timestamps because a pooled worktree can reuse an inode.
+    merge_instance = None
+    if merge_head:
+        stat = (private / 'MERGE_HEAD').stat()
+        merge_instance = [stat.st_dev, stat.st_ino, stat.st_mtime_ns, stat.st_ctime_ns]
     if location.exists():
         saved = json.loads(location.read_text())
-        if saved.get('identity') == identity:
+        if saved.get('identity') == identity and saved.get('merge_instance') == merge_instance:
             return location, saved
-    saved = {'identity': identity, 'hunks': [], 'paths': unmerged(), 'generated': []}
+    saved = {'identity': identity, 'merge_instance': merge_instance,
+             'hunks': [], 'paths': unmerged(), 'generated': []}
     history = subjects(head, merge_head) if merge_head else {'ours': [], 'theirs': []}
     for path in saved['paths']:
         attr = git('check-attr', '-z', 'linguist-generated', '--', path).stdout.split(b'\0')

@@ -13,6 +13,7 @@ local modules: { { name: string, run: () -> () } } = {
 	{ name = "selection_test", run = require("./selection_test") },
 	{ name = "flake_test", run = require("./flake_test") },
 	{ name = "rereview_test", run = require("./rereview_test") },
+	{ name = "agent_fix_test", run = require("./agent_fix_test") },
 }
 
 local failed = 0

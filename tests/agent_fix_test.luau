@@ -215,8 +215,29 @@ return function()
  merging.engine.begin(); merging.engine.stop()
  assert(#merging.calls == 7, "do not return while git is running")
  merging.resume(); merging.finish(false); merging.only()
- local same = harness({ acquisition() }, true)
- same.engine.begin(); same.finish(false); same.only()
+ -- A valid lease that aliases the reader's checkout is returned without reset or clean.
+ local same = harness({ acquisition(), returned() }, true)
+ same.engine.begin()
+ local _, sameError = same.finish(false)
+ assert(sameError == "Treehouse returned the reader's checkout")
+ assert(same.engine.held() == nil and not same.engine.busy())
+ same.only()
+
+ -- Failed guarded returns retain this lease too, without ever cleaning the checkout.
+ local sameRetry = harness({ acquisition(), returned(1), returned() }, true)
+ sameRetry.engine.begin(); sameRetry.finish(false)
+ assert(sameRetry.engine.held() ~= nil)
+ sameRetry.engine.release(function(ok) assert(ok) end)
+ sameRetry.only()
+
+ -- Missing lease guards cannot be returned safely and remain a reconciliation failure.
+ local invalid = harness({ { argv = Tree.get.argv, cwd = "/clone", decoded = { path = WORKTREE, lease_holder = "prguide" } } })
+ invalid.engine.begin(); invalid.finish(false)
+ assert(invalid.engine.held() == nil and invalid.engine.busy())
+ invalid.engine.release(function(ok, err)
+  assert(not ok and err == "The worktree lease needs reconciliation")
+ end)
+ invalid.only()
 
  -- A failed return retains the lease and can be retried without running the job again.
  local retry = harness({ acquisition(), git({ "status", "--porcelain" }, "dirty\n"), returned(1), returned() })
