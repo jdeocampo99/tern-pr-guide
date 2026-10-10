@@ -1008,11 +1008,12 @@ local function sharedCache()
 		handoffs(w)[1].done(out("KEPT"))
 		assert(card(b.s, KEY).pr.tandem and b.watched[KEY] == true)
 
-		-- B's cache is newer and does not name the PR.
+		-- B's cache is newer and does not name the PR. The timers the block armed when it opened run its refresh tick,
+		-- which adopts the shared cache before it starts a read of Tandem and a refresh that never answers.
 		local theirs = storedCache({ WEB, API114 }, Cases.asOf + 60)
 		w.kvIn = { ["hub.cache"] = theirs }
 		b.github = quietGithub(function() end)
-		Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+		runTimers(w)
 		assert(b.cache.refreshedAt == theirs.refreshedAt, "the other window's cache was adopted")
 		assert(b.cache.counts.needFixes == needFixesOf(b) and w.kv["hub.status"].counts.needFixes == needFixesOf(b), "counted with A's flags")
 		for _, cached in b.cache.prs do
