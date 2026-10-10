@@ -1080,6 +1080,7 @@ local function terminalAgents()
 		withWorld(function(w, Fetch, Block)
 			local b = agentBoard(w, Fetch, Block)
 			if terminal == "failed" then State.agentFailed(b.s, TARGET, "No clone was found", nil) else State.noAgentClone(b.s, TARGET, "acme/api") end
+			b.github = quietGithub(function() end)
 			b.watched[TARGET] = true
 			w.kvIn = { ["hub.cache"] = storedCache({ WEB, API114, TARGET }, Cases.asOf + 60) }
 			runTimers(w)
