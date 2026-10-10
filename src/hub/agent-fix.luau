@@ -203,9 +203,10 @@ function M.botPrompt(details: Fixes.FixDetails, known: { string }?): string
 end
 
 -- Seatbelt profile for the bot worker. Reads, network and processes stay open; every write is refused
--- except under the leased worktree (its `.git` pointer excluded), OMP's own state (its configuration,
--- extension and skill folders excluded) and the system temp folders. The clone, its worktree metadata
--- and every other worktree are therefore read-only. Nil when a path cannot be quoted safely.
+-- except under the leased worktree (its `.git` pointer excluded) and three device nodes. OMP's own state
+-- and the system temp folders are not writable, so the clone, its worktree metadata and every other
+-- worktree are read-only too. `home` is only denied: OMP's state folder is never a place the worker writes.
+-- Nil when a path cannot be quoted safely.
 function M.sandboxProfile(worktree: string, home: string): string?
  for _, path in { worktree, home } do
   if string.sub(path, 1, 1) ~= "/" or string.find(path, '[%c"\\]') or string.find(path, "/%.%./") or string.sub(path, -3) == "/.." then
@@ -213,20 +214,24 @@ function M.sandboxProfile(worktree: string, home: string): string?
   end
  end
  local function sub(path: string): string return '(subpath "' .. path .. '")' end
- local roots = { worktree }
+ local function lit(path: string): string return '(literal "' .. path .. '")' end
  -- The kernel matches resolved paths, and /tmp, /var and /etc are links into /private.
- if string.match(worktree, "^/tmp/") or string.match(worktree, "^/var/") or string.match(worktree, "^/etc/") then
-  table.insert(roots, "/private" .. worktree)
+ local function resolved(path: string): { string }
+  if string.match(path, "^/tmp/") or string.match(path, "^/var/") or string.match(path, "^/etc/") then
+   return { path, "/private" .. path }
+  end
+  return { path }
  end
  local allow: { string } = {}
- for _, root in roots do table.insert(allow, sub(root)) end
- for _, path in { home .. "/.omp", "/private/tmp", "/private/var/folders" } do table.insert(allow, sub(path)) end
- for _, path in { "/dev/null", "/dev/tty", "/dev/dtracehelper" } do table.insert(allow, '(literal "' .. path .. '")') end
  local deny: { string } = {}
- for _, root in roots do table.insert(deny, sub(root .. "/.git")) end
- for _, name in { "config.yml", "extensions", "hooks", "skills", "rules", "agents", "commands" } do
-  table.insert(deny, sub(home .. "/.omp/agent/" .. name))
+ for _, root in resolved(worktree) do
+  table.insert(allow, sub(root))
+  -- `.git` is a pointer file in a worktree: deny the node itself and anything under it.
+  table.insert(deny, lit(root .. "/.git"))
+  table.insert(deny, sub(root .. "/.git"))
  end
+ for _, path in { "/dev/null", "/dev/tty", "/dev/dtracehelper" } do table.insert(allow, lit(path)) end
+ for _, root in resolved(home .. "/.omp") do table.insert(deny, sub(root)) end
  return "(version 1)\n(allow default)\n(deny file-write*)\n(allow file-write*\n  " .. table.concat(allow, "\n  ")
   .. ")\n(deny file-write*\n  " .. table.concat(deny, "\n  ") .. ")\n"
 end

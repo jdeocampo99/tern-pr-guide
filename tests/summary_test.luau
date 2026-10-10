@@ -301,12 +301,22 @@ return function()
 	local planned = Summary.plan("/omp", "provider/model", "high", goodPrompt) :: { string }
 	assert(planned[#planned] == goodPrompt and string.sub(planned[#planned], 1, 1) ~= "@" and string.sub(planned[#planned], 1, 1) ~= "-")
 
-	-- The bot worker's profile: writes only under the worktree (not its .git pointer), OMP state and temp.
+	-- The bot worker's profile: writes only under the worktree (not its .git pointer) and three device nodes.
+	-- Temp folders and OMP's state are not writable, and a single file is denied by `literal`, not `subpath`.
 	local profile = AgentFix.sandboxProfile(WORKTREE, "/home/prguide") :: string
-	assert(string.find(profile, "(deny file-write*)", 1, true) and string.find(profile, '(subpath "' .. WORKTREE .. '")', 1, true))
-	assert(string.find(profile, '(subpath "' .. WORKTREE .. '/.git")', 1, true) and string.find(profile, '(subpath "/home/prguide/.omp")', 1, true))
-	assert(not string.find(profile, '"/clone', 1, true) and not string.find(profile, '(subpath "/")', 1, true) and not string.find(profile, "(allow file-write*)", 1, true))
-	assert(string.find(AgentFix.sandboxProfile("/tmp/pool/wt", "/home/prguide") :: string, '(subpath "/private/tmp/pool/wt")', 1, true))
+	local allowed = string.match(profile, "%(allow file%-write%*(.-)%)\n%(deny file%-write%*\n") :: string
+	assert(allowed == '\n  (subpath "' .. WORKTREE .. '")\n  (literal "/dev/null")\n  (literal "/dev/tty")\n  (literal "/dev/dtracehelper")', allowed)
+	assert(string.find(profile, "(deny file-write*)", 1, true) and not string.find(profile, "(allow file-write*)", 1, true))
+	assert(string.find(profile, '(literal "' .. WORKTREE .. '/.git")', 1, true) and string.find(profile, '(subpath "' .. WORKTREE .. '/.git")', 1, true))
+	assert(string.find(profile, '(subpath "/home/prguide/.omp")', 1, true), "OMP state is denied")
+	assert(not string.find(allowed, "/tmp", 1, true) and not string.find(allowed, "/var/folders", 1, true) and not string.find(allowed, ".omp", 1, true))
+	assert(not string.find(profile, '"/clone', 1, true) and not string.find(profile, '(subpath "/")', 1, true))
+	-- A worktree or home under /tmp is matched by its resolved /private path, and only the worktree is allowed.
+	local temp = AgentFix.sandboxProfile("/tmp/pool/wt", "/tmp/home") :: string
+	local tempAllowed = string.match(temp, "%(allow file%-write%*(.-)%)\n%(deny file%-write%*\n") :: string
+	assert(string.find(tempAllowed, '(subpath "/private/tmp/pool/wt")', 1, true) and string.find(tempAllowed, '(subpath "/tmp/pool/wt")', 1, true))
+	assert(not string.find(tempAllowed, '(subpath "/private/tmp")', 1, true) and not string.find(tempAllowed, '(subpath "/tmp")', 1, true))
+	assert(string.find(temp, '(literal "/private/tmp/pool/wt/.git")', 1, true) and string.find(temp, '(subpath "/private/tmp/home/.omp")', 1, true))
 	for _, bad in { "relative", '/pool/"quote', "/pool/back\\slash", "/pool/new\nline", "/pool/../outside", "/pool/.." } do
 		assert(AgentFix.sandboxProfile(bad, "/home/prguide") == nil, bad)
 	end
