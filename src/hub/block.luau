@@ -753,17 +753,26 @@ local function joinOwnership(b: Block, shared: Sync.Cache)
 	if took then b.handoffs += 1 end
 end
 
--- The cache another window stored since this block's own, if there is one.
-local function newerShared(b: Block): Sync.Cache?
+-- The cache another window stored, if it is as new as this block's own (`strict`: newer). Adopting a cache takes the
+-- strictly newer one; joining its ownership also takes one stored at the same time, because a hand-off keeps the
+-- cache's own `refreshedAt`, so the window that took it leaves the same stamp this block holds.
+local function sharedCache(b: Block, strict: boolean): Sync.Cache?
 	local shared = readCache()
 	if not shared then return nil end
 	local theirs, mine = Model.epoch(shared.refreshedAt), cachedAt(b)
-	return if theirs and (mine == nil or theirs > mine) then shared else nil
+	if not theirs then return nil end
+	return if mine == nil or theirs > mine or (not strict and theirs == mine) then shared else nil
+end
+
+-- Joins the ownership of a shared cache stored at this block's cache's time or later; an older one joins nothing.
+local function joinShared(b: Block)
+	local shared = sharedCache(b, false)
+	if shared then joinOwnership(b, shared) end
 end
 
 -- Takes another window's newer cache, so windows share one refresh.
 local function adoptShared(b: Block, cx: BlockCx)
-	local shared = newerShared(b)
+	local shared = sharedCache(b, true)
 	if shared then
 		local now = os.time()
 		joinOwnership(b, shared)
@@ -1073,10 +1082,10 @@ startRefresh = function(b: Block, cx: BlockCx)
 		else
 			local canon, moved = State.canonicalAdded(readLocal().added, fresh.prs)
 			if moved then writeAdded(canon) end
-			-- Another window's newer cache may flag a PR this block's own set does not hold yet. Join it before the answer is
-			-- merged and persisted, so the stored cache cannot erase it; a read of Tandem still out predates it and is read again.
-			local shared = newerShared(b)
-			if shared then joinOwnership(b, shared) end
+			-- Another window's cache, as new as this block's own, may flag a PR this block's own set does not hold yet. Join it
+			-- before the answer is merged and persisted, so the stored cache cannot erase it; a read of Tandem still out
+			-- predates it and is read again.
+			joinShared(b)
 			local cache = Sync.merge(fresh, b.cache, withTandem(b, fresh.prs), now)
 			cache.lastModified = b.sched.lastModified
 			announce(b, cx, b.cache, cache.prs, now)

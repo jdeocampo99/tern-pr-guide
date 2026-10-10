@@ -187,7 +187,15 @@ local function stubTern(w: any): any
 			return { cancel = function() end }
 		end,
 		getenv = function(): string? return nil end,
-		kv = { get = function(key: string): any return if w.kvIn then w.kvIn[key] else nil end, set = function(key: string, value: any) w.kv[key] = value end },
+		-- `w.kvIn` is what the plugin finds stored and `w.kv` what it wrote. With `w.shared`, one store serves both: a read sees
+		-- every earlier write, and values are copied in and out, as a store shared by two windows would.
+		kv = {
+			get = function(key: string): any
+				if w.shared then return copy(w.kv[key]) end
+				return if w.kvIn then w.kvIn[key] else nil
+			end,
+			set = function(key: string, value: any) w.kv[key] = if w.shared then copy(value) else value end,
+		},
 	}
 end
 
@@ -1265,6 +1273,113 @@ local function delayedRefresh()
 	end)
 end
 
+-- Two windows share one store. A hand-off keeps the cache's own `refreshedAt`, so the window that took it stores the
+-- stamp the other window already holds, and that window's delayed refresh must still join it. A read of Tandem that
+-- returns before the refresh joins a strictly newer cache first, so it is dropped and cannot overwrite it.
+local function sharedStore()
+	local KEY = "acme/api#116"
+	local function keeps(cache: any, why: string)
+		local seen = false
+		for _, saved in cache.prs do
+			if saved.key == KEY then seen = true; assert(saved.tandem == true, why) end
+		end
+		assert(seen, why)
+	end
+	local function fresh(): any
+		return { viewer = "jubbydev", prs = copy(Cases.prs), rateLimit = nil, calls = {}, truncated = false }
+	end
+
+	-- A cache of the same stamp: window B hands the PR off for real, and window A's delayed refresh keeps the flag.
+	withWorld(function(w, Fetch, Block)
+		w.shared = true
+		w.kv["hub.cache"] = storedCache({ WEB, API114 }, Cases.asOf)
+		local a = live(w, Block, true)
+		local cxA = w.cx
+		local other = live(w, Block, true)
+		local cxB = w.cx
+		assert(#reads(w) == 2 and a.cache.refreshedAt == other.cache.refreshedAt)
+		reads(w)[1].done(out("WATCH"))
+		reads(w)[2].done(out("WATCH"))
+		local answer: any = nil
+		a.github = quietGithub(function(_, done) answer = done end)
+		Block.event(a, { ev = "action", act = "hub-refresh", value = "" } :: any, cxA)
+		assert(answer ~= nil and a.flights.refresh and #reads(w) == 3 and a.watched[KEY] == nil)
+
+		Block.event(other, { ev = "action", act = "card-handoff", value = KEY } :: any, cxB)
+		assert(#handoffs(w) == 1)
+		handoffs(w)[1].done(out("KEPT"))
+		assert(other.watched[KEY] == true and other.cache.refreshedAt == a.cache.refreshedAt)
+		keeps(w.kv["hub.cache"], "the hand-off was stored")
+		assert(w.kv["hub.cache"].refreshedAt == a.cache.refreshedAt, "the hand-off kept the stamp")
+		assert(a.watched[KEY] == nil and a.handoffs == 0, "A has not seen it")
+
+		answer(fresh(), nil)
+		frozen(a)
+		assert(a.watched[KEY] == true and a.handoffs >= 1, "the same-stamp ownership joined")
+		keeps(a.cache, "A's cache")
+		keeps(w.kv["hub.cache"], "what A stored")
+		local mine = card(a.s, KEY)
+		assert(mine.pr.tandem and mine.column == "in_review" and mine.chips[1].text == "Waiting on Tandem" and mine.main and mine.main.act == "card-handoff" and not offers(mine, "card-agent"))
+		Block.event(a, { ev = "action", act = "card-agent", value = KEY } :: any, cxA)
+		assert(a.agentFlight == nil and a.s.agents[KEY] == nil and gh(w) == nil, "no local fixer")
+
+		-- A's read that began before the join is dropped and read again.
+		reads(w)[3].done(out("WATCH"))
+		assert(#reads(w) == 4 and a.flights.tandem)
+	end)
+
+	-- Silence at the same stamp never clears ownership, and a cache that is not newer is not adopted.
+	withWorld(function(w, Fetch, Block)
+		local b = live(w, Block)
+		reads(w)[1].done(out("WATCH"))
+		b.cache = Sync.merge(fresh(), nil, { added = {}, tandem = Model.tandemFlags(b.watched, fresh().prs) }, Cases.asOf + 60)
+		State.replace(b.s, b.cache.prs, Cases.asOf, Cases.asOfIso)
+		local answer: any = nil
+		b.github = quietGithub(function(_, done) answer = done end)
+		Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+		w.kvIn = { ["hub.cache"] = storedCache({}, Cases.asOf + 60) }
+		answer(fresh(), nil)
+		assert(b.watched[WEB] == true and b.watched[API114] == true and b.handoffs == 0 and #reads(w) == 2, "nothing joined and nothing cleared")
+	end)
+
+	-- Window B stores a strictly newer cache while A's read of Tandem and refresh are out; the read returns first.
+	withWorld(function(w, Fetch, Block)
+		w.shared = true
+		w.kv["hub.cache"] = storedCache({}, Cases.asOf)
+		local a = live(w, Block, true)
+		reads(w)[1].done(out("WATCH"))
+		assert(a.watched[WEB] == true and w.kv["hub.cache"].refreshedAt == a.cache.refreshedAt)
+		local answer: any = nil
+		a.github = quietGithub(function(_, done) answer = done end)
+		Block.event(a, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+		assert(answer ~= nil and #reads(w) == 2 and a.flights.tandem)
+
+		local theirs = storedCache({ WEB, API114, KEY }, Cases.asOf + 60)
+		w.kv["hub.cache"] = theirs
+		assert(a.watched[KEY] == nil)
+
+		-- Its answer names another PR, so applying it would change the board and store A's older cache over B's.
+		w.decoded["OLDER"] = watchWith({ "acme/web#101" })
+		reads(w)[2].done(out("OLDER"))
+		assert(a.watched[KEY] == true and a.watched["acme/web#101"] == nil, "B's ownership joined and the older answer was dropped")
+		assert(#reads(w) == 3 and a.flights.tandem, "read again")
+		assert(same(w.kv["hub.cache"], theirs), "the older read stored nothing")
+		keeps(w.kv["hub.cache"], "B's cache stands")
+		assert(not card(a.s, "acme/web#101").pr.tandem)
+
+		-- The GitHub answer then keeps the flag too.
+		answer(fresh(), nil)
+		frozen(a)
+		keeps(a.cache, "A's cache")
+		keeps(w.kv["hub.cache"], "what A stored")
+		assert(card(a.s, KEY).pr.tandem and card(a.s, KEY).column == "in_review")
+
+		-- The read made after the join is the one that applies.
+		reads(w)[3].done(out("OLDER"))
+		assert(a.watched["acme/web#101"] == true and card(a.s, "acme/web#101").pr.tandem and not a.flights.tandem)
+	end)
+end
+
 -- A board whose TARGET holds a ready fix on the Review fix page, kept by a retained engine. The push and the lease
 -- return are recorded calls (the real `Fetch.pushAgentFix` needs the engine's own lease), settled by hand.
 local function withReady(run: (w: any, b: any) -> ())
@@ -1682,6 +1797,7 @@ return function()
 	terminalAgents()
 	reverseSharedCache()
 	delayedRefresh()
+	sharedStore()
 	readyPush()
 	retainedLease()
 	preWorktreeLease()
