@@ -85,8 +85,9 @@ export type FlakeEvidence = {
 	history: { failed: number, total: number }?, -- the same check on recent runs of the base branch
 	passedBefore: boolean, -- it passed on this commit earlier, or on the previous one without a change to the failing area
 	text: string, -- the failure text
-	annotationPaths: { string },
+	annotationPaths: { string }, -- files the annotations point at (workflow files and exit-code lines already left out)
 	changedPaths: { string },
+	base: string?, -- the base branch the history counted; "main" when nil
 }
 export type FlakeVerdict = { flaky: boolean, basis: ("history" | "rerun" | "text" | "outside_diff")?, reason: string? }
 
@@ -441,6 +442,71 @@ function M.methodLines(methods: { MergeMethod }): { string }
 	return out
 end
 
--- flake (#13) arrives with its issue; its types are declared above.
+-- Flakes ---------------------------------------------------------------------------------------------------
+-- github.luau fetches the evidence; this is the rule. Nothing here reads the network or the clock.
+
+M.FLAKE_FAILED_MIN = 3 -- this many failures among the last runs on the base branch make a check likely flaky
+M.FLAKE_FAILED_MAX = 1 -- this many or fewer count for nothing; the numbers between are not enough alone
+M.FLAKE_RUNS = 20 -- how many recent runs of the check the history looks at
+
+-- Failure text that names the infrastructure and not the code: [lowercase pattern, what the reason says].
+local INFRA: { { string } } = {
+	{ "exceeded the maximum execution time", "the job timed out" },
+	{ "timed out", "the job timed out" },
+	{ "etimedout", "a timeout (ETIMEDOUT)" },
+	{ "econnreset", "a network reset (ECONNRESET)" },
+	{ "connection reset", "a network reset" },
+	{ "socket hang up", "a network reset (socket hang up)" },
+	{ "could not resolve host", "a network failure (could not resolve host)" },
+	{ "rate limit", "a rate limit" },
+	{ "http 429", "a rate limit (429)" },
+	{ "lost communication with the server", "a lost runner" },
+	{ "runner has received a shutdown signal", "a lost runner" },
+	{ "lost communication with the runner", "a lost runner" },
+	{ "exit code 137", "out of memory (exit 137)" },
+	{ "exit status 137", "out of memory (exit 137)" },
+}
+
+local function infraIn(text: string): string?
+	local lower = string.lower(text)
+	for _, row in INFRA do
+		if string.find(lower, row[1], 1, true) then return row[2] end
+	end
+	return nil
+end
+
+-- Whether the failure is likely flaky, and why. An annotation on a changed path is real and nothing outweighs it.
+-- Then, in order of strength: failures on the base branch (3 or more), a pass earlier on this commit, text that names
+-- the infrastructure, and errors only in files the PR didn't change. Two failures on the base branch is not enough alone.
+function M.flake(evidence: FlakeEvidence): FlakeVerdict
+	local changed: { [string]: boolean } = {}
+	for _, path in evidence.changedPaths do changed[path] = true end
+	for _, path in evidence.annotationPaths do
+		if changed[path] then return { flaky = false, basis = nil, reason = "Error in " .. path .. ", which this PR changed" } end
+	end
+	local history = evidence.history
+	if history and history.failed >= M.FLAKE_FAILED_MIN then
+		return { flaky = true, basis = "history", reason = "failed " .. history.failed .. " of the last " .. history.total .. " runs on " .. (evidence.base or "main") }
+	end
+	if evidence.passedBefore then
+		return { flaky = true, basis = "rerun", reason = "passed earlier on this commit" }
+	end
+	local infra = infraIn(evidence.text)
+	if infra then return { flaky = true, basis = "text", reason = "the log shows " .. infra } end
+	if #evidence.annotationPaths > 0 then
+		return { flaky = true, basis = "outside_diff", reason = "errors only in files this PR didn't change" }
+	end
+	return { flaky = false, basis = nil, reason = nil }
+end
+
+-- One verdict for a card: flaky only when every failing check is, with the first check's reason.
+function M.flakeAll(verdicts: { FlakeVerdict }): FlakeVerdict
+	local first: FlakeVerdict? = nil
+	for _, verdict in verdicts do
+		if not verdict.flaky then return verdict end
+		first = first or verdict
+	end
+	return first or { flaky = false, basis = nil, reason = nil }
+end
 
 return M

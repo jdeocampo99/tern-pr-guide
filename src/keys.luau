@@ -140,6 +140,7 @@ local function fixesKey(s: HubState.State, key: Key): Action?
 	if name == "escape" then return act("fixes-close") end
 	local label = cardKeyLabel(key)
 	if label == "⇧L" then return act("fixes-log") end
+	if label == "⇧R" then return act("fixes-rerun") end
 	if name == "down" or name == "j" then return act("fixes-move", 1) end
 	if name == "up" or name == "k" then return act("fixes-move", -1) end
 	if name == "left" or name == "h" then return act("fixes-focus", "steps") end
@@ -151,6 +152,13 @@ local function fixesKey(s: HubState.State, key: Key): Action?
 	if label == "B" then return act("fixes-bots") end
 	local main = HubState.fixMain(s)
 	if main and label ~= nil and main.key == label and s.route then return act(main.act, s.route.key) end
+	-- When Re-run moved first, the agent is the card's alternative and keeps its key.
+	local card = if s.route then HubState.card(s, s.route.key) else nil
+	if card and label == "A" and s.route then
+		for _, more in card.more do
+			if more.act == "card-agent" or more.act == "card-handoff" then return act(more.act, s.route.key) end
+		end
+	end
 	return nil
 end
 

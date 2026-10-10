@@ -24,6 +24,9 @@ type Fix = { worktree: string, branch: string, base: string, headOid: string, co
 export type Mode = "board" | "search" | "link" | "menu" | "confirm" | "help" | "fixes" | "reply"
 export type MenuId = "repositories" | "sort" | "agent" | "merge" | "actions"
 export type Ring = "bad" | "good" | "bad-out" | "good-out" -- red ring, green wash, then the same fading
+-- What the flake evidence says about a card's failing checks, for the commit it was read on. `runs` are the workflow
+-- runs Re-run failed checks sends `gh run rerun` to, once each.
+export type Flake = { flaky: boolean, reason: string?, runs: { number }, headOid: string }
 export type CardAction = { act: string, value: string?, label: string, key: string?, confirm: boolean }
 
 export type AgentFixState =
@@ -43,6 +46,7 @@ export type Card = {
 	detailKind: ("bad" | "info")?, -- the detail's color: red on your PRs, blue on review requests
 	column: Column,
 	reasons: { Model.Reason },
+	flake: string?, -- "Likely flaky: failed 3 of the last 20 runs on main", shown under the title
 	main: CardAction?, -- the split button's action
 	more: { CardAction }, -- behind the attached ▾
 	agent: AgentFixState?,
@@ -119,6 +123,7 @@ export type State = {
 	ringed: { [string]: Ring },
 	agents: { [string]: AgentFixState },
 	details: { [string]: FixDetails },
+	flakes: { [string]: Flake }, -- by card key; the block reads the evidence, so a card without one has no label
 	summaries: { [string]: Summary },
 	merges: { [string]: Model.MergeResolution }, -- by repo
 	acted: { [string]: boolean }, -- cards the viewer just acted on (merged, updated): their arrival is not toasted
@@ -201,7 +206,7 @@ function M.new(prs: { HubPR }, now: number, saved: any): State
 		prs = prs, now = now, board = emptyBoard(tab), tab = tab, selected = nil, marked = {},
 		repositories = repositories, sort = sort, search = Fields.create(""), link = Fields.create(""),
 		mode = "board", route = nil, menu = nil, menuCursor = 1, confirm = nil, methodEdit = nil, folded = folded, recent = {}, walking = false,
-		ringed = {}, agents = {}, details = {}, summaries = {}, merges = {}, acted = {}, busy = {},
+		ringed = {}, agents = {}, details = {}, flakes = {}, summaries = {}, merges = {}, acted = {}, busy = {},
 		refreshedAt = nil, loading = false, error = nil, agent = nil,
 		keyed = false, born = {}, booted = false,
 	}
@@ -222,6 +227,20 @@ function M.setRecent(s: State, recent: { Opened })
 	M.project(s)
 end
 
+-- The block's reading of the flake evidence for card `key` (nil forgets it, as after a re-run). The cards follow.
+function M.setFlake(s: State, key: string, flake: Flake?)
+	s.flakes[key] = flake
+	M.project(s)
+end
+
+-- The flake evidence on hand for `key`, while it is for the commit now at the head.
+function M.flakeOf(s: State, key: string): Flake?
+	local pr = M.prOf(s, key)
+	local flake = s.flakes[key]
+	if pr and flake and flake.headOid == pr.headOid then return flake end
+	return nil
+end
+
 -- What a saved state holds, for the block's `save`.
 function M.saved(s: State): { tab: Tab, sort: Sort, repositories: { string }?, folded: { [string]: boolean } }
 	local repositories: { string }? = nil
@@ -240,15 +259,31 @@ local function action(act: string, label: string, key: string?): CardAction
 	return { act = act, value = nil, label = label, key = key, confirm = false }
 end
 
-local function actionsFor(pr: HubPR, column: Column, reasons: { Model.Reason }, merge: Model.MergeResolution?): (CardAction?, { CardAction })
+local function actionsFor(pr: HubPR, column: Column, reasons: { Model.Reason }, merge: Model.MergeResolution?, flake: Flake?): (CardAction?, { CardAction })
 	if column == "needs_fixes" then
-		local feedback = false
+		local feedback, checks = false, false
 		for _, reason in reasons do
 			if reason == "feedback" then feedback = true end
+			if reason == "checks" then checks = true end
 		end
-		if feedback and #reasons == 1 then return action("card-summarize", "Summarize", "A"), {} end
-		local main = if pr.tandem then action("card-handoff", "Hand off to Tandem", "A") else action("card-agent", "Fix with agent", "A")
-		return main, if feedback then { action("card-summarize", "Summarize", "⇧A") } else {}
+		local main, more
+		if feedback and #reasons == 1 then
+			main, more = action("card-summarize", "Summarize", "A"), {}
+		else
+			main = if pr.tandem then action("card-handoff", "Hand off to Tandem", "A") else action("card-agent", "Fix with agent", "A")
+			more = if feedback then { action("card-summarize", "Summarize", "⇧A") } else {}
+		end
+		if checks then
+			-- Behind Fix checks ▾ for every failing check. It moves first only when the evidence says flaky and the
+			-- checks are all that is wrong; the agent stays first when an annotation points at a changed file.
+			local rerun = action("card-rerun", "Re-run failed checks", "⇧R")
+			if flake and flake.flaky and #reasons == 1 then
+				table.insert(more, 1, main :: CardAction)
+				return rerun, more
+			end
+			table.insert(more, rerun)
+		end
+		return main, more
 	elseif column == "in_review" then
 		return action("card-copy", "Copy link", "C"), {}
 	elseif column == "ready" then
@@ -396,9 +431,12 @@ function askingOf(s: State, pr: HubPR): string?
 end
 
 local function toCard(pr: HubPR, placement: Model.Placement, s: State): Card
-	local main, more = actionsFor(pr, placement.column, placement.reasons, s.merges[pr.repo])
+	local known = s.flakes[pr.key]
+	local flake = if known and known.headOid == pr.headOid then known else nil
+	local main, more = actionsFor(pr, placement.column, placement.reasons, s.merges[pr.repo], flake)
 	local chips, detail, detailKind = chipsFor(pr, placement, s.now)
 	return {
+		flake = if flake and flake.flaky and flake.reason then "Likely flaky: " .. flake.reason else nil,
 		pr = pr, chips = chips, detail = detail, detailKind = detailKind, column = placement.column, reasons = placement.reasons, main = main, more = more,
 		agent = s.agents[pr.key], summary = s.summaries[pr.key], merge = s.merges[pr.repo], note = M.pendingNote(s, pr),
 		asking = askingOf(s, pr), busy = s.busy[pr.key],
@@ -1380,7 +1418,7 @@ function M.fixItems(s: State, step: Fixes.Step?): { string }
 	local card = if s.route then M.card(s, s.route.key) else nil
 	local agent = card ~= nil and card.main ~= nil and card.main.act ~= "open"
 	if step.thread then return { "reply", "resolve" } end
-	if step.check then return { "log" } end
+	if step.check then return { "log", "rerun" } end
 	if step.conflict then return if agent then { "agent", "github" } else { "github" } end
 	return { "github" }
 end

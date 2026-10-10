@@ -1,0 +1,14 @@
+{
+ "_note": "Recorded 2026-10-10 from jubbydev/tern-pr-guide-hub-smoke with read-only gh api, trimmed to the fields github.parseRuns reads. Runs of PR #8's head commit.",
+ "workflow_runs": [
+  {
+   "conclusion": "failure",
+   "event": "pull_request",
+   "head_branch": "hub-smoke/failing-1791575605",
+   "head_sha": "e04c90dfa27ff240eaab3668cfb37b11ad6679aa",
+   "id": 37983327811,
+   "name": "smoke-fail",
+   "status": "completed"
+  }
+ ]
+}

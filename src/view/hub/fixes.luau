@@ -339,8 +339,17 @@ local function checkPanel(s: State.State, step: Step, pr: Model.HubPR, details: 
 		el("div", { class = "gp-fx-chk", key = "strip" }, {
 			span("gp-fx-cname", check.name), span("gp-fx-cfail", "Failed"), span("gp-fx-cmeta", meta), Ui.spacer(),
 			keyed("", "View log", "⇧L", "fixes-log", itemOn(s, "log")),
+			keyed("", "Re-run failed checks", "⇧R", "fixes-rerun", itemOn(s, "rerun")),
 		}),
 	}
+	-- The evidence, when it says flaky; a real failure says nothing here, its annotations speak.
+	local flake = State.flakeOf(s, pr.key)
+	if flake and flake.flaky and flake.reason then
+		table.insert(kids, el("div", { class = "gp-panel gp-fx-note", key = "flake" }, {
+			span("gp-fx-t", "Likely flaky: " .. flake.reason),
+			span("gp-fx-n", "Re-running costs no AI tokens and never starts on its own."),
+		}))
+	end
 	local usable = Fixes.usable(check.annotations)
 	if #usable == 0 then
 		table.insert(kids, el("div", { class = "gp-panel gp-fx-note", key = "note" }, {
@@ -495,9 +504,18 @@ local function hints(s: State.State, steps: { Step }): Node
 			table.insert(kids, item("R", "reply"))
 			table.insert(kids, item("E", "resolve"))
 		end
-		if step and step.check then table.insert(kids, item("⇧L", "view log")) end
 		local main = State.fixMain(s)
+		-- With Re-run first the bar is full: View log keeps its button on the page.
+		if step and step.check and not (main and main.key == "⇧R") then table.insert(kids, item("⇧L", "view log")) end
+		-- The card's own action already says ⇧R when Re-run moved first.
+		if step and step.check and not (main and main.key == "⇧R") then table.insert(kids, item("⇧R", "re-run")) end
 		if main and main.key then table.insert(kids, item(main.key, string.lower(main.label), true)) end
+		local card = State.card(s, route.key)
+		if main and main.act == "card-rerun" and card then
+			for _, more in card.more do
+				if more.act == "card-agent" or more.act == "card-handoff" then table.insert(kids, item(more.key or "A", string.lower(more.label))) end
+			end
+		end
 		if step then table.insert(kids, item("G", if step.group == "conflict" then "resolve on GitHub" else "open on GitHub")) end
 		if #Fixes.bots(State.fixDetails(s) :: Fixes.FixDetails) > 0 then table.insert(kids, item("B", "bot comments")) end
 		table.insert(kids, item("esc", "back", true))

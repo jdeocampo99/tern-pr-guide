@@ -36,13 +36,15 @@ export type Block = {
 	generate: boolean, -- ⏎ opens the PR with the AI guide started
 	agent: Agent.Agent?, -- the reader's own agent, once found (never with a fixture)
 	github: Github.Client, timers: Timers,
-	flights: { refresh: boolean, checks: boolean, probe: boolean }, -- one call of each kind at a time
+	flights: { refresh: boolean, checks: boolean, probe: boolean, flake: boolean }, -- one call of each kind at a time
 	sched: Sched,
 	closed: boolean, -- a render failed: the window is gone, so no timer starts anything
 	refetch: boolean, -- a refresh was asked for while one was running: run another when it ends
 	show: Model.PRRef?, -- a pull request just added by link: select it when the refresh brings it
 	records: { [string]: Sync.MergeRecord }, -- each repo's hub.merge.* record, read once
 	detecting: { [string]: boolean }, -- repos whose merge method was asked for this session (once each, success or not)
+	histories: Github.HistoryCache, -- each repo's base-branch run history, read once an hour (memory only: no kv key)
+	flakeTried: { [string]: boolean }, -- cards (by key and head) whose evidence was read this session, success or not
 	step: number, -- fixture only: how many `refreshes` entries ⌘R has applied
 }
 
@@ -484,6 +486,64 @@ local function detectMerges(b: Block, cx: BlockCx)
 	end
 end
 
+-- Flake evidence ----------------------------------------------------------------------------------------------
+-- For each Needs fixes card with a failing check, the block reads what the verdict needs: the details (annotations,
+-- changed files, run ids), the base branch's recent runs (once an hour per repo) and the runs of the head commit.
+-- Nothing here re-runs anything: that is a press on Re-run failed checks.
+local FLAKE_PRS = 10 -- the most cards read in one pass
+
+local function flakeOf(pr: Model.HubPR, d: Fixes.FixDetails, history: Github.RepoHistory?, runs: { Github.RunRow }?): State.Flake
+	local verdicts: { Model.FlakeVerdict } = {}
+	local ids: { number } = {}
+	for _, check in d.checks do
+		if check.runId then
+			table.insert(verdicts, Model.flake(Github.evidenceFor(check, d.changedPaths, history, runs)))
+			if table.find(ids, check.runId) == nil then table.insert(ids, check.runId) end
+		end
+	end
+	local verdict = Model.flakeAll(verdicts)
+	return { flaky = verdict.flaky and #ids > 0, reason = verdict.reason, runs = ids, headOid = d.headOid }
+end
+
+local function loadFlakes(b: Block, cx: BlockCx)
+	if b.fixture or b.closed or b.flights.flake then return end
+	local queue: { Model.HubPR } = {}
+	for _, entry in b.s.board.columns do
+		if entry.column == "needs_fixes" then
+			for _, card in entry.cards do
+				local pr = card.pr
+				local wants = table.find(card.reasons, "checks") ~= nil and pr.checks.failing > 0
+				if wants and not b.flakeTried[pr.key .. "@" .. pr.headOid] and State.flakeOf(b.s, pr.key) == nil and #queue < FLAKE_PRS then
+					table.insert(queue, pr)
+				end
+			end
+		end
+	end
+	if #queue == 0 then return end
+	b.flights.flake = true
+	local function step(i: number)
+		local pr = queue[i]
+		if pr == nil or b.closed then
+			b.flights.flake = false
+			return
+		end
+		b.flakeTried[pr.key .. "@" .. pr.headOid] = true
+		b.github.details(pr, function(d, _)
+			if b.closed then return end
+			if d == nil then return step(i + 1) end
+			b.histories.read(pr.repo, pr.baseBranch, os.time(), function(history)
+				b.github.runs(pr.repo, d.headOid, function(runs, _)
+					if b.closed then return end
+					State.setFlake(b.s, pr.key, flakeOf(pr, d, history, runs))
+					draw(b, cx)
+					step(i + 1)
+				end)
+			end)
+		end)
+	end
+	step(1)
+end
+
 startRefresh = function(b: Block, cx: BlockCx)
 	b.flights.refresh = true
 	b.s.loading = true
@@ -511,6 +571,7 @@ startRefresh = function(b: Block, cx: BlockCx)
 			showAdded(b, cx)
 			loadMerges(b)
 			detectMerges(b, cx)
+			loadFlakes(b, cx)
 		end
 		if b.refetch then
 			b.refetch = false
@@ -559,6 +620,7 @@ onChecks = function(b, cx)
 				State.project(b.s)
 				local why = persist(b)
 				if why then b.s.error = { operation = KV_CACHE, message = "the cache couldn't be saved: " .. why } end
+				loadFlakes(b, cx)
 			end
 		end
 		rearm(b, cx)
@@ -1090,6 +1152,57 @@ ACTIONS["card-update"] = function(b, cx, key)
 	end)
 end
 
+-- Re-run failed checks (⇧R, behind Fix checks ▾): `gh run rerun <id> --failed` for each failing workflow run of the
+-- card, one at a time. Only a press runs it. The runs come from the evidence on hand, else from the details.
+ACTIONS["card-rerun"] = function(b, cx, key)
+	local s = b.s
+	local pr = State.prOf(s, key)
+	if pr == nil or s.busy[key] then return end
+	if b.fixture then return cx:toast("info", "The sample board doesn't re-run checks", pr.key) end
+	if pr.checks.failing == 0 then return cx:toast("info", "#" .. pr.number .. " has no failing checks", pr.key) end
+	local function fail(reason: string)
+		State.setBusy(s, key, nil)
+		cx:toast("error", "Couldn't re-run checks on #" .. pr.number .. ": " .. reasonOf(reason), pr.repo)
+		draw(b, cx)
+	end
+	local function go(ids: { number })
+		if #ids == 0 then return fail("GitHub lists no workflow run for the failing checks") end
+		State.setBusy(s, key, "Re-running…")
+		draw(b, cx)
+		local function step(i: number)
+			if b.closed then return end
+			if i > #ids then
+				State.setBusy(s, key, nil)
+				b.flakeTried[pr.key .. "@" .. pr.headOid] = nil
+				State.setFlake(s, key, nil)
+				cx:toast("success", "Re-running failed checks on #" .. pr.number, pr.repo)
+				refetchSoon(b, cx)
+				return draw(b, cx)
+			end
+			b.github.run(Github.commands.rerun(pr.repo, ids[i]), function(_, err)
+				if b.closed then return end
+				if err then return fail(err.message) end
+				step(i + 1)
+			end)
+		end
+		step(1)
+	end
+	local known = State.flakeOf(s, key)
+	if known and #known.runs > 0 then return go(known.runs) end
+	State.setBusy(s, key, "Reading checks…")
+	draw(b, cx)
+	b.github.details(pr, function(d, err)
+		if b.closed then return end
+		State.setBusy(s, key, nil)
+		if d == nil then return fail(if err then err.message else "no answer") end
+		local ids: { number } = {}
+		for _, check in d.checks do
+			if check.runId and table.find(ids, check.runId) == nil then table.insert(ids, check.runId) end
+		end
+		go(ids)
+	end)
+end
+
 -- Add by link (N) ---------------------------------------------------------------------------------------
 
 ACTIONS["hub-link"] = function(b, cx)
@@ -1321,6 +1434,10 @@ ACTIONS["fixes-resolve"] = function(b, cx)
 		draw(b, cx)
 	end)
 end
+ACTIONS["fixes-rerun"] = function(b, cx)
+	local route = b.s.route
+	if route then ACTIONS["card-rerun"](b, cx, route.key) end
+end
 ACTIONS["fixes-log"] = function(b, cx)
 	local _, pr, step = fixTarget(b)
 	if pr == nil or step == nil or step.check == nil then return end
@@ -1430,14 +1547,28 @@ local block: BlockDef<Block> = {
 		local b: Block = {
 			s = s, cache = cache, fixture = fixture, generate = opts ~= nil and opts.generate, agent = nil,
 			github = Github.client(Fetch.runner, tern.json.decode), timers = {},
-			flights = { refresh = false, checks = false, probe = false },
+			flights = { refresh = false, checks = false, probe = false, flake = false },
 			sched = {
 				probedAt = now, probeChanged = false, focusedAt = if live then now else nil, checksAt = nil,
 				refreshTried = nil, lastModified = if cache then cache.lastModified else nil,
 			},
-			closed = false, refetch = false, show = nil, step = 0, records = {}, detecting = {},
+			closed = false, refetch = false, show = nil, step = 0, records = {}, detecting = {}, flakeTried = {},
+			histories = nil :: any,
 		}
+		b.histories = Github.historyCache(b.github)
 		if fixture then
+			-- The sample board's failing checks come with recorded evidence: one flaky, one a real type error.
+			local evidence: any = require("../../fixtures/hub/flake")
+			for key, name in evidence.board do
+				local pr = State.prOf(s, key)
+				for _, case in evidence.cases do
+					if pr and case.name == name then
+						local verdict = Model.flake(evidence.evidence(case))
+						s.flakes[key] = { flaky = verdict.flaky, reason = verdict.reason, runs = evidence.runIds[key], headOid = pr.headOid }
+					end
+				end
+			end
+			State.project(s)
 			local sample = table.clone(SAMPLE_AGENT)
 			sample.models = table.clone(SAMPLE_AGENT.models)
 			s.agent = sample
