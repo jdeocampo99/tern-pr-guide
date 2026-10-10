@@ -401,8 +401,42 @@ local function testProbeAndRun()
 	idle.expectOnly(0)
 end
 
+-- Merge in each of the three methods and update-branch: the exact argv, run through the client, and nothing else.
+local function testCommands()
+	local pr = byKey["acme/api#110"]
+	same(Github.commands.merge(pr, { kind = "squash" }), { argv = { "gh", "pr", "merge", "110", "--repo", "acme/api", "--squash" } }, "squash")
+	same(Github.commands.merge(pr, { kind = "merge" }), { argv = { "gh", "pr", "merge", "110", "--repo", "acme/api", "--merge" } }, "merge")
+	same(Github.commands.merge(pr, { kind = "rebase" }), { argv = { "gh", "pr", "merge", "110", "--repo", "acme/api", "--rebase" } }, "rebase")
+	same(Github.commands.updateBranch(pr), { argv = { "gh", "pr", "update-branch", "110", "--repo", "acme/api" } }, "update-branch")
+	assert(not pcall(Github.commands.merge, pr, { kind = "queue" }), "a queue merge is not a GitHub method")
+
+	local fake = FakeRunner.new({
+		{ prefix = { "gh", "pr", "merge" }, contains = "--squash", reply = { stdout = "" } },
+		{ prefix = { "gh", "pr", "merge" }, contains = "--rebase", reply = { status = 1, stderr = "X Pull request #110 is not mergeable: the base branch policy prohibits the merge.\n" } },
+		{ prefix = { "gh", "pr", "update-branch" }, reply = { stdout = "Updated\n" } },
+	})
+	local client = Github.client(fake.run, decoder({}))
+	local out, err = first(function(done) client.run(Github.commands.merge(pr, { kind = "squash" }), done) end)
+	assert(err == nil and out == "")
+	out, err = first(function(done) client.run(Github.commands.merge(pr, { kind = "rebase" }), done) end)
+	assert(out == nil and err.message == "Couldn't run gh pr merge: X Pull request #110 is not mergeable: the base branch policy prohibits the merge.")
+	out, err = first(function(done) client.run(Github.commands.updateBranch(pr), done) end)
+	assert(err == nil and out == "Updated\n")
+	fake.expectOnly(3)
+	same(fake.calls[1].argv, { "gh", "pr", "merge", "110", "--repo", "acme/api", "--squash" }, "ran squash")
+	same(fake.calls[2].argv, { "gh", "pr", "merge", "110", "--repo", "acme/api", "--rebase" }, "ran rebase")
+	same(fake.calls[3].argv, { "gh", "pr", "update-branch", "110", "--repo", "acme/api" }, "ran update-branch")
+	for _, call in fake.calls do assert(call.stdin == nil) end
+
+	-- Adding by link needs no command: the refresh asks for the PR by its number.
+	local added = FakeRunner.new({ hubEntry({ stdout = "hub-f" }), threadsEntry({ stdout = "threads" }) })
+	first(function(done) Github.client(added.run, decoder(BODIES)).refresh({ added = { { repo = "o/r", number = 9 } }, previous = {} }, done) end)
+	assert(string.find(added.calls[1].argv[5], 'added0: repository(owner: "o", name: "r") { pullRequest(number: 9) { ...Hub } }', 1, true) ~= nil)
+end
+
 return function()
 	assert(#ids(Cases.prs) > 0)
+	testCommands()
 	testParsers()
 	testParsersNeverThrow()
 	testSearchesAndAliases()

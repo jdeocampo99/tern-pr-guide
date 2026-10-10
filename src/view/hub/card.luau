@@ -60,6 +60,16 @@ local function splitButton(card: State.Card, main: State.CardAction): Node
 	return el("span", { class = "gp-sb" .. (if card.selected then " gp-sb-on" else "") .. (if #parts > 1 then " gp-sb-split" else ""), key = "sb" }, parts)
 end
 
+-- The inline question that takes the split button's place: the question on the left of the line, Confirm
+-- (filled, with ⌘⏎) and Cancel (with esc) on the right.
+local function confirmButtons(card: State.Card): Node
+	local key = card.pr.key
+	return el("span", { class = "gp-hc-confirm", key = "confirm" }, {
+		el("span", { class = "gp-sb" }, { el("span", { class = "gp-sb-main gp-sb-confirm", key = "ok", actions = { click = "hub-confirm=" .. key } }, { span("gp-sb-label", "Confirm"), Ui.keys("⌘⏎") }) }),
+		el("span", { class = "gp-sb" }, { el("span", { class = "gp-sb-main", key = "no", actions = { click = "hub-confirm-cancel=" .. key } }, { span("gp-sb-label", "Cancel"), Ui.keys("esc") }) }),
+	})
+end
+
 local function toneOf(card: State.Card): string
 	local c = card.column
 	if c == "needs_fixes" then return "bad" end
@@ -90,7 +100,14 @@ function M.view(card: State.Card, now: number): Node
 	table.insert(info, span("gp-hc-age", Model.ago(pr.lastActivityAt, now)))
 
 	local meta: { Node } = { el("span", { class = "gp-hc-lead", key = "lead" }, lead), el("span", { class = "gp-hc-stats", key = "stats" }, info) }
-	if main then table.insert(meta, el("span", { class = "gp-hc-acts", key = "acts" }, { splitButton(card, main) })) end
+	if card.asking then
+		meta[1] = el("span", { class = "gp-hc-lead", key = "lead" }, { span("gp-hc-ask", card.asking) })
+		table.insert(meta, el("span", { class = "gp-hc-acts", key = "acts" }, { confirmButtons(card) }))
+	elseif card.busy then
+		table.insert(meta, el("span", { class = "gp-hc-acts", key = "acts" }, { el("span", { class = "gp-hc-busy" }, { span("gp-hc-spin", ""), span("gp-hc-busy-text", card.busy) }) }))
+	elseif main then
+		table.insert(meta, el("span", { class = "gp-hc-acts", key = "acts" }, { splitButton(card, main) }))
+	end
 
 	local kids: { Node } = {}
 	local body: { Node } = {}
@@ -107,7 +124,8 @@ function M.view(card: State.Card, now: number): Node
 
 	local class = "gp-hc gp-hc-" .. toneOf(card)
 	if card.selected then class ..= " gp-hc-on" end
-	if main then class ..= " gp-hc-act" end
+	if main and not card.busy then class ..= " gp-hc-act" end
+	if card.asking or card.busy then class ..= " gp-hc-pinned" end
 	if card.ring then class ..= " gp-hc-ring-" .. card.ring end
 	return el("div", {
 		class = class, key = Paths.cardKey(pr.key),

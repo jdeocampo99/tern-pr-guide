@@ -5,6 +5,7 @@ local Card = require("./card")
 local Fields = require("../../text-field")
 local Help = require("./help")
 local Hints = require("./hints")
+local Link = require("./link")
 local Menus = require("./menus")
 local Model = require("../../hub/model")
 local Paths = require("./paths")
@@ -135,6 +136,7 @@ local function columns(s: State.State): Node
 				span("gp-hub-colcount" .. (if #entry.cards == 0 then " gp-hub-colcount-zero" else ""), tostring(#entry.cards)),
 			}),
 		}
+		if entry.column == "to_review" then table.insert(kids, Link.view(s)) end
 		if #entry.cards == 0 then
 			table.insert(kids, span("gp-hub-empty", emptyText(entry.column)))
 		else
@@ -212,11 +214,18 @@ local function body(s: State.State, motion: Ui.Motion): Node
 	if s.error then
 		table.insert(kids, span("gp-hub-error", "Couldn't load pull requests: " .. s.error.message))
 	end
+	-- With no columns to hold it, the add field still shows on Review requests, above the message, at the same path.
+	local function message(text: string)
+		local note = span("gp-hub-empty", text)
+		if s.tab ~= "review" then return table.insert(kids, note) end
+		local column = el("div", { class = "gp-hub-col gp-hub-col-act gp-hub-col-info", key = Paths.columnKey("to_review") }, { Link.view(s), note })
+		table.insert(kids, el("div", { class = "gp-hub-board", key = "board" }, { column }))
+	end
 	if s.board.empty and s.loading then
-		table.insert(kids, span("gp-hub-empty", "Loading pull requests…"))
+		message("Loading pull requests…")
 	else
 		if s.board.empty and (s.search.text ~= "" or s.repositories ~= nil) then
-			table.insert(kids, span("gp-hub-empty", "No pull requests match the search or filter."))
+			message("No pull requests match the search or filter.")
 		else
 			table.insert(kids, columns(s))
 			local inactive = fold(s, motion)

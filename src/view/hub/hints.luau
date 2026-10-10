@@ -8,6 +8,8 @@ local el, span = Ui.el, Ui.span
 local FIXED: { [string]: { title: string, keys: { { string } } } } = {
 	search = { title = "Searching", keys = { { "↑ ↓", "Move" }, { "⏎", "Done" }, { "esc", "Clear" } } },
 	menu = { title = "Choosing", keys = { { "j k", "Move" }, { "⏎", "Choose" }, { "esc", "Close" } } },
+	link = { title = "Adding", keys = { { "⏎", "Add" }, { "⇧⏎", "Open" }, { "esc", "Clear" } } },
+	confirm = { title = "Confirm", keys = { { "⌘⏎", "Confirm" }, { "esc", "Cancel" } } },
 	help = { title = "All shortcuts", keys = { { "esc", "Close" } } },
 }
 

@@ -230,7 +230,7 @@ Every issue builds against these types and signatures. An issue that needs a cha
 | `src/hub/agent-fix.luau` | `model`, `fixes` |
 | `src/hub/summary.luau` | `model`, `fixes` |
 | `window.luau` | `src/links.luau` |
-| `src/hub/state.luau` | `model`, `sync`, `fixes`, `agent-fix`, `summary`, `src/text-field.luau`. Never `fetch`, `github` or `block`. |
+| `src/hub/state.luau` | `model`, `sync`, `fixes`, `agent-fix`, `summary`, `src/text-field.luau`, `src/links.luau` (pure: link parsing and the `#prguide-open=` link). Never `fetch`, `github` or `block`. |
 | `src/keys.luau` | `src/hub/state.luau`, plus what it requires today minus `picker` |
 | `src/view/hub/*.luau` | `state`, `model`, `fixes`, `src/view/ui.luau`, `src/text.luau`. Never `sync` or `github`. |
 | `src/fetch.luau` | `model` and `fixes` for types, `github` for the `Runner` type, `src/links.luau`, `src/hub/sync.luau` (the recent store), plus what it requires today minus `picker` |
@@ -459,7 +459,7 @@ function M.parseDetails(raw: any, pr: HubPR): FixDetails?
 -- Command builders: exact argv, no network. Merging squash/merge/rebase is `gh pr merge`; queue is `--auto`;
 -- comment is `gh pr comment`; label is `gh pr edit --add-label`.
 M.commands = {
-	merge = function(pr: HubPR, method: MergeMethod): Command end,
+	merge = function(pr: HubPR, method: MergeMethod): Command end,   -- squash, merge, rebase: `gh pr merge <n> --repo <owner/repo> --squash|--merge|--rebase`; raises for the other kinds (#10)
 	cancelMerge = function(pr: HubPR, method: MergeMethod): Command end,
 	updateBranch = function(pr: HubPR): Command end,
 	rerun = function(repo: string, runId: number): Command end,            -- gh run rerun <id> --failed
@@ -606,6 +606,8 @@ export type Card = {
 	main: CardAction?,                -- the split button's action
 	more: { CardAction },             -- behind the attached ▾
 	agent: AgentFixState?, summary: Summary?, merge: MergeResolution?,
+	asking: string?,                  -- an inline question ("Squash and merge #412?"): Confirm (⌘⏎) and Cancel (Esc) replace the split button
+	busy: string?,                    -- an action in flight ("Merging…", "Updating…")
 	ring: ("bad" | "good")?,          -- the arrival ring, until it fades
 	selected: boolean, marked: boolean,
 }
@@ -646,6 +648,8 @@ export type State = {
 	agents: { [string]: AgentFixState },
 	details: { [string]: FixDetails }, summaries: { [string]: Summary },
 	merges: { [string]: MergeResolution },    -- by repo
+	acted: { [string]: boolean },     -- cards the viewer just merged or updated: the block hands these to `Sync.diff` as `suppressed`
+	busy: { [string]: string },       -- by card key: the action in flight
 	refreshedAt: string?, loading: boolean, error: Error?,
 	agent: AgentChoice?,
 	narrow: boolean,                  -- the pane is split beside a terminal: the columns stack
@@ -662,6 +666,21 @@ function M.replace(s: State, prs: { HubPR }, now: number, refreshedAt: string?) 
 function M.project(s: State)                 -- recomputes s.board from s.prs and the inputs
 function M.mode(s: State): Mode
 function M.reviewed(fix: AgentFix.Fix, reviewed: { [string]: boolean }): boolean
+
+-- Card actions (#7). All pure; the block runs the effects.
+function M.mergeMethodFor(s: State, pr: HubPR): "squash" | "merge" | "rebase"   -- the repo's resolved method when it is a GitHub one, else squash (viewerDefaultMergeMethod arrives with #10's detection)
+function M.askMerge(s: State, key: string): boolean      -- opens the "Squash and merge #n?" question; mode "confirm", `confirm = { kind = "merge", keys = { key } }`
+function M.cancelConfirm(s: State)
+function M.setBusy(s: State, key: string, text: string?)
+function M.dropPr(s: State, key: string)                 -- a merged PR leaves the board
+function M.branchUpdated(s: State, key: string)          -- behind = false and checks pending, until a refresh says more
+function M.linkTarget(s: State): LinkTarget              -- "empty" | "invalid" | "new" | "board": what the add field's text names (github.com links and owner/repo#123 only)
+function M.openLink(s: State) / M.closeLink(s: State, clear: boolean)   -- N: Review requests with mode "link"
+function M.show(s: State, key: string): boolean          -- selects a PR, clearing a search or filter that hides it
+function M.withAdded(added, ref): (Added?, string?)      -- hub.added with `ref`, or why not (the 50 cap)
+function M.canonicalAdded(added, prs): (Added, boolean)  -- keys an added PR by the repo's own spelling
+function M.unadd(s: State, key: string)                  -- X
+function M.openPlan(slug, number, generate, root: string?, why: string?, dir: string): OpenPlan   -- open this link, or refuse with this toast
 ```
 
 Every file in `src/view/hub/` exports `function M.view(s: State.State, motion: Ui.Motion): Node`, plus `M.layer(s): Node?` where it has an overlay.
@@ -691,6 +710,8 @@ export type Block = {
 	generate: boolean,                -- ⏎ opens the PR with the AI guide started
 	sched: { probedAt: number?, probeChanged: boolean, focusedAt: number?, checksAt: number?, refreshTried: number?, lastModified: string? },   -- what `Sync.schedule` reads; `refreshTried` keeps a failed refresh from retrying at once
 	closed: boolean,
+	refetch: boolean,                 -- a refresh was asked for while one ran (an add, remove, merge or update): run another when it ends
+	show: PRRef?,                     -- a PR just added by link: selected and scrolled to when the refresh brings it
 }
 export type Saved = { tab: Tab, sort: Sort, repositories: { string }?, folded: { [string]: boolean } }
 -- `BlockDef<Block>`: init(cx, args, saved), title, view, key, event, save — as src/block.luau:686.

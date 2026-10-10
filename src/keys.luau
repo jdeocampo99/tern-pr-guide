@@ -144,6 +144,7 @@ local function hubBoardKey(s: HubState.State, key: Key): Action?
 	if label == "F" then return act("hub-menu", "repositories") end
 	if label == "S" then return act("hub-menu", "sort") end
 	if label == "⇧M" then return act("hub-menu", "agent") end
+	if label == "N" then return act("hub-link") end
 	local card = HubState.selectedCard(s)
 	if card and label then
 		local main = card.main
@@ -167,6 +168,16 @@ function M.hubAction(s: HubState.State, key: Key): Action?
 		return nil
 	end
 	if mode == "menu" then return hubMenuKey(s, key) end
+	if mode == "link" then
+		if key.name == "enter" then return act(if key.shift then "hub-link-open" else "hub-link-add") end
+		if key.name == "escape" then return act("hub-link-clear") end
+		return nil
+	end
+	if mode == "confirm" then
+		if key.name == "enter" and (key.meta or key.ctrl) then return act("hub-confirm") end
+		if key.name == "escape" then return act("hub-confirm-cancel") end
+		return nil
+	end
 	if mode == "help" then
 		if key.name == "escape" or isQuestionMark(key) then return act("hub-help-close") end
 		return nil

@@ -3,6 +3,7 @@
 -- built from it. Views read `State.board` and never filter, sort or classify: every rule is `model`'s.
 -- Pure: no clock, no network, no Tern. `now` is passed in.
 local Fields = require("../text-field")
+local Links = require("../links")
 local Model = require("./model")
 
 type HubPR = Model.HubPR
@@ -45,6 +46,8 @@ export type Card = {
 	agent: AgentFixState?,
 	summary: Summary?,
 	merge: Model.MergeResolution?,
+	asking: string?, -- an inline question the card is waiting on ("Squash and merge #412?"); the split button gives way to Confirm and Cancel
+	busy: string?, -- an action in flight ("Merging…"); the split button gives way to it
 	ring: ("bad" | "good")?, -- the arrival ring, until it fades
 	selected: boolean,
 	marked: boolean,
@@ -92,6 +95,8 @@ export type State = {
 	details: { [string]: FixDetails },
 	summaries: { [string]: Summary },
 	merges: { [string]: Model.MergeResolution }, -- by repo
+	acted: { [string]: boolean }, -- cards the viewer just acted on (merged, updated): their arrival is not toasted
+	busy: { [string]: string }, -- by card key: the action in flight
 	refreshedAt: string?,
 	loading: boolean,
 	error: Model.Error?,
@@ -105,6 +110,8 @@ export type State = {
 export type MenuRow = { label: string, sub: string?, count: number?, on: boolean, kind: "choice" | "check" | "clear" }
 
 local M = {}
+
+local askingOf: (s: State, pr: HubPR) -> string?
 
 M.TABS = {
 	{ id = "mine" :: Tab, label = "Your pull requests" },
@@ -169,7 +176,7 @@ function M.new(prs: { HubPR }, now: number, saved: any): State
 		prs = prs, now = now, board = emptyBoard(tab), tab = tab, selected = nil, marked = {},
 		repositories = repositories, sort = sort, search = Fields.create(""), link = Fields.create(""),
 		mode = "board", menu = nil, menuCursor = 1, confirm = nil, folded = folded, recent = {}, walking = false,
-		ringed = {}, agents = {}, details = {}, summaries = {}, merges = {},
+		ringed = {}, agents = {}, details = {}, summaries = {}, merges = {}, acted = {}, busy = {},
 		refreshedAt = nil, loading = false, error = nil, agent = nil, narrow = false,
 		keyed = false, born = {}, booted = false,
 	}
@@ -304,12 +311,36 @@ local function chipsFor(pr: HubPR, placement: Model.Placement, now: number): ({ 
 	return chips, detail, kind
 end
 
+local MERGE_LABELS: { [string]: string } = { squash = "Squash and merge", merge = "Create a merge commit", rebase = "Rebase and merge" }
+
+-- The repo's GitHub merge method: the resolved one when it is squash, merge or rebase, else squash
+-- (viewerDefaultMergeMethod arrives with the method detection).
+function M.mergeMethodFor(s: State, pr: HubPR): "squash" | "merge" | "rebase"
+	local resolved = s.merges[pr.repo]
+	local kind = if resolved then resolved.method.kind else "squash"
+	if kind == "merge" or kind == "rebase" then return kind end
+	return "squash"
+end
+
+function M.mergeLabel(kind: string): string
+	return MERGE_LABELS[kind] or MERGE_LABELS.squash
+end
+
+function askingOf(s: State, pr: HubPR): string?
+	local confirm = s.confirm
+	if confirm and confirm.kind == "merge" and confirm.keys[1] == pr.key then
+		return M.mergeLabel(M.mergeMethodFor(s, pr)) .. " #" .. pr.number .. "?"
+	end
+	return nil
+end
+
 local function toCard(pr: HubPR, placement: Model.Placement, s: State): Card
 	local main, more = actionsFor(pr, placement.column, placement.reasons)
 	local chips, detail, detailKind = chipsFor(pr, placement, s.now)
 	return {
 		pr = pr, chips = chips, detail = detail, detailKind = detailKind, column = placement.column, reasons = placement.reasons, main = main, more = more,
 		agent = s.agents[pr.key], summary = s.summaries[pr.key], merge = s.merges[pr.repo],
+		asking = askingOf(s, pr), busy = s.busy[pr.key],
 		ring = s.ringed[pr.key], selected = s.selected == pr.key, marked = s.marked[pr.key] == true,
 	}
 end
@@ -463,6 +494,9 @@ local function refreshSelection(s: State)
 end
 
 function M.select(s: State, key: string?)
+	-- Choosing another card drops an inline question about the first, and leaves the add field.
+	if s.confirm and (key == nil or s.confirm.keys[1] ~= key) then M.cancelConfirm(s) end
+	if s.mode == "link" and key ~= nil then s.mode = "board" end
 	s.selected = key
 	refreshSelection(s)
 end
@@ -718,6 +752,196 @@ function M.agentLabel(s: State): string
 	if not agent then return "Agent model" end
 	local name = string.match(agent.model, "[^/]+$") or agent.model
 	return if agent.effort then name .. " · " .. agent.effort else name
+end
+
+-- Card actions --------------------------------------------------------------------------------------------
+
+-- Opens the merge question on the card `key` when it offers Merge and nothing else is running on it.
+function M.askMerge(s: State, key: string): boolean
+	local card = M.card(s, key)
+	if not card or not card.main or card.main.act ~= "card-merge" or s.busy[key] then return false end
+	M.select(s, key)
+	s.confirm = { kind = "merge", keys = { key } }
+	s.mode, s.menu = "confirm", nil
+	M.project(s)
+	return true
+end
+
+function M.cancelConfirm(s: State)
+	local had = s.confirm ~= nil
+	s.confirm = nil
+	if s.mode == "confirm" then s.mode = "board" end
+	if had then M.project(s) end
+end
+
+-- Marks `key` as running `text`, or clears it with nil.
+function M.setBusy(s: State, key: string, text: string?)
+	s.busy[key] = text
+	M.project(s)
+end
+
+-- Takes the pull request off the board (merged, or removed from a refresh the viewer just made).
+function M.dropPr(s: State, key: string)
+	local kept: { HubPR } = {}
+	for _, pr in s.prs do
+		if pr.key ~= key then table.insert(kept, pr) end
+	end
+	s.prs = kept
+	s.busy[key] = nil
+	M.project(s)
+end
+
+-- Updating the branch makes its checks run again: the card waits on them until a refresh says otherwise.
+function M.branchUpdated(s: State, key: string)
+	for _, pr in s.prs do
+		if pr.key == key then
+			pr.behind = false
+			pr.checks = { state = "pending", passing = 0, failing = 0, pending = 0 }
+		end
+	end
+	s.busy[key] = nil
+	M.project(s)
+end
+
+-- Removes a pull request the viewer added by link: it leaves the board unless it is on it for another
+-- reason, in which case only the "Added by you" mark goes. A refresh settles the rest.
+function M.unadd(s: State, key: string)
+	for _, pr in s.prs do
+		if pr.key == key then
+			pr.addedByMe = false
+			if not pr.reviews.requestedMe and pr.reviews.mine == nil then return M.dropPr(s, key) end
+		end
+	end
+	M.project(s)
+end
+
+-- Add by link ---------------------------------------------------------------------------------------------
+
+M.ADDED_CAP = 50
+
+export type LinkTarget =
+	{ kind: "empty" }
+	| { kind: "invalid" }
+	| { kind: "new", repo: string, number: number }
+	| { kind: "board", repo: string, number: number, pr: HubPR }
+
+-- The pull request the add field's text names: a github.com pull request link, or `owner/repo#123`.
+local function parseRef(text: string): Model.PRRef?
+	local trimmed = string.match(text, "^%s*(.-)%s*$") :: string
+	-- A link pasted without its scheme ("github.com/owner/repo/pull/123") is the same link.
+	local lowered = string.lower(trimmed)
+	if string.find(lowered, "^github%.com/") or string.find(lowered, "^www%.github%.com/") then trimmed = "https://" .. trimmed end
+	local repo: string?
+	local number: number?
+	local host = Links.linkHost(trimmed)
+	if host then
+		local lowerHost = string.lower(host)
+		if lowerHost ~= "github.com" and lowerHost ~= "www.github.com" then return nil end
+		repo, number = Links.linkRepo(trimmed), Links.named(trimmed)
+	else
+		local r, n = string.match(trimmed, "^([%w_.%-]+/[%w_.%-]+)#(%d+)$")
+		repo, number = r, tonumber(n)
+	end
+	if repo == nil or number == nil or string.match(repo, "^[%w_.%-]+/[%w_.%-]+$") == nil then return nil end
+	if (number :: number) < 1 then return nil end
+	return { repo = repo, number = number :: number }
+end
+
+-- The pull request on the board named by `repo` (any case) and `number`.
+function M.find(s: State, repo: string, number: number): HubPR?
+	for _, pr in s.prs do
+		if pr.number == number and string.lower(pr.repo) == string.lower(repo) then return pr end
+	end
+	return nil
+end
+
+function M.linkTarget(s: State): LinkTarget
+	local text = s.link.text
+	if string.match(text, "^%s*$") then return { kind = "empty" } end
+	local ref = parseRef(text)
+	if not ref then return { kind = "invalid" } end
+	local pr = M.find(s, ref.repo, ref.number)
+	if pr then return { kind = "board", repo = pr.repo, number = pr.number, pr = pr } end
+	return { kind = "new", repo = ref.repo, number = ref.number }
+end
+
+-- N: the add field, on Review requests.
+function M.openLink(s: State)
+	s.menu = nil
+	M.setTab(s, "review")
+	s.mode = "link"
+end
+
+-- Leaves the add field; `clear` empties it too.
+function M.closeLink(s: State, clear: boolean)
+	if s.mode == "link" then s.mode = "board" end
+	if clear and s.link.text ~= "" then s.link = Fields.create("") end
+end
+
+-- Brings the pull request `key` into view and selects it: its tab, with the search and repository filter
+-- cleared if they hide it, and the Inactive fold open if it sits there. Returns whether it was found.
+function M.show(s: State, key: string): boolean
+	for _, pr in s.prs do
+		if pr.key == key then
+			local placement = Model.placement(pr, s.now)
+			s.tab = placement.tab
+			s.search = Fields.create("")
+			s.repositories = nil
+			if placement.column == "inactive" then s.folded.inactive = false end
+			s.mode, s.menu = "board", nil
+			M.project(s)
+			M.select(s, key)
+			return true
+		end
+	end
+	return false
+end
+
+-- Adds `ref` to the added set. Returns the new set, or nil with why it can't (the set is full).
+function M.withAdded(added: { [string]: Model.PRRef }, ref: Model.PRRef): ({ [string]: Model.PRRef }?, string?)
+	local key = ref.repo .. "#" .. ref.number
+	if added[key] then return added, nil end
+	local count = 0
+	for _ in added do count += 1 end
+	if count >= M.ADDED_CAP then
+		return nil, M.ADDED_CAP .. " pull requests are added already. Remove one first."
+	end
+	local out = table.clone(added)
+	out[key] = ref
+	return out, nil
+end
+
+-- `added` with each entry that names a fetched PR under that PR's own spelling of the repo ("Acme/API#5"
+-- becomes "acme/api#5"). Returns the set and whether anything changed.
+function M.canonicalAdded(added: { [string]: Model.PRRef }, prs: { HubPR }): ({ [string]: Model.PRRef }, boolean)
+	local out = table.clone(added)
+	local changed = false
+	for _, pr in prs do
+		local wrong = nil
+		for key, ref in added do
+			if key ~= pr.key and ref.number == pr.number and string.lower(ref.repo) == string.lower(pr.repo) then wrong = key end
+		end
+		if wrong then
+			out[wrong] = nil
+			out[pr.key] = { repo = pr.repo, number = pr.number }
+			changed = true
+		end
+	end
+	return out, changed
+end
+
+-- Opening a pull request ----------------------------------------------------------------------------------
+
+export type OpenPlan = { kind: "open", url: string } | { kind: "refuse", text: string, sub: string }
+
+-- What opening PR `number` of `slug` does, given what the block found: `root` is a checkout of the repo (or
+-- nil), `why` is why PR Guide can't keep its own copy (or nil when it can), `dir` is the folder searched.
+function M.openPlan(slug: string, number: number, generate: boolean, root: string?, why: string?, dir: string): OpenPlan
+	if root then return { kind = "open", url = Links.openLink(slug, number, root, generate, false) } end
+	if why or dir == "" then
+		return { kind = "refuse", text = "Couldn't open #" .. number .. " of " .. slug, sub = why or "No folder to look for a checkout in." }
+	end
+	return { kind = "open", url = Links.openLink(slug, number, dir, generate, true) }
 end
 
 return M
