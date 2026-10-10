@@ -27,6 +27,7 @@ export type Local = { added: Added, tandem: { [string]: boolean } }
 export type MergeRecord = {
 	schema: number, user: MergeMethod?, declared: MergeMethod?, learned: MergeMethod?,
 	learnedAnswered: boolean, checkedAt: string?,
+	viewerDefault: string?, -- "squash", "merge" or "rebase": viewerDefaultMergeMethod when detection ran
 }
 export type Opened = { repo: string, number: number, title: string, author: string, at: string } -- hub.recent, newest first, at most RECENT_CAP
 
@@ -146,7 +147,8 @@ function M.merge(fresh: Refresh, previous: Cache?, localFacts: Local, now: numbe
 		pr.tandem = localFacts.tandem[pr.key] == true
 		pr.addedByMe = localFacts.added[pr.key] ~= nil
 		local old = before[pr.key]
-		if pr.pending == nil and old and old.pending and old.headOid == pr.headOid then pr.pending = old.pending end
+		local removed = pr.mergeFailure ~= nil and pr.mergeFailure.kind == "queue" -- the queue dropped it: nothing is in flight
+		if pr.pending == nil and old and old.pending and old.headOid == pr.headOid and not removed then pr.pending = old.pending end
 		table.insert(prs, pr)
 	end
 	local toReview, needFixes = countsOf(prs, now)
@@ -179,6 +181,7 @@ function M.loadMerge(raw: any): MergeRecord?
 	return {
 		schema = 1, user = validMethod(raw.user), declared = validMethod(raw.declared), learned = validMethod(raw.learned),
 		learnedAnswered = raw.learnedAnswered == true, checkedAt = if isString(raw.checkedAt) then raw.checkedAt else nil,
+		viewerDefault = if raw.viewerDefault == "squash" or raw.viewerDefault == "merge" or raw.viewerDefault == "rebase" then raw.viewerDefault else nil,
 	}
 end
 

@@ -1,0 +1,13 @@
+# Once per repo (the result is cached in kv as hub.merge.<owner>/<repo>): what the repo declares and the habit of its last 8 merges.
+# `mergeQueue` is null without a queue, `aviator` is null without .aviator/config.yml. The cost is read from the response's rateLimit.
+query MergeDetect($owner: String!, $name: String!) {
+  rateLimit { cost remaining limit resetAt }
+  repository(owner: $owner, name: $name) {
+    viewerDefaultMergeMethod
+    mergeQueue { id }
+    aviator: object(expression: "HEAD:.aviator/config.yml") { __typename }
+    pullRequests(states: MERGED, first: 8, orderBy: { field: UPDATED_AT, direction: DESC }) {
+      nodes { mergedAt mergedBy { __typename login } comments(last: 5) { nodes { createdAt body author { __typename login } } } }
+    }
+  }
+}

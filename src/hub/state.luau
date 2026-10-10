@@ -47,12 +47,14 @@ export type Card = {
 	agent: AgentFixState?,
 	summary: Summary?,
 	merge: Model.MergeResolution?,
+	note: string?, -- a merge in flight ("Commented /merge · waiting for the merge"); shown under the title
 	asking: string?, -- an inline question the card is waiting on ("Squash and merge #412?"); the split button gives way to Confirm and Cancel
 	busy: string?, -- an action in flight ("Merging…"); the split button gives way to it
 	ring: Ring?, -- the arrival ring or wash; the "-out" kinds are fading
 	selected: boolean,
 	marked: boolean,
 }
+export type MethodEdit = { repo: string, kind: "comment" | "label", field: Fields.Field }
 export type RepoOption = { repo: string, count: number, on: boolean }
 
 -- Everything a view reads, built by `project`.
@@ -87,7 +89,8 @@ export type State = {
 	mode: Mode,
 	menu: MenuId?,
 	menuCursor: number,
-	confirm: { kind: string, keys: { string } }?,
+	confirm: { kind: string, keys: { string } }?, -- kind "merge" (a GitHub method) or "learned" (a suggested comment command)
+	methodEdit: MethodEdit?, -- the merge menu is asking for a command or a label
 	folded: { [string]: boolean }, -- true: the fold is closed. Inactive and Recently opened start closed
 	recent: { Opened }, -- hub.recent, newest first; the block sets it, `project` builds the Review requests fold from it
 	walking: boolean, -- Next up is being walked: the banner shows "2 of 11"
@@ -175,7 +178,7 @@ function M.new(prs: { HubPR }, now: number, saved: any): State
 	local s: State = {
 		prs = prs, now = now, board = emptyBoard(tab), tab = tab, selected = nil, marked = {},
 		repositories = repositories, sort = sort, search = Fields.create(""), link = Fields.create(""),
-		mode = "board", menu = nil, menuCursor = 1, confirm = nil, folded = folded, recent = {}, walking = false,
+		mode = "board", menu = nil, menuCursor = 1, confirm = nil, methodEdit = nil, folded = folded, recent = {}, walking = false,
 		ringed = {}, agents = {}, details = {}, summaries = {}, merges = {}, acted = {}, busy = {},
 		refreshedAt = nil, loading = false, error = nil, agent = nil,
 		keyed = false, born = {}, booted = false,
@@ -215,7 +218,7 @@ local function action(act: string, label: string, key: string?): CardAction
 	return { act = act, value = nil, label = label, key = key, confirm = false }
 end
 
-local function actionsFor(pr: HubPR, column: Column, reasons: { Model.Reason }): (CardAction?, { CardAction })
+local function actionsFor(pr: HubPR, column: Column, reasons: { Model.Reason }, merge: Model.MergeResolution?): (CardAction?, { CardAction })
 	if column == "needs_fixes" then
 		local feedback = false
 		for _, reason in reasons do
@@ -227,6 +230,12 @@ local function actionsFor(pr: HubPR, column: Column, reasons: { Model.Reason }):
 	elseif column == "in_review" then
 		return action("card-copy", "Copy link", "C"), {}
 	elseif column == "ready" then
+		if pr.pending then
+			-- A merge in flight: only Cancel merge, and only when the method can be taken back.
+			local method = if merge then merge.method else nil
+			if method and method.kind == "comment" and not method.cancel then return nil, {} end
+			return action("card-cancel", "Cancel merge", "M"), {}
+		end
 		if pr.behind then return action("card-update", "Update branch", "U"), { action("card-method", "Merge method", ",") } end
 		return action("card-merge", "Merge", "M"), { action("card-method", "Merge method", ",") }
 	elseif column == "to_review" then
@@ -326,20 +335,50 @@ function M.mergeLabel(kind: string): string
 	return MERGE_LABELS[kind] or MERGE_LABELS.squash
 end
 
+-- What a merge in flight reads on its card.
+function M.pendingNote(s: State, pr: HubPR): string?
+	local pending = pr.pending
+	if not pending then return nil end
+	local resolved = s.merges[pr.repo]
+	local method = if resolved then resolved.method else nil
+	if pending.method == "queue" then return "In the merge queue" end
+	if pending.method == "label" then
+		return "Labeled " .. (if method and method.kind == "label" then method.label else "for merge") .. " · waiting for the merge"
+	end
+	local command = if method and method.kind == "comment" then method.command else "/merge"
+	if string.sub(command, 1, 8) == "/aviator" then return "Queued in Aviator" end
+	return "Commented " .. command .. " · waiting for the merge"
+end
+
+-- What M does on a card: a GitHub method asks first ("confirm"), a suggested comment asks once ("ask"), and
+-- a method the repo or the viewer chose (comment, label, queue) just runs: it can be cancelled.
+function M.mergeStep(s: State, pr: HubPR): "confirm" | "ask" | "run"
+	local resolved = s.merges[pr.repo]
+	if resolved == nil then return "confirm" end
+	local kind = resolved.method.kind
+	if resolved.ask then return "ask" end
+	if kind == "squash" or kind == "merge" or kind == "rebase" then return "confirm" end
+	return "run"
+end
+
 function askingOf(s: State, pr: HubPR): string?
 	local confirm = s.confirm
-	if confirm and confirm.kind == "merge" and confirm.keys[1] == pr.key then
-		return M.mergeLabel(M.mergeMethodFor(s, pr)) .. " #" .. pr.number .. "?"
+	if confirm and confirm.keys[1] == pr.key then
+		if confirm.kind == "merge" then return M.mergeLabel(M.mergeMethodFor(s, pr)) .. " #" .. pr.number .. "?" end
+		local resolved = s.merges[pr.repo]
+		if confirm.kind == "learned" and resolved and resolved.method.kind == "comment" then
+			return "Comment " .. resolved.method.command .. ", as this repository usually does?"
+		end
 	end
 	return nil
 end
 
 local function toCard(pr: HubPR, placement: Model.Placement, s: State): Card
-	local main, more = actionsFor(pr, placement.column, placement.reasons)
+	local main, more = actionsFor(pr, placement.column, placement.reasons, s.merges[pr.repo])
 	local chips, detail, detailKind = chipsFor(pr, placement, s.now)
 	return {
 		pr = pr, chips = chips, detail = detail, detailKind = detailKind, column = placement.column, reasons = placement.reasons, main = main, more = more,
-		agent = s.agents[pr.key], summary = s.summaries[pr.key], merge = s.merges[pr.repo],
+		agent = s.agents[pr.key], summary = s.summaries[pr.key], merge = s.merges[pr.repo], note = M.pendingNote(s, pr),
 		asking = askingOf(s, pr), busy = s.busy[pr.key],
 		ring = s.ringed[pr.key], selected = s.selected == pr.key, marked = s.marked[pr.key] == true,
 	}
@@ -689,6 +728,16 @@ function M.menuRows(s: State): { MenuRow }
 			table.insert(rows, row(shortRepo(option.repo), nil, option.count, option.on, "check"))
 		end
 		if s.repositories then table.insert(rows, row("Clear filter", nil, nil, false, "clear")) end
+	elseif s.menu == "merge" then
+		local repo = M.mergeRepo(s)
+		local current = if repo and s.merges[repo] then s.merges[repo].method else nil
+		for _, kind in M.MERGE_KINDS do
+			local sub: string? = nil
+			if current and current.kind == kind.id then
+				if current.kind == "comment" then sub = current.command elseif current.kind == "label" then sub = current.label end
+			end
+			table.insert(rows, row(kind.label, sub, nil, current ~= nil and current.kind == kind.id, "choice"))
+		end
 	elseif s.menu == "actions" then
 		local card = M.selectedCard(s)
 		if card then
@@ -714,11 +763,19 @@ function M.openMenu(s: State, menu: MenuId)
 		for index, model in s.agent.models do
 			if model.selector == s.agent.model then s.menuCursor = index end
 		end
+	elseif menu == "merge" then
+		local repo = M.mergeRepo(s)
+		local current = if repo and s.merges[repo] then s.merges[repo].method.kind else "squash"
+		for index, kind in M.MERGE_KINDS do
+			if kind.id == current then s.menuCursor = index end
+		end
 	end
+	s.methodEdit = nil
 end
 
 function M.closeMenu(s: State)
 	s.menu = nil
+	s.methodEdit = nil
 	if s.mode == "menu" then s.mode = "board" end
 end
 
@@ -798,6 +855,75 @@ function M.agentLabel(s: State): string
 	return if agent.effort then name .. " · " .. agent.effort else name
 end
 
+-- The merge chooser ----------------------------------------------------------------------------------------
+
+M.MERGE_KINDS = {
+	{ id = "squash", label = "Squash and merge" }, { id = "merge", label = "Create a merge commit" },
+	{ id = "rebase", label = "Rebase and merge" }, { id = "queue", label = "Merge when ready" },
+	{ id = "comment", label = "Comment a command" }, { id = "label", label = "Add a label" },
+}
+
+-- Where the repo's current setting came from, for the chooser's foot.
+local SOURCES: { [string]: string } = {
+	user = "Set by you", declared = "Declared by the repository", learned = "Learned from the last 8 merges",
+	viewer = "Your GitHub default",
+}
+
+function M.mergeSource(s: State): string?
+	local repo = M.mergeRepo(s)
+	local resolved = if repo then s.merges[repo] else nil
+	return if resolved then SOURCES[resolved.source] else nil
+end
+
+-- The repository the open merge menu is about: the selected card's.
+function M.mergeRepo(s: State): string?
+	local card = M.selectedCard(s)
+	return if card then card.pr.repo else nil
+end
+
+-- Sets the repo's resolution (the block resolves it from kv evidence).
+function M.setMerge(s: State, repo: string, resolution: Model.MergeResolution)
+	s.merges[repo] = resolution
+	M.project(s)
+end
+
+-- Row `index` of the merge menu wants text (a command, a label): the menu shows a field, prefilled with the current one.
+function M.beginMethodEdit(s: State, kind: "comment" | "label")
+	local repo = M.mergeRepo(s)
+	if not repo then return end
+	local current = if s.merges[repo] then s.merges[repo].method else nil
+	local text = ""
+	if current and current.kind == "comment" and kind == "comment" then
+		text = current.command .. (if current.cancel then " | " .. current.cancel else "")
+	elseif current and current.kind == "label" and kind == "label" then
+		text = current.label
+	end
+	s.methodEdit = { repo = repo, kind = kind, field = Fields.create(text) }
+end
+
+function M.cancelMethodEdit(s: State)
+	s.methodEdit = nil
+end
+
+local function trimmed(text: string): string
+	local start = string.gsub(text, "^%s+", "")
+	return (string.gsub(start, "%s+$", ""))
+end
+
+-- The method the field names: "/merge" or "/merge | /cancel" for a comment, a label's name for a label; nil when empty.
+function M.methodOfEdit(s: State): Model.MergeMethod?
+	local edit = s.methodEdit
+	if not edit then return nil end
+	local text = trimmed(edit.field.text)
+	if text == "" then return nil end
+	if edit.kind == "label" then return { kind = "label", label = text } end
+	local command, cancel = string.match(text, "^(.-)%s*|%s*(.*)$")
+	command = trimmed(command or text)
+	if command == "" then return nil end
+	cancel = if cancel and trimmed(cancel) ~= "" then trimmed(cancel) else nil
+	return { kind = "comment", command = command, cancel = cancel }
+end
+
 -- Card actions --------------------------------------------------------------------------------------------
 
 -- Opens the merge question on the card `key` when it offers Merge and nothing else is running on it.
@@ -805,7 +931,7 @@ function M.askMerge(s: State, key: string): boolean
 	local card = M.card(s, key)
 	if not card or not card.main or card.main.act ~= "card-merge" or s.busy[key] then return false end
 	M.select(s, key)
-	s.confirm = { kind = "merge", keys = { key } }
+	s.confirm = { kind = if M.mergeStep(s, card.pr) == "ask" then "learned" else "merge", keys = { key } }
 	s.mode, s.menu = "confirm", nil
 	M.project(s)
 	return true
@@ -821,6 +947,14 @@ end
 -- Marks `key` as running `text`, or clears it with nil.
 function M.setBusy(s: State, key: string, text: string?)
 	s.busy[key] = text
+	M.project(s)
+end
+
+-- Records (or clears, with nil) a merge asked for through a queue, comment or label.
+function M.setPending(s: State, key: string, pending: Model.PendingMerge?)
+	for _, pr in s.prs do
+		if pr.key == key then pr.pending = pending end
+	end
 	M.project(s)
 end
 

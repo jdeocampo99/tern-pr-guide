@@ -116,6 +116,12 @@ end
 
 local function hubMenuKey(s: HubState.State, key: Key): Action?
 	local name = key.name
+	-- The merge menu is asking for a command or a label: ⏎ saves, Esc goes back to the list, the rest is typed.
+	if s.methodEdit then
+		if name == "enter" then return act("hub-method-save") end
+		if name == "escape" then return act("hub-method-cancel") end
+		return nil
+	end
 	if name == "down" or name == "j" then return act("hub-menu-move", 1) end
 	if name == "up" or name == "k" then return act("hub-menu-move", -1) end
 	if name == "enter" then return act("hub-menu-enter") end

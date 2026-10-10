@@ -5,8 +5,8 @@
 -- already decoded tables and never throw on a missing field. Each call returns its own rate-limit
 -- envelope; the caller sums them. Failures are `Error` values, never thrown.
 --
--- Not built yet (each lands with the issue that first needs it): `details`, `history`, `detect`,
--- `parseDetails` and the `commands` builders other than merge and updateBranch.
+-- Not built yet (each lands with the issue that first needs it): `details`, `history`, `parseDetails`
+-- and the `commands` builders other than the merge, cancel-merge and update-branch ones.
 local Model = require("./hub/model")
 
 type HubPR = Model.HubPR
@@ -17,6 +17,8 @@ type Refresh = Model.Refresh
 type PRRef = Model.PRRef
 type OpenThread = Model.OpenThread
 type MergeMethod = Model.MergeMethod
+type MergeFailure = Model.MergeFailure
+type PendingMerge = Model.PendingMerge
 
 -- What `tern.process.run` gives and takes, minus the `cx`. src/fetch.luau exports the real runner.
 export type Out = { status: number, stdout: string, stderr: string, timed_out: boolean }
@@ -27,11 +29,14 @@ export type RefreshRequest = { added: { PRRef }, previous: { HubPR } }
 export type Probe = { changed: boolean, lastModified: string?, pollSeconds: number? }
 export type ChecksUpdate = { byId: { [string]: { headOid: string, checks: Checks } }, rateLimit: RateLimit }
 export type Command = { argv: { string }, stdin: string? }
+-- What a repo declares and what its last merges show. `checkedAt` is "" here: the block stamps it, because this module reads no clock.
+export type Detected = { declared: MergeMethod?, learned: MergeMethod?, viewerDefault: "squash" | "merge" | "rebase", checkedAt: string }
 
 export type Client = {
 	refresh: (req: RefreshRequest, done: (value: Refresh?, err: Error?) -> ()) -> (),
 	probe: (since: string?, done: (value: Probe?, err: Error?) -> ()) -> (),
 	checks: (ids: { string }, done: (value: ChecksUpdate?, err: Error?) -> ()) -> (),
+	detect: (repo: string, done: (value: Detected?, err: Error?) -> ()) -> (),
 	run: (command: Command, done: (stdout: string?, err: Error?) -> ()) -> (),
 }
 
@@ -104,6 +109,33 @@ local CHECKS_QUERY = [=[
 query Checks($ids: [ID!]!) {
   rateLimit { cost remaining limit resetAt }
   nodes(ids: $ids) { ... on PullRequest { id number headRefOid commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 0) { checkRunCountsByState { state count } statusContextCountsByState { state count } } } } } } } }
+}]=]
+
+-- These two mirror docs/hub/queries/merge-detect.graphql and merge-failure.graphql the same way.
+local DETECT_QUERY = [=[
+query MergeDetect($owner: String!, $name: String!) {
+  rateLimit { cost remaining limit resetAt }
+  repository(owner: $owner, name: $name) {
+    viewerDefaultMergeMethod
+    mergeQueue { id }
+    aviator: object(expression: "HEAD:.aviator/config.yml") { __typename }
+    pullRequests(states: MERGED, first: 8, orderBy: { field: UPDATED_AT, direction: DESC }) {
+      nodes { mergedAt mergedBy { __typename login } comments(last: 5) { nodes { createdAt body author { __typename login } } } }
+    }
+  }
+}]=]
+
+local FAILURE_QUERY = [=[
+query MergeFailure($ids: [ID!]!) {
+  rateLimit { cost remaining limit resetAt }
+  nodes(ids: $ids) { ... on PullRequest { id headRefOid
+    comments(last: 10) { nodes { createdAt body author { __typename login } } }
+    commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 50) { nodes {
+      __typename
+      ... on CheckRun { name conclusion completedAt }
+      ... on StatusContext { context state createdAt }
+    } } } } } }
+  } }
 }]=]
 
 local GRAPHQL_MS = 60_000
@@ -448,17 +480,173 @@ end
 -- Command builders: exact argv, no network. `Client.run` executes them.
 local MERGE_FLAGS: { [string]: string } = { squash = "--squash", merge = "--merge", rebase = "--rebase" }
 
+local function prArgv(verb: string, pr: HubPR, ...: string): { string }
+	local argv = { "gh", "pr", verb, tostring(pr.number), "--repo", pr.repo }
+	for _, word in { ... } do table.insert(argv, word) end
+	return argv
+end
+
 M.commands = {
-	-- The three GitHub methods only; a queue, comment or label method is #10's and raises here.
+	-- Merging asks the repo's own tool: GitHub for squash, merge and rebase, `--auto` for the queue, a comment, or a label.
 	merge = function(pr: HubPR, method: MergeMethod): Command
-		local flag = MERGE_FLAGS[method.kind]
-		if flag == nil then error("commands.merge: " .. method.kind .. " is not a GitHub merge method", 0) end
-		return { argv = { "gh", "pr", "merge", tostring(pr.number), "--repo", pr.repo, flag }, stdin = nil }
+		if method.kind == "queue" then return { argv = prArgv("merge", pr, "--auto"), stdin = nil } end
+		if method.kind == "comment" then return { argv = prArgv("comment", pr, "--body", method.command), stdin = nil } end
+		if method.kind == "label" then return { argv = prArgv("edit", pr, "--add-label", method.label), stdin = nil } end
+		return { argv = prArgv("merge", pr, MERGE_FLAGS[method.kind]), stdin = nil }
+	end,
+	-- Takes back a merge asked for through a queue, a comment (when the method has a cancel) or a label. A GitHub
+	-- merge happens at once and has nothing to cancel, so those raise, as does a comment method without a cancel.
+	cancelMerge = function(pr: HubPR, method: MergeMethod): Command
+		if method.kind == "queue" then return { argv = prArgv("merge", pr, "--disable-auto"), stdin = nil } end
+		if method.kind == "comment" and method.cancel then
+			return { argv = prArgv("comment", pr, "--body", method.cancel), stdin = nil }
+		end
+		if method.kind == "label" then return { argv = prArgv("edit", pr, "--remove-label", method.label), stdin = nil } end
+		error("commands.cancelMerge: " .. method.kind .. " has nothing to cancel", 0)
 	end,
 	updateBranch = function(pr: HubPR): Command
 		return { argv = { "gh", "pr", "update-branch", tostring(pr.number), "--repo", pr.repo }, stdin = nil }
 	end,
 }
+
+-- Merge failures and merge habits
+
+local FAILURE_WORDS = {
+	"fail", "blocked", "couldn't", "could not", "can't", "cannot", "unable", "conflict", "reject", "dequeue",
+	"removed from", "not mergeable", "error",
+}
+local LEARN_MIN = 3 -- a habit needs this many of the last 8 merges, and more than half of those read
+
+-- The first line that says something: not blank, not an HTML comment or a heading, with leading marks
+-- (">", "*", ":x:", emoji) dropped.
+local function replyLine(body: string): string?
+	for line in string.gmatch(body, "[^\r\n]+") do
+		local text = string.match(line, "^%s*(.-)%s*$") :: string
+		local skip = text == "" or string.sub(text, 1, 4) == "<!--" or string.sub(text, 1, 1) == "#"
+		if not skip then
+			text = string.gsub(text, "^:[%w_+%-]+:%s*", "")
+			text = string.match(text, "^[^%w]*(.-)$") :: string
+			if text ~= "" then
+				if #text > 140 then text = string.sub(text, 1, 139) .. "…" end
+				return text
+			end
+		end
+	end
+	return nil
+end
+
+local function mentionsFailure(line: string): boolean
+	local lower = string.lower(line)
+	for _, word in FAILURE_WORDS do
+		if string.find(lower, word, 1, true) then return true end
+	end
+	return false
+end
+
+local function isBot(author: any): boolean
+	local who = tbl(author)
+	if who == nil then return false end
+	local login = string.lower(str(who.login) or "")
+	return who.__typename == "Bot" or string.find(login, "bot", 1, true) ~= nil or string.find(login, "aviator", 1, true) ~= nil
+end
+
+-- A check that failed after the merge was asked for: its name, the first by name.
+local function failedCheck(node: any, since: string): string?
+	local commit = list(tbl(node.commits) and node.commits.nodes)[1]
+	local rollup = commit and tbl(tbl(commit.commit) and commit.commit.statusCheckRollup)
+	local contexts = rollup and tbl(rollup.contexts)
+	local found: { string } = {}
+	for _, row in list(contexts and contexts.nodes) do
+		local name, at, failed
+		if row.__typename == "StatusContext" then
+			name, at, failed = str(row.context), str(row.createdAt), FAILING_STATUSES[str(row.state) or ""]
+		else
+			name, at, failed = str(row.name), str(row.completedAt), FAILING_RUNS[str(row.conclusion) or ""]
+		end
+		if name and failed and at and at > since then table.insert(found, name) end
+	end
+	table.sort(found)
+	return found[1]
+end
+
+-- Why a merge asked for at `pending.at` did not happen, from `merge-failure.graphql`'s node for the PR, or nil.
+-- Only what came after `pending.at` counts, so asking again clears an old failure. The newest bot reply wins:
+-- a reply from Aviator is `aviator`, from any other bot `bot`. Without a reply, a check that failed afterwards is
+-- `comment` for a comment merge and `check` for a label merge. A queue's own failures arrive with hub-f.
+function M.parseMergeFailure(raw: any, pending: PendingMerge): MergeFailure?
+	local node = tbl(raw)
+	if node == nil or pending.method == "queue" then return nil end
+	local newest: { createdAt: string, line: string, aviator: boolean }? = nil
+	for _, row in list(tbl(node.comments) and node.comments.nodes) do
+		local at, body = str(row.createdAt), str(row.body)
+		local line = if body then replyLine(body) else nil
+		if at and at > pending.at and line and isBot(row.author) and (newest == nil or at > newest.createdAt) then
+			local who = tbl(row.author)
+			local login = string.lower(str(who and who.login) or "")
+			newest = { createdAt = at, line = line, aviator = string.find(login, "aviator", 1, true) ~= nil or string.find(string.lower(line), "aviator", 1, true) ~= nil }
+		end
+	end
+	if newest and mentionsFailure(newest.line) then
+		return { kind = if newest.aviator then "aviator" else "bot", reason = newest.line }
+	end
+	local check = failedCheck(node, pending.at)
+	if check == nil then return nil end
+	if string.find(string.lower(check), "aviator", 1, true) then return { kind = "aviator", reason = check .. " failed" } end
+	return { kind = if pending.method == "comment" then "comment" else "check", reason = check }
+end
+
+local ENUM_METHODS: { [string]: "squash" | "merge" | "rebase" } = { SQUASH = "squash", MERGE = "merge", REBASE = "rebase" }
+
+-- "/merge" from a comment's first line, when it is a short slash command.
+local function slashCommand(body: string): string?
+	local line = string.match(body, "^%s*([^\r\n]*)")
+	local command = line and string.match(line, "^(/[%w_%-]+[%w_%- ]*)%s*$")
+	if command and #command <= 40 then return command end
+	return nil
+end
+
+-- A repo's declared merge tool and the habit of its last merges. Declared: `.aviator/config.yml` (comment
+-- `/aviator merge`, cancelled by `/aviator cancel`), else a merge queue. Learned: a bot merged after a person
+-- commented the same slash command, in more than half of the merged PRs and at least LEARN_MIN of them.
+function M.parseDetect(raw: any): Detected?
+	local data = tbl(raw) and tbl(raw.data)
+	local repo = data and tbl(data.repository)
+	if data == nil or repo == nil then return nil end
+	local declared: MergeMethod? = nil
+	if tbl(repo.aviator) then
+		declared = { kind = "comment", command = "/aviator merge", cancel = "/aviator cancel" }
+	elseif tbl(repo.mergeQueue) then
+		declared = { kind = "queue" }
+	end
+	local merged = list(tbl(repo.pullRequests) and repo.pullRequests.nodes)
+	local counts: { [string]: number } = {}
+	for _, pr in merged do
+		local mergedAt = str(pr.mergedAt)
+		if mergedAt and isBot(pr.mergedBy) then
+			local latest: string? = nil
+			local command: string? = nil
+			for _, row in list(tbl(pr.comments) and pr.comments.nodes) do
+				local at, body = str(row.createdAt), str(row.body)
+				local who = tbl(row.author)
+				local slash = if body and not isBot(who) then slashCommand(body) else nil
+				if at and slash and at <= mergedAt and (latest == nil or at > latest) then latest, command = at, slash end
+			end
+			if command then counts[command] = (counts[command] or 0) + 1 end
+		end
+	end
+	local learned: MergeMethod? = nil
+	local best, bestCount = nil, 0
+	for command, count in counts do
+		if count > bestCount or (count == bestCount and best ~= nil and command < best) then best, bestCount = command, count end
+	end
+	if best and bestCount >= LEARN_MIN and bestCount * 2 > #merged then
+		learned = { kind = "comment", command = best, cancel = nil }
+	end
+	return {
+		declared = declared, learned = learned,
+		viewerDefault = ENUM_METHODS[str(repo.viewerDefaultMergeMethod) or ""] or "squash", checkedAt = "",
+	}
+end
 
 function M.client(run: Runner, decode: Decode): Client
 	-- Runs `argv` once and hands `done` its result, also when the runner throws.
@@ -502,6 +690,34 @@ function M.client(run: Runner, decode: Decode): Client
 		return ids
 	end
 
+	local function idArgs(ids: { string }): { string }
+		local args: { string } = {}
+		for _, id in ids do
+			table.insert(args, "-f")
+			table.insert(args, "ids[]=" .. id)
+		end
+		return args
+	end
+
+	local function previousOf(previous: { HubPR }, pr: HubPR): HubPR
+		for _, before in previous do
+			if before.id == pr.id then return before end
+		end
+		return pr
+	end
+
+	-- PRs with a comment or label merge in flight on the same head commit: the only ones worth a failure lookup.
+	-- A queue merge reports its own removal in hub-f, and a new head drops the merge.
+	local function inFlightMerges(prs: { HubPR }, previous: { HubPR }): { HubPR }
+		local out: { HubPR } = {}
+		for _, pr in prs do
+			local before = previousOf(previous, pr)
+			local pending = before.pending
+			if pending and pending.method ~= "queue" and before.headOid == pr.headOid then table.insert(out, pr) end
+		end
+		return out
+	end
+
 	local function refresh(req: RefreshRequest, done: (value: Refresh?, err: Error?) -> ())
 		graphql(hubQuery(req.added), {}, "gh api graphql: hub", "refresh pull requests", function(doc, err)
 			if err then return done(nil, err) end
@@ -513,13 +729,41 @@ function M.client(run: Runner, decode: Decode): Client
 				prs = hub.prs, viewer = hub.viewer, rateLimit = hub.rateLimit, calls = { hub.rateLimit },
 				truncated = hub.truncated, partial = nil,
 			}
-			local ids = threadsFor(hub.prs, req.previous)
-			if #ids == 0 then return done(result, nil) end
-			local args: { string } = {}
-			for _, id in ids do
-				table.insert(args, "-f")
-				table.insert(args, "ids[]=" .. id)
+			local function finish()
+				local inFlight = inFlightMerges(hub.prs, req.previous)
+				if #inFlight == 0 then return done(result, nil) end
+				local ids: { string } = {}
+				for _, pr in inFlight do table.insert(ids, pr.id) end
+				graphql(FAILURE_QUERY, idArgs(ids), "gh api graphql: merge failures", "check merges in flight", function(failDoc, failErr)
+					if failErr then
+						result.partial = result.partial or failErr
+						if failErr.rateLimit then
+							table.insert(result.calls, failErr.rateLimit)
+							result.rateLimit = failErr.rateLimit
+						end
+						return done(result, nil)
+					end
+					local data = tbl(failDoc) and tbl(failDoc.data)
+					local byId: { [string]: any } = {}
+					for _, node in list(data and data.nodes) do
+						local id = str(node.id)
+						if id then byId[id] = node end
+					end
+					for _, pr in inFlight do
+						local node, pending = byId[pr.id], previousOf(req.previous, pr).pending
+						if node and pending and str(node.headRefOid) == pr.headOid then
+							pr.mergeFailure = pr.mergeFailure or M.parseMergeFailure(node, pending)
+						end
+					end
+					local used = rateLimitOf(data and data.rateLimit) or NO_LIMIT
+					table.insert(result.calls, used)
+					result.rateLimit = used
+					done(result, nil)
+				end)
 			end
+			local ids = threadsFor(hub.prs, req.previous)
+			if #ids == 0 then return finish() end
+			local args = idArgs(ids)
 			graphql(THREADS_QUERY, args, "gh api graphql: threads", "read review threads", function(threadsDoc, threadsErr)
 				if threadsErr then
 					result.partial = threadsErr
@@ -527,12 +771,12 @@ function M.client(run: Runner, decode: Decode): Client
 						table.insert(result.calls, threadsErr.rateLimit)
 						result.rateLimit = threadsErr.rateLimit
 					end
-					return done(result, nil)
+					return finish()
 				end
 				local threads = M.parseThreads(threadsDoc)
 				if threads == nil then
 					result.partial = failure("gh api graphql: threads", "read review threads", "GitHub sent a response without nodes", nil)
-					return done(result, nil)
+					return finish()
 				end
 				for _, pr in result.prs do
 					local open = threads.threads[pr.id]
@@ -543,7 +787,7 @@ function M.client(run: Runner, decode: Decode): Client
 				end
 				table.insert(result.calls, threads.rateLimit)
 				result.rateLimit = threads.rateLimit
-				done(result, nil)
+				finish()
 			end)
 		end)
 	end
@@ -583,6 +827,21 @@ function M.client(run: Runner, decode: Decode): Client
 		end)
 	end
 
+	local function detect(repo: string, done: (value: Detected?, err: Error?) -> ())
+		local owner, name = string.match(repo, "^([%w_.%-]+)/([%w_.%-]+)$")
+		if owner == nil or name == nil then
+			return done(nil, failure("gh api graphql: merge-detect", "detect how " .. repo .. " merges", "not an owner/repo name", nil))
+		end
+		graphql(DETECT_QUERY, { "-f", "owner=" .. owner, "-f", "name=" .. name }, "gh api graphql: merge-detect", "detect how " .. repo .. " merges", function(doc, err)
+			if err then return done(nil, err) end
+			local detected = M.parseDetect(doc)
+			if detected == nil then
+				return done(nil, failure("gh api graphql: merge-detect", "detect how " .. repo .. " merges", "GitHub has no repository " .. repo, nil))
+			end
+			done(detected, nil)
+		end)
+	end
+
 	local function runCommand(command: Command, done: (stdout: string?, err: Error?) -> ())
 		local argv = command.argv
 		local operation = table.concat(argv, " ", 1, math.min(#argv, 3))
@@ -596,7 +855,7 @@ function M.client(run: Runner, decode: Decode): Client
 		end)
 	end
 
-	return { refresh = refresh, probe = probe, checks = checks, run = runCommand }
+	return { refresh = refresh, probe = probe, checks = checks, detect = detect, run = runCommand }
 end
 
 return M

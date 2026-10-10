@@ -21,7 +21,7 @@ local GROUPS: { Group } = {
 		{ "A", "Fix with agent, or Summarize" },
 		{ "⇧A", "Summarize feedback" },
 		{ "C", "Copy link" },
-		{ "M", "Merge (⌘⏎ confirms)" },
+		{ "M", "Merge (⌘⏎ confirms), or Cancel merge" },
 		{ "U", "Update branch" },
 		{ ",", "Merge method" },
 		{ "X", "Remove from Review requests" },

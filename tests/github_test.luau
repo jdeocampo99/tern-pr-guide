@@ -408,7 +408,6 @@ local function testCommands()
 	same(Github.commands.merge(pr, { kind = "merge" }), { argv = { "gh", "pr", "merge", "110", "--repo", "acme/api", "--merge" } }, "merge")
 	same(Github.commands.merge(pr, { kind = "rebase" }), { argv = { "gh", "pr", "merge", "110", "--repo", "acme/api", "--rebase" } }, "rebase")
 	same(Github.commands.updateBranch(pr), { argv = { "gh", "pr", "update-branch", "110", "--repo", "acme/api" } }, "update-branch")
-	assert(not pcall(Github.commands.merge, pr, { kind = "queue" }), "a queue merge is not a GitHub method")
 
 	local fake = FakeRunner.new({
 		{ prefix = { "gh", "pr", "merge" }, contains = "--squash", reply = { stdout = "" } },
