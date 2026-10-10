@@ -9,6 +9,7 @@ local modules: { { name: string, run: () -> () } } = {
 	{ name = "sync_test", run = require("./sync_test") },
 	{ name = "links_test", run = require("./links_test") },
 	{ name = "merge_test", run = require("./merge_test") },
+	{ name = "fixes_test", run = require("./fixes_test") },
 }
 
 local failed = 0

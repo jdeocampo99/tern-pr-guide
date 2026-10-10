@@ -5,11 +5,13 @@
 -- agent writing a guide. Each step starts the next from its callback; the first failure ends the
 -- chain with a message naming the step.
 local Agent = require("./agent")
+local Fixes = require("./hub/fixes")
 local Github = require("./github")
 local GitOutput = require("./git-output")
 local Guide = require("./guide")
 local Lens = require("./lens")
 local Links = require("./links")
+local Model = require("./hub/model")
 local Pr = require("./pr")
 local Review = require("./review")
 local Sync = require("./hub/sync")
@@ -502,6 +504,105 @@ function M.openPr(target: Target, progress: (stage: string) -> (), done: (pr: Pr
    end
   end)
  end)
+end
+
+-- PR Guide's saved copy of the GitHub repo `slug` when it is already set up (the fixes page never sets one up), else nil.
+function M.readySavedCopy(slug: string): Repo?
+ local copy = M.savedCopy("github.com", slug)
+ if copy and tern.fs.exists(copy.root .. READY) then return copy end
+ return nil
+end
+
+-- What the fixes page reads from local git, as text: `mergeTree` is `git merge-tree --write-tree --name-only`
+-- of the PR's head into its base (nil when the page did not ask), `shown` each conflicted file as the merged
+-- tree holds it (with markers), `logs` the last commit on the base touching it since the merge base, and
+-- `files` the annotated files as the head commit has them.
+export type FixRead = { mergeTree: string?, shown: { [string]: string }, logs: { [string]: string }, files: { [string]: string } }
+
+-- Files read for conflicts and for annotations, at most.
+local CONFLICT_FILES, ANNOTATED_FILES = 8, 6
+
+-- `git` in `job`'s repo whose exit status the caller reads: `merge-tree` exits 1 for a merge with conflicts.
+local function gitStatus(job: Job, args: { string }, done: (out: Github.Out) -> ())
+ local argv = { "git", "--literal-pathspecs", "-C", job.repo }
+ table.move(args, 1, #args, #argv + 1, argv)
+ M.runner(argv, { timeout_ms = GIT_MS }, done)
+end
+
+-- Runs `step` on each of `items` in turn, then `done`.
+local function eachInTurn(items: { string }, step: (item: string, next: () -> ()) -> (), done: () -> ())
+ local at = 0
+ local function advance()
+  at += 1
+  if at > #items then return done() end
+  step(items[at], advance)
+ end
+ advance()
+end
+
+local function firstLines(paths: { string }, cap: number): { string }
+ local out = {}
+ for _, path in paths do
+  if #out < cap then table.insert(out, path) end
+ end
+ return out
+end
+
+-- Reads what the fixes page needs from the checkout `repo` (its own, or PR Guide's saved copy): fetches the
+-- PR's head and base into refs/prguide/<n>/*, merges them with `git merge-tree` when the PR conflicts, and
+-- reads each conflicted file and its cause with `git show` and `git log`. `paths` are annotated files to
+-- read at the head with `git show`; a missing one is left out. Calls `done` once.
+function M.readFixes(repo: Repo, pr: Model.HubPR, paths: { string }, done: (read: FixRead?, err: string?) -> ())
+ local function open(release: () -> ())
+  local job: Job = {
+   repo = repo.root,
+   fail = function(message: string)
+    release()
+    done(nil, message)
+   end,
+   partial = repo.cache ~= nil,
+  }
+  local meta: Meta = {
+   number = pr.number, title = pr.title, body = nil, url = pr.url, author = nil,
+   baseRefName = pr.baseBranch, headRefOid = pr.headOid, mergeCommit = nil,
+  }
+  local read: FixRead = { mergeTree = nil, shown = {}, logs = {}, files = {} }
+  fetchRefs(job, meta, function(head, mergeBase)
+   release()
+   local base = refPrefix(pr.number) .. "/base"
+   local function annotated()
+    eachInTurn(firstLines(paths, ANNOTATED_FILES), function(path, next)
+     gitStatus(job, { "show", head .. ":" .. path }, function(out)
+      if out.status == 0 then read.files[path] = out.stdout end
+      next()
+     end)
+    end, function() done(read, nil) end)
+   end
+   if not pr.conflicts then return annotated() end
+   gitStatus(job, { "merge-tree", "--write-tree", "--name-only", head, base }, function(out)
+    -- 0 is a clean merge and 1 a merge with conflicts; anything else is git failing.
+    if out.timed_out or (out.status ~= 0 and out.status ~= 1) then
+     return job.fail("git merge-tree: " .. (if out.timed_out then "timed out" else (string.match(out.stderr, "%S[^\r\n]*") or ("exit status " .. out.status))))
+    end
+    read.mergeTree = out.stdout
+    local tree = Fixes.parseMergeTree(out.stdout)
+    if tree == nil then return annotated() end
+    eachInTurn(firstLines(tree.files, CONFLICT_FILES), function(path, next)
+     gitStatus(job, { "show", tree.tree .. ":" .. path }, function(shown)
+      if shown.status == 0 then read.shown[path] = shown.stdout end
+      local log = { "log", "-1", "--format=%H%x09%an%x09%s", mergeBase .. ".." .. base, "--", path }
+      gitStatus(job, log, function(logged)
+       if logged.status == 0 then read.logs[path] = logged.stdout end
+       next()
+      end)
+     end)
+    end, annotated)
+   end)
+  end)
+ end
+ local slug = repo.cache
+ if not slug then return open(function() end) end
+ acquire(repo.root, open)
 end
 
 -- Sends `payload` to `to` in one go, first checking the PR still has the head the page shows.

@@ -1,0 +1,500 @@
+{
+  "_note": "conflict and failing are recorded from jubbydev/tern-pr-guide-hub-smoke (#6 with a real thread and reply, #8 with only noise annotations) with read-only gh api graphql on 2026-10-10. requested, annotated, noann and the bot/outdated/resolved threads are SYNTHETIC: hand-written in the same shape, because a changes-requested review is not possible on your own PR and the smoke workflow emits only .github annotations.",
+  "conflict": {
+    "data": {
+      "rateLimit": {
+        "cost": 1,
+        "remaining": 4978,
+        "limit": 5000,
+        "resetAt": "2026-10-10T08:30:39Z"
+      },
+      "node": {
+        "id": "PR_kwDOVC46H88AAAABHmliHA",
+        "headRefOid": "c32b1c761911413bcbdba8f95f7f943c741a23be",
+        "reviews": {
+          "nodes": []
+        },
+        "reviewThreads": {
+          "nodes": [
+            {
+              "id": "PRRT_kwDOVC46H86rCHsY",
+              "isResolved": false,
+              "isOutdated": false,
+              "path": "smoke/conflict.txt",
+              "line": 1,
+              "comments": {
+                "totalCount": 2,
+                "nodes": [
+                  {
+                    "author": {
+                      "__typename": "User",
+                      "login": "jubbydev"
+                    },
+                    "body": "Does this line still match main after the rename?\nThe `conflict.txt` header changed on main too.",
+                    "url": "https://github.com/jubbydev/tern-pr-guide-hub-smoke/pull/6#discussion_r4236872632",
+                    "diffHunk": "@@ -1 +1 @@\n-main side 1791575513\n+branch side 1791575605",
+                    "pullRequestReview": {
+                      "state": "COMMENTED"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "files": {
+          "nodes": [
+            {
+              "path": "smoke/conflict.txt"
+            }
+          ]
+        },
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "statusCheckRollup": null
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "failing": {
+    "data": {
+      "rateLimit": {
+        "cost": 1,
+        "remaining": 4982,
+        "limit": 5000,
+        "resetAt": "2026-10-10T08:30:39Z"
+      },
+      "node": {
+        "id": "PR_kwDOVC46H88AAAABHmlmxw",
+        "headRefOid": "e04c90dfa27ff240eaab3668cfb37b11ad6679aa",
+        "reviews": {
+          "nodes": []
+        },
+        "reviewThreads": {
+          "nodes": []
+        },
+        "files": {
+          "nodes": [
+            {
+              "path": ".github/workflows/fail.yml"
+            }
+          ]
+        },
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": [
+                      {
+                        "__typename": "CheckRun",
+                        "name": "fail",
+                        "conclusion": "FAILURE",
+                        "detailsUrl": "https://github.com/jubbydev/tern-pr-guide-hub-smoke/actions/runs/37983327811/job/113999024479",
+                        "summary": null,
+                        "checkSuite": {
+                          "workflowRun": {
+                            "databaseId": 37983327811,
+                            "workflow": {
+                              "name": "smoke-fail"
+                            }
+                          }
+                        },
+                        "annotations": {
+                          "nodes": [
+                            {
+                              "path": ".github",
+                              "annotationLevel": "FAILURE",
+                              "title": "",
+                              "message": "Process completed with exit code 1.",
+                              "location": {
+                                "start": {
+                                  "line": 5
+                                }
+                              }
+                            },
+                            {
+                              "path": ".github",
+                              "annotationLevel": "NOTICE",
+                              "title": "",
+                              "message": "\"The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748\"",
+                              "location": {
+                                "start": {
+                                  "line": 1
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "requested": {
+    "data": {
+      "rateLimit": {
+        "cost": 1,
+        "remaining": 4977,
+        "limit": 5000,
+        "resetAt": "2026-10-10T08:30:39Z"
+      },
+      "node": {
+        "id": "PR_synthetic_requested",
+        "headRefOid": "1111111111111111111111111111111111111111",
+        "reviews": {
+          "nodes": [
+            {
+              "author": {
+                "__typename": "User",
+                "login": "maria-k"
+              },
+              "body": "Steps should skip removed lines; step 3 now points at a deleted line.",
+              "submittedAt": "2026-10-09T10:00:00Z",
+              "url": "https://github.com/acme/web/pull/404#pullrequestreview-1"
+            }
+          ]
+        },
+        "reviewThreads": {
+          "nodes": [
+            {
+              "id": "PRRT_requested",
+              "isResolved": false,
+              "isOutdated": false,
+              "path": "src/cart/reprice.ts",
+              "line": 57,
+              "comments": {
+                "totalCount": 3,
+                "nodes": [
+                  {
+                    "author": {
+                      "__typename": "User",
+                      "login": "maria-k"
+                    },
+                    "body": "Does the promo code survive a currency change?\n`reprice` rebuilds `promo` from `next.promoCode`, which is undefined when only `currency` changes.",
+                    "url": "https://github.com/acme/web/pull/404#discussion_r1",
+                    "diffHunk": "@@ -48,9 +48,11 @@ export function reprice(cart: Cart, next: PriceInput): Cart {\n   const rates = rateTable(next.currency);\n   const items = cart.items.map(item => ({\n     ...item,\n     unitPrice: convert(item.basePrice, rates),\n   }));\n-  const promo = cart.promo;\n+  const promo = next.promoCode ? findPromo(next.promoCode) : null;\n+  const subtotal = sum(items.map(i => i.unitPrice * i.quantity));\n   return {\n     ...cart,\n     items,",
+                    "pullRequestReview": {
+                      "state": "CHANGES_REQUESTED"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "PRRT_comment",
+              "isResolved": false,
+              "isOutdated": false,
+              "path": "src/cart/reprice.test.ts",
+              "line": 12,
+              "comments": {
+                "totalCount": 1,
+                "nodes": [
+                  {
+                    "author": {
+                      "__typename": "User",
+                      "login": "devon"
+                    },
+                    "body": "Could this test have a clearer name?",
+                    "url": "https://github.com/acme/web/pull/404#discussion_r2",
+                    "diffHunk": "@@ -8,3 +8,7 @@ import { makeCart } from '../testing/cart';\n describe('reprice', () => {\n+  it('works with promo', () => {\n+    const cart = makeCart({ currency: 'USD', promoCode: 'SPRING10' });\n+    const next = reprice(cart, { currency: 'EUR', promoCode: 'SPRING10' });",
+                    "pullRequestReview": {
+                      "state": "COMMENTED"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "PRRT_bot",
+              "isResolved": false,
+              "isOutdated": false,
+              "path": "src/cart/reprice.ts",
+              "line": 60,
+              "comments": {
+                "totalCount": 1,
+                "nodes": [
+                  {
+                    "author": {
+                      "__typename": "Bot",
+                      "login": "coderabbitai"
+                    },
+                    "body": "Nitpick: consider a named constant.",
+                    "url": "https://github.com/acme/web/pull/404#discussion_r3",
+                    "diffHunk": "@@ -58,2 +58,3 @@\n   return {\n+    total: applyDiscount(subtotal, promo),",
+                    "pullRequestReview": {
+                      "state": "COMMENTED"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "PRRT_outdated",
+              "isResolved": false,
+              "isOutdated": true,
+              "path": "src/cart/old.ts",
+              "line": null,
+              "comments": {
+                "totalCount": 1,
+                "nodes": [
+                  {
+                    "author": {
+                      "__typename": "User",
+                      "login": "devon"
+                    },
+                    "body": "This file moved.",
+                    "url": "https://github.com/acme/web/pull/404#discussion_r4",
+                    "diffHunk": "@@ -1,1 +1,1 @@\n-x",
+                    "pullRequestReview": {
+                      "state": "COMMENTED"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "PRRT_done",
+              "isResolved": true,
+              "isOutdated": false,
+              "path": "src/cart/reprice.ts",
+              "line": 3,
+              "comments": {
+                "totalCount": 1,
+                "nodes": [
+                  {
+                    "author": {
+                      "__typename": "User",
+                      "login": "devon"
+                    },
+                    "body": "Resolved already.",
+                    "url": "https://github.com/acme/web/pull/404#discussion_r5",
+                    "diffHunk": "@@ -1,1 +1,1 @@\n-x",
+                    "pullRequestReview": {
+                      "state": "COMMENTED"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "files": {
+          "nodes": [
+            {
+              "path": "src/cart/reprice.ts"
+            },
+            {
+              "path": "src/cart/reprice.test.ts"
+            }
+          ]
+        },
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "statusCheckRollup": null
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "annotated": {
+    "data": {
+      "rateLimit": {
+        "cost": 1,
+        "remaining": 4977,
+        "limit": 5000,
+        "resetAt": "2026-10-10T08:30:39Z"
+      },
+      "node": {
+        "id": "PR_synthetic_annotated",
+        "headRefOid": "2222222222222222222222222222222222222222",
+        "reviews": {
+          "nodes": []
+        },
+        "reviewThreads": {
+          "nodes": []
+        },
+        "files": {
+          "nodes": [
+            {
+              "path": "src/session/receipts.ts"
+            }
+          ]
+        },
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": [
+                      {
+                        "__typename": "CheckRun",
+                        "name": "typecheck",
+                        "conclusion": "FAILURE",
+                        "detailsUrl": "https://github.com/acme/web/actions/runs/901/job/1",
+                        "summary": "tsc --noEmit found 1 error.",
+                        "checkSuite": {
+                          "workflowRun": {
+                            "databaseId": 901,
+                            "workflow": {
+                              "name": "ci"
+                            }
+                          }
+                        },
+                        "annotations": {
+                          "nodes": [
+                            {
+                              "path": "src/session/receipts.ts",
+                              "annotationLevel": "FAILURE",
+                              "title": "TS2339",
+                              "message": "Property 'id' does not exist on type 'Receipt'",
+                              "location": {
+                                "start": {
+                                  "line": 42
+                                }
+                              }
+                            },
+                            {
+                              "path": ".github/workflows/ci.yml",
+                              "annotationLevel": "FAILURE",
+                              "title": "",
+                              "message": "Process completed with exit code 2.",
+                              "location": {
+                                "start": {
+                                  "line": 17
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "__typename": "CheckRun",
+                        "name": "lint",
+                        "conclusion": "SUCCESS",
+                        "detailsUrl": "https://github.com/acme/web/actions/runs/901/job/1",
+                        "summary": null,
+                        "checkSuite": {
+                          "workflowRun": {
+                            "databaseId": 901,
+                            "workflow": {
+                              "name": "ci"
+                            }
+                          }
+                        },
+                        "annotations": {
+                          "nodes": []
+                        }
+                      },
+                      {
+                        "__typename": "StatusContext",
+                        "context": "deploy/preview",
+                        "state": "FAILURE",
+                        "targetUrl": "https://example.com/deploy/1"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "noann": {
+    "data": {
+      "rateLimit": {
+        "cost": 1,
+        "remaining": 4977,
+        "limit": 5000,
+        "resetAt": "2026-10-10T08:30:39Z"
+      },
+      "node": {
+        "id": "PR_synthetic_noann",
+        "headRefOid": "3333333333333333333333333333333333333333",
+        "reviews": {
+          "nodes": []
+        },
+        "reviewThreads": {
+          "nodes": []
+        },
+        "files": {
+          "nodes": []
+        },
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": [
+                      {
+                        "__typename": "CheckRun",
+                        "name": "build",
+                        "conclusion": "FAILURE",
+                        "detailsUrl": "https://github.com/acme/web/actions/runs/902/job/1",
+                        "summary": "tsc --noEmit found 1 error.",
+                        "checkSuite": {
+                          "workflowRun": {
+                            "databaseId": 902,
+                            "workflow": {
+                              "name": "ci"
+                            }
+                          }
+                        },
+                        "annotations": {
+                          "nodes": [
+                            {
+                              "path": ".github",
+                              "annotationLevel": "FAILURE",
+                              "title": "",
+                              "message": "Process completed with exit code 1.",
+                              "location": {
+                                "start": {
+                                  "line": 5
+                                }
+                              }
+                            },
+                            {
+                              "path": ".github/workflows/ci.yml",
+                              "annotationLevel": "FAILURE",
+                              "title": "",
+                              "message": "Process completed with exit code 2.",
+                              "location": {
+                                "start": {
+                                  "line": 9
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

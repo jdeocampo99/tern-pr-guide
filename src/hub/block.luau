@@ -6,6 +6,8 @@ local Agent = require("../agent")
 local Board = require("../view/hub/board")
 local Fetch = require("../fetch")
 local Fields = require("../text-field")
+local FixesPage = require("../view/hub/fixes")
+local Fixes = require("./fixes")
 local Github = require("../github")
 local Keys = require("../keys")
 local Model = require("./model")
@@ -134,6 +136,8 @@ local function openPr(b: Block, cx: BlockCx, slug: string, number: number, gener
 	end)
 end
 
+local openFixes: (b: Block, cx: BlockCx, key: string) -> ()
+
 -- ⏎ and a double-click open the selected row; ⇧⏎ (or a hub opened for AI guides) starts the AI guide too.
 local function openRow(b: Block, cx: BlockCx, value: string, withGuide: boolean)
 	local s = b.s
@@ -142,7 +146,10 @@ local function openRow(b: Block, cx: BlockCx, value: string, withGuide: boolean)
 	local recent = State.selectedRecent(s)
 	if recent then return openPr(b, cx, recent.repo, recent.number, generate) end
 	local card = State.selectedCard(s)
-	if card then openPr(b, cx, card.pr.repo, card.pr.number, generate) end
+	if card == nil then return end
+	-- A Needs fixes card opens at what needs fixing; the AI guide still opens the whole pull request.
+	if card.column == "needs_fixes" and not generate then return openFixes(b, cx, card.pr.key) end
+	openPr(b, cx, card.pr.repo, card.pr.number, generate)
 end
 
 local function openCard(b: Block, cx: BlockCx, value: string)
@@ -1018,6 +1025,213 @@ ACTIONS["card-remove"] = function(b, cx, key)
 	refetch(b, cx)
 end
 
+-- The fixes page ---------------------------------------------------------------------------------------------
+-- ⏎ on a Needs fixes card. The details are read once when it opens (one GraphQL call); the conflicted files and
+-- the annotated source come from local git when the repo has a checkout. Reply and Resolve are GraphQL writes.
+
+-- The annotated source files of the details' failing checks, each once.
+local function annotatedPaths(d: Fixes.FixDetails): { string }
+	local paths: { string } = {}
+	for _, check in d.checks do
+		for _, annotation in Fixes.usable(check.annotations) do
+			if table.find(paths, annotation.path) == nil then table.insert(paths, annotation.path) end
+		end
+	end
+	return paths
+end
+
+-- Reads the conflicts and the annotated files from the repo's checkout (or PR Guide's saved copy). With none, the
+-- conflict step says so, and its files are unknown.
+local function readGit(b: Block, cx: BlockCx, pr: Model.HubPR, d: Fixes.FixDetails)
+	local paths = annotatedPaths(d)
+	if not pr.conflicts and #paths == 0 then return end
+	local dir = cx.cwd or tern.getenv("HOME") or ""
+	Fetch.checkoutFor(nil, dir, pr.repo, function(found)
+		if b.closed then return end
+		local repo = found or Fetch.readySavedCopy(pr.repo)
+		if repo == nil then
+			if pr.conflicts then d.conflictNote = "No local copy of " .. pr.repo end
+			return draw(b, cx)
+		end
+		Fetch.readFixes(repo, pr, paths, function(read, err)
+			if b.closed then return end
+			if read == nil then
+				if pr.conflicts then d.conflictNote = "Couldn't read the conflicts: " .. reasonOf(err or "no answer") end
+				return draw(b, cx)
+			end
+			d.files = read.files
+			if pr.conflicts then
+				local tree = Fixes.parseMergeTree(read.mergeTree or "")
+				if tree then
+					d.conflicts, d.conflictNote = Fixes.conflicts(tree, read.shown, read.logs), nil
+				else
+					d.conflictNote = "Couldn't read the conflicts: git printed nothing usable"
+				end
+			end
+			draw(b, cx)
+		end)
+	end)
+end
+
+-- The sample board's details: the fixture for the card's key, with the recorded git output for its conflicts.
+local function sampleDetails(pr: Model.HubPR): Fixes.FixDetails
+	local fixture: any = require("../../fixtures/hub/fixes")
+	local kind = fixture.sample[pr.key]
+	local source: Fixes.FixDetails = if kind then fixture.details[kind] else fixture.details.failure
+	local d = table.clone(source)
+	d.key, d.headOid, d.fetchedAt, d.conflicts, d.conflictNote = pr.key, pr.headOid, "", nil, nil
+	if pr.conflicts then
+		local read = fixture.gitRead.conflictMany
+		d.conflicts = Fixes.conflicts(Fixes.parseMergeTree(read.mergeTree) :: Fixes.MergeTree, read.shown, read.logs)
+	end
+	return d
+end
+
+openFixes = function(b: Block, cx: BlockCx, key: string)
+	local s = b.s
+	if not State.openFixes(s, key) then return end
+	local pr = State.prOf(s, key) :: Model.HubPR
+	if b.fixture then
+		State.setDetails(s, sampleDetails(pr))
+		return
+	end
+	local route = s.route :: State.Route
+	local known = s.details[key]
+	b.github.details(pr, function(d, err)
+		if b.closed then return end
+		if d == nil then
+			if s.route == route then route.loading, route.error = false, if err then err.message else "no answer" end
+			return draw(b, cx)
+		end
+		d.fetchedAt = isoNow()
+		-- The same commit keeps what git said last time while it is read again.
+		if known and known.headOid == d.headOid then d.conflicts, d.conflictNote, d.files = known.conflicts, known.conflictNote, known.files end
+		State.setDetails(s, d)
+		draw(b, cx)
+		readGit(b, cx, pr, d)
+	end)
+end
+
+ACTIONS["fixes-close"] = function(b)
+	State.closeFixes(b.s)
+end
+ACTIONS["fixes-step"] = function(b, cx, index)
+	State.fixSelect(b.s, tonumber(index) or 1)
+	State.fixFocus(b.s, "steps")
+end
+ACTIONS["fixes-move"] = function(b, cx, delta)
+	State.fixMove(b.s, tonumber(delta) or 0)
+end
+ACTIONS["fixes-focus"] = function(b, cx, where)
+	State.fixFocus(b.s, if where == "panel" then "panel" else "steps")
+end
+ACTIONS["fixes-bots"] = function(b)
+	State.fixToggleBots(b.s)
+end
+
+-- The page's pull request and the thread of the step on show, when it has one.
+local function fixTarget(b: Block): (State.Route?, Model.HubPR?, Fixes.Step?)
+	local s = b.s
+	local route = s.route
+	if route == nil then return nil, nil, nil end
+	return route, State.prOf(s, route.key), State.fixStep(s)
+end
+
+ACTIONS["fixes-reply"] = function(b, cx)
+	local route, _, step = fixTarget(b)
+	if route == nil or step == nil or step.thread == nil then return end
+	if route.resolved[step.thread.id] then return cx:toast("info", "This thread is resolved", step.thread.path) end
+	if State.beginReply(b.s) then frameLater(cx, { { "focus", Paths.replyField } }) end
+end
+ACTIONS["fixes-cancel"] = function(b)
+	State.cancelReply(b.s)
+end
+ACTIONS["fixes-post"] = function(b, cx)
+	local route, pr, step = fixTarget(b)
+	if route == nil or pr == nil or step == nil or step.thread == nil or route.reply == nil or route.busy then return end
+	local thread = step.thread
+	local text = string.match(route.reply.text, "^%s*(.-)%s*$") :: string
+	if text == "" then return cx:toast("error", "Couldn't post the reply: it's empty", pr.key) end
+	local function posted()
+		route.busy = false
+		local list = route.replies[thread.id] or {}
+		table.insert(list, text)
+		route.replies[thread.id] = list
+		route.reply = nil
+		if b.s.mode == "reply" then b.s.mode = "fixes" end
+		cx:toast("success", "Replied to @" .. thread.author, pr.key)
+	end
+	if b.fixture then return posted() end
+	route.busy = true
+	b.github.run(Github.commands.reply(pr, thread.id, text), function(_, err)
+		if b.closed then return end
+		if err then
+			route.busy = false
+			cx:toast("error", err.message, pr.key)
+		else
+			posted()
+		end
+		draw(b, cx)
+	end)
+end
+ACTIONS["fixes-resolve"] = function(b, cx)
+	local route, pr, step = fixTarget(b)
+	if route == nil or pr == nil or step == nil or step.thread == nil or route.busy then return end
+	local thread = step.thread
+	if route.resolved[thread.id] then return cx:toast("info", "This thread is already resolved", thread.path) end
+	local function resolved()
+		route.busy = false
+		route.resolved[thread.id] = true
+		cx:toast("success", "Resolved the thread", thread.path)
+	end
+	if b.fixture then return resolved() end
+	route.busy = true
+	b.github.run(Github.commands.resolve(thread.id), function(_, err)
+		if b.closed then return end
+		if err then
+			route.busy = false
+			cx:toast("error", err.message, pr.key)
+		else
+			resolved()
+		end
+		draw(b, cx)
+	end)
+end
+ACTIONS["fixes-log"] = function(b, cx)
+	local _, pr, step = fixTarget(b)
+	if pr == nil or step == nil or step.check == nil then return end
+	local url = Fixes.logUrl(step.check, pr.repo)
+	if url == "" then return cx:toast("error", "Couldn't open the log: GitHub gave no link for " .. step.check.name, pr.key) end
+	cx:open(url)
+end
+-- G: the step on GitHub: the conflict editor, the thread, the check, the review, or the pull request.
+ACTIONS["fixes-github"] = function(b, cx)
+	local _, pr, step = fixTarget(b)
+	if pr == nil then return end
+	local url = pr.url
+	if step then
+		if step.group == "conflict" then url = pr.url .. "/conflicts"
+		elseif step.thread then url = step.thread.url
+		elseif step.review then url = step.review.url
+		elseif step.check and step.check.url ~= "" then url = step.check.url end
+	end
+	cx:open(url)
+end
+-- ⏎ in the panel runs the highlighted action; the agent action is the card's own.
+ACTIONS["fixes-press"] = function(b, cx)
+	local act = State.fixPress(b.s)
+	if act == nil then return end
+	local route, pr = fixTarget(b)
+	if act == "agent" then
+		local main = State.fixMain(b.s)
+		local handler = if main then ACTIONS[main.act] else nil
+		if handler and pr then handler(b, cx, pr.key) end
+		return
+	end
+	local handler = ACTIONS["fixes-" .. act]
+	if handler and route then handler(b, cx, "") end
+end
+
 local function dispatch(b: Block, cx: BlockCx, action: Keys.Action)
 	local handler = ACTIONS[action.act]
 	if handler then handler(b, cx, action.value or "") end
@@ -1106,6 +1320,11 @@ local block: BlockDef<Block> = {
 	view = function(b: Block): BlockView
 		local s = b.s
 		local motion = { born = s.born, next = {}, booted = s.booted, animate = not s.keyed }
+		if s.route then
+			local page = FixesPage.view(s, motion)
+			s.born, s.booted = motion.next, true
+			return { main = page, layer = nil }
+		end
 		local main = Board.view(s, motion)
 		s.born, s.booted = motion.next, true
 		return { main = main, layer = Board.layer(s) }
@@ -1122,6 +1341,12 @@ local block: BlockDef<Block> = {
 		if action then
 			s.keyed = true
 			dispatch(b, cx, action)
+			return true
+		end
+		if s.mode == "reply" and s.route and s.route.reply then
+			-- ⏎ is a new line in a reply; ⌘⏎ posts it (Keys.hubAction).
+			local typed = if key.name == "enter" and not (key.meta or key.ctrl) then { name = "enter", shift = true } :: any else key
+			Fields.key(s.route.reply, typed)
 			return true
 		end
 		if s.mode == "search" then

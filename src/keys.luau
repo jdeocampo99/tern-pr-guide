@@ -132,6 +132,28 @@ local function hubMenuKey(s: HubState.State, key: Key): Action?
 	return nil
 end
 
+-- The fixes page: j and k move over the steps (or the panel's actions), h and l between the two, ⏎ goes in or
+-- chooses, Esc goes back to the board. A step's own keys follow the buttons it shows.
+local function fixesKey(s: HubState.State, key: Key): Action?
+	local name = key.name
+	if key.ctrl or key.meta or key.alt then return nil end
+	if name == "escape" then return act("fixes-close") end
+	local label = cardKeyLabel(key)
+	if label == "⇧L" then return act("fixes-log") end
+	if name == "down" or name == "j" then return act("fixes-move", 1) end
+	if name == "up" or name == "k" then return act("fixes-move", -1) end
+	if name == "left" or name == "h" then return act("fixes-focus", "steps") end
+	if name == "right" or name == "l" then return act("fixes-focus", "panel") end
+	if name == "enter" then return act("fixes-press") end
+	if label == "R" then return act("fixes-reply") end
+	if label == "E" then return act("fixes-resolve") end
+	if label == "G" then return act("fixes-github") end
+	if label == "B" then return act("fixes-bots") end
+	local main = HubState.fixMain(s)
+	if main and label ~= nil and main.key == label and s.route then return act(main.act, s.route.key) end
+	return nil
+end
+
 local function hubBoardKey(s: HubState.State, key: Key): Action?
 	local name = key.name
 	if isQuestionMark(key) then return act("hub-help") end
@@ -176,6 +198,12 @@ function M.hubAction(s: HubState.State, key: Key): Action?
 		return nil
 	end
 	if mode == "menu" then return hubMenuKey(s, key) end
+	if mode == "fixes" then return fixesKey(s, key) end
+	if mode == "reply" then
+		if key.name == "enter" and (key.meta or key.ctrl) then return act("fixes-post") end
+		if key.name == "escape" then return act("fixes-cancel") end
+		return nil
+	end
 	if mode == "link" then
 		if key.name == "enter" then return act(if key.shift then "hub-link-open" else "hub-link-add") end
 		if key.name == "escape" then return act("hub-link-clear") end

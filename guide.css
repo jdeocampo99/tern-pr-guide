@@ -1215,3 +1215,107 @@
 .sf-overlay[data-role='gp.hubmenu'], .sf-overlay[data-role='gp.hubmenu'] .sf-ov-card { width: 260px; }
 /* the key panel is wider than Tern's lg overlay: three columns that wrap to fewer in a narrower pane */
 .sf-overlay[data-role='gp.hubhelp'], .sf-overlay[data-role='gp.hubhelp'] .sf-ov-card { width: 940px; max-width: 100%; }
+
+/* PR hub fixes page: a Needs fixes card opened at what needs fixing, in the guided review's layout.
+   Steps on the left, the code for the step on the right. See docs/hub/README.md and docs/hub/mockups/pr-fixes.html. */
+.gp-fx-head { padding: 14px 16px 12px; }
+.gp-fx .gp-title-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gp-fx-hdr { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
+.gp-fx-status { min-height: 28px; }
+.gp-fx-chip { flex-shrink: 0; padding: 0 7px; border-radius: var(--r-chip); font-family: var(--sans); font-size: 12px; font-weight: 650; line-height: 19px; white-space: nowrap; color: #fff; background: var(--gp-danger-fill); }
+.gp-fx-clear { font-weight: 600; color: var(--gp-added); }
+.gp-fx-repo { font-family: var(--sans); color: var(--t3); }
+.gp-fx-error { color: var(--gp-danger-text); }
+.gp-fx .gp-btn-keyed { padding: 3px 6px 3px 12px; }
+.gp-fx-hdr .gp-btn-keyed { padding: 5px 8px 5px 12px; }
+.gp-fx-btn-label { font-family: var(--sans); }
+.gp-fx .gp-btn.gp-fx-agent-btn { font-weight: 600; color: var(--gp-suggestion); background: var(--gp-suggestion-wash); border-color: var(--gp-suggestion); }
+.gp-fx .gp-btn.gp-fx-agent-btn:hover { background: var(--gp-suggestion-wash); box-shadow: inset 0 0 0 1px var(--gp-suggestion); }
+.gp-fx .gp-btn.gp-fx-ok { color: #fff; font-weight: 600; background: var(--gp-merge); border-color: transparent; }
+.gp-fx .gp-btn.gp-fx-ok:hover { background: var(--gp-merge-hover); }
+.gp-fx-item-on { outline: 2px solid var(--gp-blue-line); outline-offset: 2px; }
+.gp-fx-cols { flex-grow: 1; padding: 20px 16px 28px; }
+
+/* left column: one step per problem */
+.gp-ccard .gp-fx-first { margin-top: 0; }
+.gp-fx-gn { color: var(--t3); }
+.gp-fx-step { border-radius: var(--r-ctl); cursor: pointer; margin-bottom: 4px; padding: 2px 0; border: 1px solid transparent; }
+.gp-fx-step.gp-ol-herebox { padding: 2px 0; }
+.gp-fx-step:hover { background: var(--l1); }
+.gp-fx-step.gp-ol-herebox:hover { background: var(--gp-blue-wash); }
+.gp-fx-st-t { flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.gp-fx-st-a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; }
+.gp-fx-who { font-weight: 650; color: var(--t1); }
+.gp-fx-text { margin-left: 5px; }
+.gp-ol-herebox .gp-fx-who { color: var(--gp-blue-ink); }
+.gp-fx-st-f { display: flex; gap: 10px; align-items: baseline; font-family: var(--tv-font); font-size: 12px; font-weight: 400; color: var(--t3); min-width: 0; }
+.gp-ol-herebox .gp-fx-st-f { color: var(--t2); }
+.gp-fx-pth { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gp-fx-state { margin-left: auto; flex-shrink: 0; font-family: var(--sans); font-size: 12px; font-weight: 600; }
+.gp-fx-state-done { color: var(--gp-added); }
+.gp-fx-step .gp-ol-dot { font-size: 13px; cursor: pointer; }
+.gp-fx-step .gp-fx-dot-open { color: var(--gp-removed); }
+.gp-fx-step .gp-fx-dot-done { color: var(--gp-added); font-weight: 700; }
+.gp-fx-pf .gp-fx-step.gp-ol-herebox { background: var(--l1); border-color: var(--l2); }
+.gp-fx-pf .gp-fx-step.gp-ol-herebox .gp-ol-steptitle, .gp-fx-pf .gp-fx-step.gp-ol-herebox .gp-fx-who { color: var(--t1); }
+.gp-fx-g { display: flex; flex-direction: column; }
+.gp-fx-gh { display: flex; gap: 10px; align-items: baseline; padding: 5px 8px; border-radius: var(--r-ctl); cursor: pointer; }
+.gp-fx-gh:hover { background: var(--l1); }
+.gp-fx-gh .gp-ol-dot { width: 26px; font-size: 14px; }
+.gp-fx-gt { font-family: var(--sans); font-size: 13.5px; color: var(--t3); }
+.gp-fx-gh:hover .gp-fx-gt { color: var(--t1); }
+.gp-fx-gh .sf-kbd, .gp-fx-gh kbd { margin-left: auto; align-self: center; }
+.gp-fx-muted { font-family: var(--sans); font-size: 13px; line-height: 1.5; color: var(--t3); padding: 0 8px 0 44px; }
+
+/* right column */
+.gp-fx-path { display: flex; align-items: center; gap: 0; }
+.gp-fx-fbtns { display: flex; gap: 8px; align-items: center; }
+.gp-fx-gap { cursor: default; }
+.gp-fx-av { background: var(--l3); color: var(--t1); }
+.gp-fx-av-bad { background: var(--gp-danger-fill); color: #fff; }
+.gp-fx-msg > .gp-card-head { padding-top: 11px; }
+.gp-fx-msg + .gp-fx-msg { border-top: 1px solid var(--l2); }
+.gp-fx-more { padding: 0 14px 10px 46px; }
+.gp-fx-muted-line { font-family: var(--sans); font-size: 12.5px; color: var(--t3); }
+.gp-fx-dim { opacity: 0.6; }
+.gp-fx-p { line-height: 1.5; }
+.gp-fx-code { font-family: var(--tv-font); font-size: 13px; }
+.gp-fx-compose { padding-bottom: 12px; }
+.gp-fx-err { background: var(--gp-danger-wash); box-shadow: inset 3px 0 0 var(--gp-danger-fill); }
+.gp-fx-stack { display: flex; flex-direction: column; gap: 12px; }
+.gp-fx-stack > * { flex-shrink: 0; }
+.gp-fx-stack > .gp-fx-stack > .gp-card { margin: 0; }
+.gp-fx-where { font-family: var(--tv-font); font-size: 12px; color: var(--t3); }
+.gp-fx-chk { display: flex; gap: 12px; align-items: center; padding: 0 4px; }
+.gp-fx-cname { font-family: var(--tv-font); font-size: 15px; font-weight: 650; }
+.gp-fx-cfail { font-family: var(--sans); font-size: 13px; font-weight: 600; color: var(--gp-danger-text); }
+.gp-fx-cmeta { font-family: var(--sans); font-size: 13px; color: var(--t3); }
+.gp-fx-note { display: flex; flex-direction: column; gap: 4px; font-family: var(--sans); }
+.gp-fx-t { font-size: 14.5px; color: var(--t1); }
+.gp-fx-n { font-size: 13px; color: var(--t3); }
+.gp-fx-note .gp-fx-fbtns { margin-top: 8px; }
+.gp-fx-cause { padding: 7px 12px; font-family: var(--sans); font-size: 12.5px; color: var(--t3); background: var(--sf-shade); border-top: 1px solid var(--l2); }
+.gp-fx-causetext { white-space: pre; }
+.gp-fx-b { font-weight: 600; color: var(--t2); }
+.gp-fx-chead { padding: 5px 12px; font-family: var(--sans); font-size: 12.5px; color: var(--t3); background: var(--sf-shade); border-top: 1px dashed var(--l2); border-bottom: 1px dashed var(--l2); }
+.gp-fx-side { display: flex; flex-direction: column; }
+.gp-fx-side + .gp-fx-side { border-top: 1px solid var(--l2); }
+.gp-fx-side > * { flex-shrink: 0; }
+.gp-fx-side-h { display: flex; gap: 10px; align-items: baseline; padding: 7px 12px; background: var(--sf-shade); border-bottom: 1px solid var(--l2); }
+.gp-fx-side-n { font-family: var(--sans); font-size: 13px; font-weight: 650; }
+.gp-fx-side-b { font-size: 12px; color: var(--t3); }
+.gp-fx-shared { opacity: 0.55; }
+.gp-fx-pad { height: 6px; }
+
+/* fixes page in a narrow pane: the steps keep up to 320px and the code takes the rest; when both don't fit the
+   steps wrap above the code. The hint bar drops its optional keys first, then ellipsizes. */
+.gp-fx-cols { flex-wrap: wrap; }
+.gp-fx-cols > .gp-fx-steps { width: auto; flex: 0 1 320px; min-width: 220px; }
+.gp-fx-cols > .gp-code-col { flex: 1 1 0; min-width: 360px; }
+.gp-hdr-act { white-space: nowrap; flex-shrink: 0; }
+.gp-fx .gp-hintbar { overflow: hidden; }
+.gp-fx .gp-hb-item { flex-shrink: 1; min-width: 0; }
+.gp-fx .gp-hb-item.gp-hb-must { flex-shrink: 0; }
+.gp-fx .gp-hb-item.gp-hb-opt { flex-shrink: 1000; }
+.gp-fx .gp-hb-label, .gp-fx .gp-hb-mode { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.gp-fx .gp-hb-mode { flex-shrink: 2; }

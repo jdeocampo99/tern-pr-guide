@@ -39,6 +39,10 @@ function M.recentRow(key: string): string
 	return M.ROOT .. ".body.recent.rows." .. M.recentKey(key)
 end
 
+-- The fixes page and the reply field inside the thread card on show. They follow the keys in fixes.luau.
+M.FIXES = "main.fixes"
+M.replyField = M.FIXES .. ".cols.code.ex.body.composer.body.field"
+
 -- The ▾ beside a selected card's split button, which the card's menu anchors to.
 function M.moreButton(card: State.Card): string
 	return M.card(card) .. ".body.meta.acts.sb.more"
