@@ -1600,6 +1600,109 @@ local function mixedAge()
 		assert(State.prOf(b.s, API114).checks.state == "passing", "the update applied")
 		assert(entry(w.kv["hub.cache"], API114).checks.state == "passing", "and was stored on the newer snapshot")
 	end)
+
+	-- B's read of Tandem is out from the older cache when A stores KEY at T2. B's answer adopts the newer cache and joins
+	-- KEY, so it stores nothing older and starts one replacement read; that read keeps KEY, adds OTHER, and stores T2.
+	withWorld(function(w, Fetch, Block)
+		local OTHER = "acme/api#105"
+		w.shared = true
+		w.kv["hub.cache"] = added(storedCache({ WEB, API114 }, Cases.asOf))
+		-- Every store of the cache, in order.
+		local writes: { { stamp: number, key: boolean, other: boolean, title: string? } } = {}
+		local kv = getfenv(Block.init).tern.kv
+		local set = kv.set
+		kv.set = function(name: string, value: any)
+			if name == "hub.cache" then
+				table.insert(writes, {
+					stamp = value.refreshedAt, key = entry(value, KEY).tandem == true,
+					other = entry(value, OTHER).tandem == true, title = entry(value, API114).title,
+				})
+			end
+			set(name, value)
+		end
+		local a = live(w, Block, true)
+		local cxA = w.cx
+		local b = live(w, Block, true)
+		local c = live(w, Block, true)
+		local cxC = w.cx
+		assert(#reads(w) == 3 and b.flights.tandem and b.handoffs == 0)
+		local older = reads(w)[2]
+		reads(w)[1].done(out("WATCH"))
+		reads(w)[3].done(out("WATCH"))
+		assert(b.flights.tandem and not a.flights.tandem and not c.flights.tandem, "only B's read is out")
+		local t1 = b.cache.refreshedAt
+		assert(a.cache.refreshedAt == t1 and b.watched[KEY] == nil)
+		table.clear(writes)
+
+		-- A and C take the newer cache. C's GitHub refresh is out.
+		w.kv["hub.cache"] = newer({ WEB, API114 })
+		Block.event(a, { ev = "action", act = "hub-focused", value = "" } :: any, cxA)
+		Block.event(c, { ev = "action", act = "hub-focused", value = "" } :: any, cxC)
+		assert(a.cache.refreshedAt == stamp and c.cache.refreshedAt == stamp and b.cache.refreshedAt == t1 and t1 ~= stamp, "mixed ages")
+		local answerC: any = nil
+		c.github = quietGithub(function(_, done) answerC = done end)
+		Block.event(c, { ev = "action", act = "hub-refresh", value = "" } :: any, cxC)
+		assert(answerC ~= nil and c.flights.refresh and #reads(w) == 4)
+		reads(w)[4].done(out("WATCH"))
+
+		-- A's successful read names KEY: stored at T2.
+		a.github = quietGithub(function() end)
+		w.decoded["READ_K"] = watchWith({ KEY })
+		Block.event(a, { ev = "action", act = "hub-refresh", value = "" } :: any, cxA)
+		assert(#reads(w) == 5)
+		reads(w)[5].done(out("READ_K"))
+		assert(entry(w.kv["hub.cache"], KEY).tandem == true and w.kv["hub.cache"].refreshedAt == stamp)
+		local stored = #writes
+		assert(stored >= 1 and b.watched[KEY] == nil and not State.prOf(b.s, KEY).tandem and b.flights.tandem)
+
+		-- B's older answer, which omits KEY, adopts T2 and joins KEY: it stores nothing, and the owned card shows at once.
+		local rendered = w.renders
+		older.done(out("WATCH"))
+		assert(#writes == stored, "the older answer stored nothing")
+		assert(b.cache.refreshedAt == stamp and entry(b.cache, API114).title == NEWER, "B holds T2")
+		assert(b.watched[KEY] == true and b.handoffs == 1 and State.prOf(b.s, KEY).tandem == true, "B joined KEY")
+		assert(w.renders > rendered, "and drew it")
+		local mine = card(b.s, KEY)
+		assert(mine.column == "in_review" and mine.chips[1].text == "Waiting on Tandem" and not offers(mine, "card-agent"))
+		assert(#reads(w) == 6 and b.flights.tandem, "one replacement read is out")
+		older.done(out("WATCH"))
+		assert(#reads(w) == 6 and #writes == stored, "the older answer counts once")
+
+		-- The replacement read keeps KEY, adds OTHER, and stores the newer snapshot.
+		w.decoded["REPLACEMENT"] = watchWith({ KEY, OTHER })
+		reads(w)[6].done(out("REPLACEMENT"))
+		assert(not b.flights.tandem and #reads(w) == 6)
+		assert(b.watched[KEY] == true and b.watched[OTHER] == true and State.prOf(b.s, KEY).tandem and State.prOf(b.s, OTHER).tandem)
+		local latest = w.kv["hub.cache"]
+		assert(latest.refreshedAt == stamp and entry(latest, KEY).tandem == true and entry(latest, OTHER).tandem == true and entry(latest, API114).title == NEWER)
+		assert(#writes == stored + 1, "one store, from the replacement read")
+
+		-- Every store so far is T2 and keeps the newer snapshot; none is the older cache, and no store dropped a flag once set.
+		local seenKey, seenOther = false, false
+		assert(#writes == stored + 1)
+		for i, saved in writes do
+			assert(saved.stamp ~= t1 and saved.stamp == stamp, "store " .. i .. " is not the older cache")
+			assert(not (seenKey and not saved.key) and not (seenOther and not saved.other), "store " .. i .. " kept every flag")
+			assert(saved.title == NEWER, "store " .. i .. " kept the newer snapshot")
+			seenKey, seenOther = seenKey or saved.key, seenOther or saved.other
+		end
+		assert(seenKey and seenOther)
+
+		-- C's delayed GitHub answer (a refresh, so it stamps the real clock) keeps both: Fix with agent never returns on either card.
+		answerC({ viewer = "jubbydev", prs = copy(Cases.prs), rateLimit = nil, calls = {}, truncated = false }, nil)
+		frozen(c)
+		assert(c.watched[KEY] == true and c.watched[OTHER] == true and State.prOf(c.s, KEY).tandem and State.prOf(c.s, OTHER).tandem, "C joined both")
+		assert(entry(w.kv["hub.cache"], KEY).tandem == true and entry(w.kv["hub.cache"], OTHER).tandem == true)
+		for _, key in { KEY, OTHER } do
+			local owned = card(c.s, key)
+			assert(owned.chips[1].text == "Waiting on Tandem" and owned.main and owned.main.act == "card-handoff" and not offers(owned, "card-agent"), key)
+			Block.event(c, { ev = "action", act = "card-agent", value = key } :: any, cxC)
+		end
+		assert(c.agentFlight == nil and gh(w) == nil, "no local fixer")
+		for i = #writes - 1, #writes do
+			assert(writes[i].stamp ~= t1 and writes[i].key and writes[i].other, "store " .. i .. " after C's answer keeps both flags")
+		end
+	end)
 end
 
 -- An Update branch queued before Tandem took the PR sends nothing once it owns it.

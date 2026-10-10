@@ -1059,11 +1059,16 @@ local function loadTandem(b: Block, cx: BlockCx)
 		replied = true
 		b.flights.tandem = false
 		if b.closed then return end
+		-- The answer lands on the newest cache there is: one stored strictly newer than this block's own becomes the board
+		-- first, so what is stored next carries its stamp and snapshot and never this block's older ones.
+		local before = b.cache
+		adoptShared(b, cx)
+		local adopted = b.cache ~= before
 		joinShared(b)
 		-- A hand-off Tandem took while this read was out is newer than the read, which could not name that PR: drop it and read
 		-- again. The ownership it joined guards the card at once, and the older answer stores nothing.
 		if b.handoffs ~= epoch then
-			if applyOwnership(b, cx) then draw(b, cx) end
+			if applyOwnership(b, cx) or adopted then draw(b, cx) end
 			return loadTandem(b, cx)
 		end
 		if watched then b.watched = watched end
@@ -1073,7 +1078,10 @@ local function loadTandem(b: Block, cx: BlockCx)
 			local want = flags[pr.key] == true
 			if pr.tandem ~= want then pr.tandem, changed = want, true end
 		end
-		if not changed then return end
+		if not changed then
+			if adopted then draw(b, cx) end
+			return
+		end
 		local flight = b.agentFlight
 		if flight then carryOn(b, cx, flight) end
 		State.project(b.s)
