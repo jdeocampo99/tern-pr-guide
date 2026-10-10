@@ -781,12 +781,15 @@ local function agentOverlap()
 			Block.event(b, { ev = "action", act = act, value = TARGET } :: any, w.cx)
 		end
 		assert(#w.finds == finds and #w.clones == 0 and #w.started == 0 and b.agentFlight == nil and gh(w) == nil)
-		assert(b.s.agents[TARGET].kind == "failed" and #w.toasts == 0)
+		assert(b.s.agents[TARGET] == nil and #w.toasts == 0, "the failed state is dropped once Tandem owns the card")
+		local owned = card(b.s, TARGET)
+		assert(owned.chips[1].text == "Waiting on Tandem" and owned.main and owned.main.act == "card-handoff" and owned.main.key == "A")
 		State.noAgentClone(b.s, TARGET, "acme/api")
+		assert(b.s.agents[TARGET] == nil, "a missing clone is dropped too")
 		for _, act in { "card-agent-clone", "card-agent-folder" } do
 			Block.event(b, { ev = "action", act = act, value = TARGET } :: any, w.cx)
 		end
-		assert(#w.finds == finds and #w.clones == 0 and #w.started == 0 and b.agentFlight == nil and b.s.agents[TARGET].kind == "no_clone")
+		assert(#w.finds == finds and #w.clones == 0 and #w.started == 0 and b.agentFlight == nil and b.s.agents[TARGET] == nil)
 		State.agentFailed(b.s, "acme/api#116", "No clone was found", nil)
 		Block.event(b, { ev = "action", act = "card-agent-retry", value = "acme/api#116" } :: any, w.cx)
 		assert(#w.finds == finds + 1 and #w.clones == 1 and b.agentFlight ~= nil, "a PR nobody watches still starts")
