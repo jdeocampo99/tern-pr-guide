@@ -126,6 +126,7 @@ export type State = {
 	flakes: { [string]: Flake }, -- by card key; the block reads the evidence, so a card without one has no label
 	summaries: { [string]: Summary },
 	merges: { [string]: Model.MergeResolution }, -- by repo
+	autoMerge: { [string]: boolean }, -- by repo: its "Allow auto-merge" setting, once detection has read it
 	acted: { [string]: boolean }, -- cards the viewer just acted on (merged, updated): their arrival is not toasted
 	busy: { [string]: string }, -- by card key: the action in flight
 	refreshedAt: string?,
@@ -206,7 +207,7 @@ function M.new(prs: { HubPR }, now: number, saved: any): State
 		prs = prs, now = now, board = emptyBoard(tab), tab = tab, selected = nil, marked = {},
 		repositories = repositories, sort = sort, search = Fields.create(""), link = Fields.create(""),
 		mode = "board", route = nil, menu = nil, menuCursor = 1, confirm = nil, methodEdit = nil, folded = folded, recent = {}, walking = false,
-		ringed = {}, agents = {}, details = {}, flakes = {}, summaries = {}, merges = {}, acted = {}, busy = {},
+		ringed = {}, agents = {}, details = {}, flakes = {}, summaries = {}, merges = {}, autoMerge = {}, acted = {}, busy = {},
 		refreshedAt = nil, loading = false, error = nil, agent = nil,
 		keyed = false, born = {}, booted = false,
 	}
@@ -259,7 +260,7 @@ local function action(act: string, label: string, key: string?): CardAction
 	return { act = act, value = nil, label = label, key = key, confirm = false }
 end
 
-local function actionsFor(pr: HubPR, column: Column, reasons: { Model.Reason }, merge: Model.MergeResolution?, flake: Flake?): (CardAction?, { CardAction })
+local function actionsFor(pr: HubPR, column: Column, reasons: { Model.Reason }, merge: Model.MergeResolution?, flake: Flake?, autoMerge: boolean?): (CardAction?, { CardAction })
 	if column == "needs_fixes" then
 		local feedback, checks = false, false
 		for _, reason in reasons do
@@ -285,7 +286,22 @@ local function actionsFor(pr: HubPR, column: Column, reasons: { Model.Reason }, 
 		end
 		return main, more
 	elseif column == "in_review" then
-		return action("card-copy", "Copy link", "C"), {}
+		local copy = action("card-copy", "Copy link", "C")
+		local main, more = copy, {}
+		-- A reviewer waits on the author to say the fix is in: asking again is the card's job until they have been asked.
+		local again = Model.awaitingReReview(pr)
+		if again and #again.ask > 0 then
+			main, more = action("card-rerequest", "Re-request review", "Q"), { copy }
+		end
+		if pr.pending then
+			local method = if merge then merge.method else nil
+			if not (method and method.kind == "comment" and not method.cancel) then
+				table.insert(more, action("card-cancel", "Cancel merge", "M"))
+			end
+		elseif Model.canMergeWhenReady(merge, autoMerge) then
+			table.insert(more, action("card-auto", "Merge when ready", "M"))
+		end
+		return main, more
 	elseif column == "ready" then
 		if pr.pending then
 			-- A merge in flight: only Cancel merge, and only when the method can be taken back.
@@ -357,8 +373,11 @@ local function chipsFor(pr: HubPR, placement: Model.Placement, now: number): ({ 
 			end
 		end
 	elseif column == "in_review" then
+		local again = Model.awaitingReReview(pr)
 		if pr.tandem then
 			table.insert(chips, chip("Waiting on Tandem", "agent"))
+		elseif again then
+			table.insert(chips, chip("Waiting on " .. Model.reviewerList(again.waiting) .. " to re-review", "wait"))
 		elseif pr.checks.state == "pending" then
 			table.insert(chips, chip("Waiting on checks", "running"))
 		else
@@ -398,6 +417,8 @@ function M.pendingNote(s: State, pr: HubPR): string?
 	if not pending then return nil end
 	local resolved = s.merges[pr.repo]
 	local method = if resolved then resolved.method else nil
+	-- Asked for before the PR is ready: whatever the method, it merges by itself once approved and green.
+	if Model.classify(pr, s.now) == "in_review" then return "Merges when ready" end
 	if pending.method == "queue" then return "In the merge queue" end
 	if pending.method == "label" then
 		return "Labeled " .. (if method and method.kind == "label" then method.label else "for merge") .. " · waiting for the merge"
@@ -433,7 +454,7 @@ end
 local function toCard(pr: HubPR, placement: Model.Placement, s: State): Card
 	local known = s.flakes[pr.key]
 	local flake = if known and known.headOid == pr.headOid then known else nil
-	local main, more = actionsFor(pr, placement.column, placement.reasons, s.merges[pr.repo], flake)
+	local main, more = actionsFor(pr, placement.column, placement.reasons, s.merges[pr.repo], flake, s.autoMerge[pr.repo])
 	local chips, detail, detailKind = chipsFor(pr, placement, s.now)
 	return {
 		flake = if flake and flake.flaky and flake.reason then "Likely flaky: " .. flake.reason else nil,
@@ -981,6 +1002,30 @@ end
 -- Sets the repo's resolution (the block resolves it from kv evidence).
 function M.setMerge(s: State, repo: string, resolution: Model.MergeResolution)
 	s.merges[repo] = resolution
+	M.project(s)
+end
+
+-- The repo's "Allow auto-merge" setting, read by detection: Merge when ready shows only where it's on.
+function M.setAutoMerge(s: State, repo: string, allowed: boolean)
+	s.autoMerge[repo] = allowed
+	M.project(s)
+end
+
+-- Reviewers just asked again: their requests show at once, until a refresh brings GitHub's own.
+function M.reRequested(s: State, key: string, logins: { string })
+	for _, pr in s.prs do
+		if pr.key == key then
+			local requested = {}
+			for _, name in pr.reviews.requested do table.insert(requested, name) end
+			for _, name in logins do
+				if not table.find(requested, name) then table.insert(requested, name) end
+			end
+			local reviews = {}
+			for k, v in pr.reviews do reviews[k] = v end
+			reviews.requested = requested
+			pr.reviews = reviews :: any
+		end
+	end
 	M.project(s)
 end
 

@@ -82,7 +82,7 @@ Each PR appears exactly once.
 | Reviewed fix | **Push to branch** (P) | Discard fix (D) |
 | Fix failed | **Try again** (A) | Open worktree (O) |
 | No local clone | **Clone repo** (A) | Choose folder… (O) |
-| In review | **Copy link** (C): copies "title url" as plain text (Tern's clipboard has no rich flavor; see the clipboard facts) | |
+| In review | **Copy link** (C), or **Re-request review** (Q) while a reviewer waits on a re-review: copies "title url" as plain text (Tern's clipboard has no rich flavor; see the clipboard facts) | |
 | In review with a bot review | **Fix bot comments** (A); the card stays in In review | Copy link (C) |
 | Ready to merge | **Merge** (M) | Merge method for the repo (`,`) |
 | To review | **Review** (⏎) | Remove from Review requests (X), only on PRs you added |
@@ -129,6 +129,7 @@ Each repo has one merge setting, stored in kv. It's one of six kinds:
 |---|---|---|
 | Squash and merge · Create a merge commit · Rebase and merge | `gh pr merge` | ⌘⏎ inline |
 | Merge when ready (GitHub merge queue) | `gh pr merge --auto` | No, it can be cancelled |
+| *Merge when ready on an In review card* (any method) | GitHub methods: `gh pr merge --auto --squash\|--merge\|--rebase`; queue: `--auto`; comment and label: the method's command, sent early | No; cancel is `--disable-auto` or the method's cancel |
 | Comment a command (`/merge`, `/aviator merge`, plus an optional cancel comment) | `gh pr comment` | No, it can be cancelled |
 | Add a label | `gh pr edit --add-label` | No, it can be cancelled |
 
@@ -1103,3 +1104,11 @@ Proposals rejected so far: automatic pushes, "Fix all", toasts for conflicts, an
 - UI copy is neutral and official, like GitHub. Every label says what's needed from the user. No filler copy.
 - Keyboard first, with vim keys.
 - Push back when you disagree.
+
+## Merge when ready and Re-request review (issue #14)
+
+- **Re-review rule (`model.awaitingReReview`).** A non-bot reviewer's latest review that requested changes on a commit other than `headOid` is *moved past*: it no longer counts as feedback in `reasons`, so the PR is In review, not Needs fixes. `ask` holds the waiting reviewers not already in `reviews.requested`. A review with no commit oid is never stale. The chip reads "Waiting on @a to re-review", "@a and @b", or "@a and 2 others". Open threads by the same reviewer still make Needs fixes.
+- **Q** is Re-request review (`gh pr edit <n> --repo <r> --add-reviewer a,b`). **M** is Merge when ready / Cancel merge on In review cards, behind the ▾.
+- **Allow auto-merge** is `repository.autoMergeAllowed` in `merge-detect.graphql`, held in `State.autoMerge` (per session, not in the kv record). GitHub methods and the queue need it true; unknown hides the entry. Comment and label methods skip it. A learned, unconfirmed command (`ask`) is not offered early.
+- **Contracts added:** `commands.autoMerge(pr, method)`, `Detected.autoMergeAllowed`, `Model.canMergeWhenReady`, `Model.reviewerList`, `State.setAutoMerge`, `State.reRequested`. `commands.requestReview(pr, logins)` takes a comma-separated list.
+- **Pending.** Merge when ready is stored as `pending` (`queue`, `comment` or `label`); a card in In review with `pending` reads "Merges when ready". Auto-merge turned on outside the hub is not shown (the hub fragment keeps `pending` nil).

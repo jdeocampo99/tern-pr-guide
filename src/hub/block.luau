@@ -50,11 +50,12 @@ export type Block = {
 
 type Handler = (b: Block, cx: BlockCx, value: string) -> ()
 
-local ARGS = "generate=true|false and fixture=<name> (cases)"
+local ARGS = "generate=true|false and fixture=<name> (cases, rereview)"
 
 -- Fixtures by name, loaded only when asked for. `cases` is the rules' recorded pull requests.
 local FIXTURES: { [string]: () -> any } = {
 	cases = function() return require("../../fixtures/hub/cases") end,
+	rereview = function() return require("../../fixtures/hub/rereview") end,
 }
 
 -- The recently opened pull requests a fixture board shows, so the fold has rows without a kv store.
@@ -459,17 +460,25 @@ local function loadMerges(b: Block)
 end
 
 -- Asks GitHub how a repo merges, once per repo: what it declares and the habit of its last 8 merges (1 point).
-local function detectRepo(b: Block, cx: BlockCx, repo: string)
-	if b.fixture or b.closed or b.detecting[repo] or readRecord(b, repo) then return end
+-- The same answer carries the repo's "Allow auto-merge" setting, which Merge when ready needs: with `needAuto`, a repo
+-- whose record is saved is asked once per session for that alone.
+local function detectRepo(b: Block, cx: BlockCx, repo: string, needAuto: boolean?)
+	if b.fixture or b.closed or b.detecting[repo] then return end
+	local known = readRecord(b, repo)
+	if known and not (needAuto and b.s.autoMerge[repo] == nil) then return end
 	b.detecting[repo] = true
 	b.github.detect(repo, function(found, err)
 		if b.closed then return end
 		if found then
-			local record = recordOf(b, repo)
-			record.declared, record.learned, record.viewerDefault, record.checkedAt = found.declared, found.learned, found.viewerDefault, isoNow()
-			local why = saveRecord(b, repo, record)
-			if why then cx:toast("error", "Couldn't save how " .. repo .. " merges: " .. why) end
+			State.setAutoMerge(b.s, repo, found.autoMergeAllowed)
+			if not known then
+				local record = recordOf(b, repo)
+				record.declared, record.learned, record.viewerDefault, record.checkedAt = found.declared, found.learned, found.viewerDefault, isoNow()
+				local why = saveRecord(b, repo, record)
+				if why then cx:toast("error", "Couldn't save how " .. repo .. " merges: " .. why) end
+			end
 		else
+			b.detecting[repo] = nil
 			cx:toast("error", "Couldn't check how " .. repo .. " merges: " .. reasonOf(if err then err.message else "no answer"))
 		end
 		draw(b, cx)
@@ -482,6 +491,8 @@ local function detectMerges(b: Block, cx: BlockCx)
 	for _, entry in b.s.board.columns do
 		if entry.column == "ready" then
 			for _, card in entry.cards do detectRepo(b, cx, card.pr.repo) end
+		elseif entry.column == "in_review" then
+			for _, card in entry.cards do detectRepo(b, cx, card.pr.repo, true) end
 		end
 	end
 end
@@ -947,9 +958,68 @@ ACTIONS["card-cancel"] = function(b, cx, key)
 				cx:toast("success", "Commented " .. (method.cancel or "") .. " on #" .. pr.number, pr.title)
 			elseif method.kind == "label" then
 				cx:toast("success", "Removed the " .. method.label .. " label from #" .. pr.number, pr.title)
+			elseif card.column == "in_review" then
+				cx:toast("success", "#" .. pr.number .. " won't merge when ready", pr.title)
 			else
 				cx:toast("success", "Removed #" .. pr.number .. " from the merge queue", pr.title)
 			end
+			refetchSoon(b, cx)
+		end
+		draw(b, cx)
+	end)
+end
+
+-- Merge when ready (M behind the ▾ on an In review card): GitHub's `--auto` with the repo's method flag, or the
+-- repo's own command posted early. It can be cancelled, so it asks nothing. The card then reads "Merges when ready".
+ACTIONS["card-auto"] = function(b, cx, key)
+	local s = b.s
+	local card = State.card(s, key)
+	if not card or s.busy[key] or card.pr.pending then return end
+	local pr = card.pr
+	State.select(s, key)
+	if b.fixture then return cx:toast("info", "The sample board doesn't merge", pr.key) end
+	if not Model.canMergeWhenReady(s.merges[pr.repo], s.autoMerge[pr.repo]) then
+		return cx:toast("error", "Couldn't set #" .. pr.number .. " to merge when ready: " .. pr.repo .. " doesn't allow auto-merge", pr.title)
+	end
+	local method = methodOf(b, pr)
+	State.setBusy(s, key, MERGE_BUSY[method.kind] or "Setting…")
+	b.github.run(Github.commands.autoMerge(pr, method), function(_, err)
+		if b.closed then return end
+		State.setBusy(s, key, nil)
+		if err then
+			cx:toast("error", "Couldn't set #" .. pr.number .. " to merge when ready: " .. reasonOf(err.message), pr.repo)
+		else
+			local kind = if method.kind == "comment" or method.kind == "label" then method.kind else "queue"
+			State.setPending(s, key, { method = kind, at = isoNow() })
+			keepCache(b)
+			cx:toast("success", "#" .. pr.number .. " will merge when ready", pr.title)
+			refetchSoon(b, cx)
+		end
+		draw(b, cx)
+	end)
+end
+
+-- Re-request review (Q on a card that waits on a re-review): asks the reviewers whose changes the push answers.
+ACTIONS["card-rerequest"] = function(b, cx, key)
+	local s = b.s
+	local card = State.card(s, key)
+	if not card or s.busy[key] then return end
+	local pr = card.pr
+	local again = Model.awaitingReReview(pr)
+	if not again or #again.ask == 0 then return end
+	State.select(s, key)
+	if b.fixture then return cx:toast("info", "The sample board doesn't ask for reviews", pr.key) end
+	local logins = again.ask
+	State.setBusy(s, key, "Requesting…")
+	b.github.run(Github.commands.requestReview(pr, table.concat(logins, ",")), function(_, err)
+		if b.closed then return end
+		State.setBusy(s, key, nil)
+		if err then
+			cx:toast("error", "Couldn't re-request review on #" .. pr.number .. ": " .. reasonOf(err.message), pr.repo)
+		else
+			State.reRequested(s, key, logins)
+			keepCache(b)
+			cx:toast("success", "Asked " .. Model.reviewerList(logins) .. " to review #" .. pr.number .. " again", pr.title)
 			refetchSoon(b, cx)
 		end
 		draw(b, cx)
@@ -1568,6 +1638,10 @@ local block: BlockDef<Block> = {
 					end
 				end
 			end
+			-- A sample may bring how its repos merge and whether they allow auto-merge.
+			local data: any = FIXTURES[fixture]()
+			for repo, resolution in (data.merges or {}) do s.merges[repo] = resolution end
+			for repo, allowed in (data.autoMerge or {}) do s.autoMerge[repo] = allowed end
 			State.project(s)
 			local sample = table.clone(SAMPLE_AGENT)
 			sample.models = table.clone(SAMPLE_AGENT.models)
