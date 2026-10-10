@@ -1082,7 +1082,7 @@ local function terminalAgents()
 			if terminal == "failed" then State.agentFailed(b.s, TARGET, "No clone was found", nil) else State.noAgentClone(b.s, TARGET, "acme/api") end
 			b.watched[TARGET] = true
 			w.kvIn = { ["hub.cache"] = storedCache({ WEB, API114, TARGET }, Cases.asOf + 60) }
-			Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+			runTimers(w)
 			assert(b.s.agents[TARGET] == nil)
 			frozen(b)
 			projected(w, b, terminal .. " by shared cache")
