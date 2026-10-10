@@ -2139,6 +2139,172 @@ local function queuedMerge()
 	end)
 end
 
+-- Two windows share one store. Window B stores ownership of a PR, at this window's cache's stamp or later, before any
+-- callback of this window (a read of Tandem, a refresh, a hand-off) has joined it. Every guard reads the shared store
+-- itself, so no command reaches the branch. The ownership comes only through the shared KV: this window runs no read of
+-- Tandem and no hand-off, and stores nothing.
+local function sharedOwnership()
+	-- This window holds the cache the store held before B wrote, naming only what Tandem's recorded watch names.
+	local function holdCache(w: any, b: any)
+		w.shared = true
+		w.kv["hub.cache"] = storedCache({ WEB, API114 }, Cases.asOf)
+		b.cache = Sync.load(copy(w.kv["hub.cache"]))
+		assert(b.cache ~= nil, "this window holds a cache of the store's stamp")
+	end
+	local function storeOwned(w: any, owned: { string }, at: number): any
+		local theirs = storedCache(owned, at)
+		w.kv["hub.cache"] = theirs
+		return theirs
+	end
+
+	-- A push whose command check is out: the next check joins what B stored and refuses, whatever the stamp's age.
+	for _, at in { Cases.asOf, Cases.asOf + 60 } do
+		withReady(function(w, b)
+			holdCache(w, b)
+			local watches, joined = #reads(w), b.handoffs
+			pressPush(w, b)
+			assert(#w.pushes == 1 and w.pushes[1].plan.command ~= nil)
+			local run = w.pushes[1]
+			assert(run.canPush() == true, "unwatched: the push may begin")
+			local theirs = storeOwned(w, { WEB, API114, TARGET }, at)
+			assert(b.watched[TARGET] == nil and not State.prOf(b.s, TARGET).tandem and b.handoffs == joined, "this window has not heard of it")
+			assert(run.canPush() == false, "the next check joins the store's ownership and refuses")
+			assert(b.watched[TARGET] == true and State.prOf(b.s, TARGET).tandem == true and b.handoffs == joined + 1)
+			assert(#reads(w) == watches and #handoffs(w) == 0 and gh(w) == nil, "only the store told this window")
+			assert(same(w.kv["hub.cache"], theirs), "nothing was stored")
+			-- Fetch stops the push there; the ready fix and its lease are kept, and Discard still returns the lease.
+			run.done(nil, "The selected fix changed")
+			assert(#w.pushes == 1 and #w.returns == 0)
+			assert(b.s.agents[TARGET].kind == "ready" and b.agentFlight ~= nil and w.lease ~= nil and b.s.busy[TARGET] == nil, "the fix and its lease are kept")
+			assert(#w.toasts == 1 and string.find(w.toasts[1].title, "Tandem watches this pull request", 1, true))
+			pressPush(w, b)
+			assert(#w.pushes == 1)
+			w.Block.event(b, { ev = "action", act = "review-fix-discard", value = "" } :: any, w.cx)
+			w.Block.event(b, { ev = "action", act = "review-fix-discard-confirm", value = "" } :: any, w.cx)
+			assert(#w.returns == 1)
+			finishReturn(w, b, 1)
+		end)
+	end
+
+	-- B's ownership arrives before the click's own check: the press itself joins it, so the push never begins.
+	withReady(function(w, b)
+		holdCache(w, b)
+		storeOwned(w, { WEB, API114, TARGET }, Cases.asOf)
+		assert(not State.prOf(b.s, TARGET).tandem)
+		pressPush(w, b)
+		assert(#w.pushes == 0 and #w.returns == 0 and State.prOf(b.s, TARGET).tandem == true)
+		assert(b.s.agents[TARGET].kind == "ready" and b.agentFlight ~= nil and w.lease ~= nil, "the fix and its lease are kept")
+	end)
+
+	-- A click whose card was drawn before B's write sends nothing. Each action also sends its command once on a PR nobody
+	-- watches, so the empty result is the guard's.
+	for _, act in { "card-merge", "card-auto", "card-update" } do
+		for _, stale in { false, true } do
+			withWorld(function(w, Fetch, Block)
+				local b = live(w, Block)
+				reads(w)[1].done(out("WATCH"))
+				w.runs = {}
+				b.github = { refresh = function() end, run = function(command: any, done: any) table.insert(w.runs, { command = command, done = done }) end }
+				local key = if act == "card-update" then "acme/api#118" else "acme/api#109"
+				if act == "card-update" then
+					local lagging: any = State.prOf(b.s, key)
+					lagging.behind, lagging.conflicts, lagging.draft = true, false, false
+				else
+					b.s.merges["acme/api"] = { method = { kind = "comment", command = "/merge" }, source = "declared", ask = false }
+					b.s.autoMerge["acme/api"] = true
+				end
+				State.project(b.s)
+				holdCache(w, b)
+				local watches = #reads(w)
+				local theirs = if stale then storeOwned(w, { WEB, API114, key }, Cases.asOf + 60) else nil
+				assert(b.watched[key] == nil and not State.prOf(b.s, key).tandem)
+				w.toasts = {}
+				Block.event(b, { ev = "action", act = act, value = key } :: any, w.cx)
+				if not stale then
+					assert(#w.runs == 1 and b.s.busy[key] ~= nil, act .. ": an unwatched PR sends it")
+				else
+					assert(#w.runs == 0 and gh(w) == nil and b.s.busy[key] == nil, act .. ": nothing is sent")
+					assert(b.watched[key] == true and State.prOf(b.s, key).tandem == true and #reads(w) == watches and #handoffs(w) == 0, act .. ": the store told this window")
+					assert(same(w.kv["hub.cache"], theirs), act .. ": nothing was stored")
+					assert(State.prOf(b.s, key).pending == nil, act .. ": and nothing is marked pending")
+				end
+			end)
+		end
+	end
+
+	-- A fix started from a click that predates B's write never begins either.
+	withWorld(function(w, Fetch, Block)
+		local b = agentBoard(w, Fetch, Block)
+		holdCache(w, b)
+		local finds = #w.finds
+		local theirs = storeOwned(w, { WEB, API114, TARGET }, Cases.asOf)
+		Block.event(b, { ev = "action", act = "card-agent", value = TARGET } :: any, w.cx)
+		noFixer(w, b, "a stale Fix with agent")
+		assert(#w.finds == finds and #w.clones == 0 and gh(w) == nil and #w.toasts == 0)
+		assert(b.watched[TARGET] == true and State.prOf(b.s, TARGET).tandem == true and same(w.kv["hub.cache"], theirs))
+	end)
+
+	-- Setup that is waiting on a lookup when B stores the ownership: the next step's own check joins it, so that step
+	-- stops the fix and nothing goes on to the clone, the refs or the engine. Without B's write the same step goes on.
+	for _, stage in { "root", "clone", "refs" } do
+		for _, stale in { false, true } do
+			withWorld(function(w, Fetch, Block)
+				local b = agentBoard(w, Fetch, Block)
+				holdCache(w, b)
+				w.holdRoot = stage == "root"
+				Block.event(b, { ev = "action", act = "card-agent", value = TARGET } :: any, w.cx)
+				assert(b.agentFlight ~= nil and b.agentFlight.engine == nil and b.s.agents[TARGET].kind == "running")
+				local held: any = nil
+				if stage == "root" then
+					held = w.finds[#w.finds]
+				elseif stage == "clone" then
+					held = w.clones[1]
+				else
+					w.clones[1].done("/clone", nil)
+					held = gh(w)
+				end
+				assert(held ~= nil, stage .. ": a step is out")
+				local watches = #reads(w)
+				local theirs = if stale then storeOwned(w, { WEB, API114, TARGET }, Cases.asOf) else nil
+				assert(b.watched[TARGET] == nil and not State.prOf(b.s, TARGET).tandem and b.agentFlight ~= nil, stage .. ": not heard of yet")
+				if stage == "root" then held.done({ root = REPO_ROOT }, nil)
+				elseif stage == "clone" then held.done("/clone", nil)
+				else held.done(out("REFS")) end
+				if stale then
+					noFixer(w, b, stage)
+					assert(b.watched[TARGET] == true and State.prOf(b.s, TARGET).tandem == true, stage .. ": joined from the store")
+					assert(#w.clones == (if stage == "root" then 0 else 1) and (stage == "refs" or gh(w) == nil), stage .. ": nothing went on")
+					assert(#w.toasts == 0 and #reads(w) == watches and same(w.kv["hub.cache"], theirs), stage)
+				elseif stage == "root" then assert(#w.clones == 1 and b.agentFlight ~= nil)
+				elseif stage == "clone" then assert(gh(w) ~= nil and b.agentFlight ~= nil)
+				else assert(#w.started == 1 and b.agentFlight ~= nil and b.agentFlight.engine ~= nil) end
+			end)
+		end
+	end
+
+	-- A running engine is never cut off by the join: it is Stop's.
+	withWorld(function(w, Fetch, Block)
+		local b = agentBoard(w, Fetch, Block)
+		holdCache(w, b)
+		Block.event(b, { ev = "action", act = "card-agent", value = TARGET } :: any, w.cx)
+		w.clones[1].done("/clone", nil)
+		gh(w).done(out("REFS"))
+		assert(#w.started == 1 and b.agentFlight.engine ~= nil)
+		storeOwned(w, { WEB, API114, TARGET }, Cases.asOf)
+		Block.event(b, { ev = "action", act = "card-agent", value = TARGET } :: any, w.cx)
+		assert(State.prOf(b.s, TARGET).tandem == true and #w.started == 1 and b.agentFlight ~= nil and b.s.agents[TARGET].kind == "running" and w.stops == 0)
+	end)
+
+	-- An older cache joins nothing, at a guard or in a callback.
+	withReady(function(w, b)
+		holdCache(w, b)
+		w.kv["hub.cache"] = storedCache({ WEB, API114, TARGET }, Cases.asOf - 60)
+		pressPush(w, b)
+		assert(#w.pushes == 1 and w.pushes[1].canPush() == true)
+		assert(b.watched[TARGET] == nil and not State.prOf(b.s, TARGET).tandem)
+	end)
+end
+
 -- A fix still being set up for a PR whose ownership arrives in a whole board (another window's newer cache adopted on
 -- focus, or this window's own GitHub answer) ends as stopped at once, before the clone lookup or the read of Tandem
 -- answers, and neither answer starts anything. A running engine and a fix for another PR are left alone.
@@ -2261,6 +2427,7 @@ return function()
 	preWorktreeLease()
 	watchedMerge()
 	queuedMerge()
+	sharedOwnership()
 	wholeBoard()
 	fixture()
 end

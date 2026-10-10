@@ -442,16 +442,71 @@ local function agentFolder(b: Block, flight: AgentFlight, prompt: string, done: 
 	if not ok then finish(nil, tostring(err)) end
 end
 
+-- Ownership runs one way. A PR the other window's cache flags joins this block's set (it may be a hand-off this block's
+-- own reads predate, so a read that began before cannot name it and is read again). The other window's silence never
+-- clears one: only a successful read of Tandem here does, whatever the cache's age.
+local function joinOwnership(b: Block, shared: Sync.Cache)
+	local took = false
+	for _, pr in shared.prs do
+		local key = string.lower(pr.repo) .. "#" .. pr.number
+		if pr.tandem and not b.watched[key] then b.watched[key], took = true, true end
+	end
+	if took then b.handoffs += 1 end
+end
+
+-- The cache another window stored, if it is as new as this block's own (`strict`: newer). Adopting a cache takes the
+-- strictly newer one; joining its ownership also takes one stored at the same time, because a hand-off keeps the
+-- cache's own `refreshedAt`, so the window that took it leaves the same stamp this block holds.
+local function sharedCache(b: Block, strict: boolean): Sync.Cache?
+	local shared = readCache()
+	if not shared then return nil end
+	local theirs, mine = Model.epoch(shared.refreshedAt), cachedAt(b)
+	if not theirs then return nil end
+	return if mine == nil or theirs > mine or (not strict and theirs == mine) then shared else nil
+end
+
+-- Joins the ownership of a shared cache stored at this block's cache's time or later; an older one joins nothing.
+local function joinShared(b: Block)
+	local shared = sharedCache(b, false)
+	if shared then joinOwnership(b, shared) end
+end
+
+-- Puts Tandem's flags from this block's set onto its PRs. Positive only: a flag is set here, never cleared. Returns
+-- whether a PR moved.
+local function flagPrs(b: Block): boolean
+	local flags = Model.tandemFlags(b.watched, b.s.prs)
+	local moved = false
+	for _, pr in b.s.prs do
+		if flags[pr.key] and not pr.tandem then pr.tandem, moved = true, true end
+	end
+	return moved
+end
+
+-- The ownership half of every guard: joins what another window stored at this cache's time or later, flags the PRs and
+-- recounts. It is read-only toward everything else (no flight is touched, nothing drawn or persisted) so `carryOn` can
+-- call it. A sample board stays wholly local. Returns whether a PR moved.
+local function joinOwned(b: Block): boolean
+	if b.fixture or b.closed then return false end
+	joinShared(b)
+	if not flagPrs(b) then return false end
+	State.project(b.s)
+	recount(b)
+	return true
+end
+
 local function currentFlight(b: Block, flight: AgentFlight): boolean
 	return not b.closed and b.agentFlight == flight and not flight.settled and not flight.stopping
 end
 
 -- True while the fix may go on. One owner per branch: a fix still being set up for a PR Tandem has taken (no engine
 -- yet, so no worktree is held) ends as stopped, as Stop would end it, and never starts. A running engine is Stop's.
+-- Ownership another window stored since the last callback joins first, so every continuation of the setup sees it.
 local function carryOn(b: Block, cx: BlockCx, flight: AgentFlight): boolean
 	if not currentFlight(b, flight) then return false end
+	if flight.engine or flight.starting then return true end
+	joinOwned(b)
 	local pr = State.prOf(b.s, flight.key)
-	if not pr or not pr.tandem or flight.engine or flight.starting then return true end
+	if not pr or not pr.tandem then return true end
 	flight.stopping = true
 	if flight.cancel then flight.cancel() end
 	flight.settled = true
@@ -466,6 +521,15 @@ end
 local function reconcileFlight(b: Block, cx: BlockCx)
 	local flight = b.agentFlight
 	if flight then carryOn(b, cx, flight) end
+end
+
+-- The check before an effect on a branch: ownership another window stored joins, and a fix still being set up is
+-- reconciled with it. Run at every action's dispatch and before each command of a push. Returns whether a PR moved.
+local function syncOwnership(b: Block, cx: BlockCx): boolean
+	if b.fixture then return false end
+	local moved = joinOwned(b)
+	reconcileFlight(b, cx)
+	return moved
 end
 
 local function settleAgent(b: Block, cx: BlockCx, flight: AgentFlight, outcome: AgentFix.Outcome)
@@ -748,35 +812,6 @@ local function announce(b: Block, cx: BlockCx, old: Sync.Cache?, fresh: { Model.
 	end)
 end
 
--- Ownership runs one way. A PR the other window's cache flags joins this block's set (it may be a hand-off this block's
--- own reads predate, so a read that began before cannot name it and is read again). The other window's silence never
--- clears one: only a successful read of Tandem here does, whatever the cache's age.
-local function joinOwnership(b: Block, shared: Sync.Cache)
-	local took = false
-	for _, pr in shared.prs do
-		local key = string.lower(pr.repo) .. "#" .. pr.number
-		if pr.tandem and not b.watched[key] then b.watched[key], took = true, true end
-	end
-	if took then b.handoffs += 1 end
-end
-
--- The cache another window stored, if it is as new as this block's own (`strict`: newer). Adopting a cache takes the
--- strictly newer one; joining its ownership also takes one stored at the same time, because a hand-off keeps the
--- cache's own `refreshedAt`, so the window that took it leaves the same stamp this block holds.
-local function sharedCache(b: Block, strict: boolean): Sync.Cache?
-	local shared = readCache()
-	if not shared then return nil end
-	local theirs, mine = Model.epoch(shared.refreshedAt), cachedAt(b)
-	if not theirs then return nil end
-	return if mine == nil or theirs > mine or (not strict and theirs == mine) then shared else nil
-end
-
--- Joins the ownership of a shared cache stored at this block's cache's time or later; an older one joins nothing.
-local function joinShared(b: Block)
-	local shared = sharedCache(b, false)
-	if shared then joinOwnership(b, shared) end
-end
-
 -- Takes another window's newer cache, so windows share one refresh.
 local function adoptShared(b: Block, cx: BlockCx)
 	local shared = sharedCache(b, true)
@@ -806,11 +841,7 @@ end
 -- the flag. Positive only: a flag is set here, never cleared; a successful read of Tandem is the one that clears.
 -- Nothing is persisted; the caller decides what to store. Returns whether a PR moved.
 local function applyOwnership(b: Block, cx: BlockCx): boolean
-	local flags = Model.tandemFlags(b.watched, b.s.prs)
-	local moved = false
-	for _, pr in b.s.prs do
-		if flags[pr.key] and not pr.tandem then pr.tandem, moved = true, true end
-	end
+	local moved = flagPrs(b)
 	local flight = b.agentFlight
 	if flight then carryOn(b, cx, flight) end
 	if not moved then return false end
@@ -1610,6 +1641,8 @@ end
 -- its repo's tool, or the reason it didn't.
 local function runMerge(b: Block, cx: BlockCx, pr: Model.HubPR, done: ((err: string?) -> ())?)
 	local s = b.s
+	-- A batch reaches here once per PR, long after its dispatch: ownership stored meanwhile joins first.
+	joinOwned(b)
 	-- One owner per branch: nothing new merges a PR Tandem watches (a merge already pending is only cancelled).
 	-- A batch holds the PRs it captured: the board may have dropped one Tandem took, so the durable set is asked too.
 	local owned = State.prOf(s, pr.key)
@@ -2217,6 +2250,7 @@ local function reviewEffect(b: Block, cx: BlockCx, action: "push" | "discard")
 	if b.fixture then completed(true, nil); return end
 	-- Fetch asks this before every command of the push, the remote reads too: a PR Tandem takes meanwhile is never pushed to.
 	local function canPush(): boolean
+		syncOwnership(b, cx)
 		local current = b.s.agents[request.key]
 		local pr = State.prOf(b.s, request.key)
 		return not b.closed and b.agentFlight == flight and current ~= nil and current == agent and current.kind == "ready"
@@ -2461,7 +2495,10 @@ end
 
 local function dispatch(b: Block, cx: BlockCx, action: Keys.Action)
 	local handler = ACTIONS[action.act]
-	if handler then handler(b, cx, action.value or "") end
+	if not handler then return end
+	-- Ownership another window stored joins before the handler reads a guard, so no direct effect reaches a Tandem branch.
+	if syncOwnership(b, cx) then draw(b, cx) end
+	handler(b, cx, action.value or "")
 end
 
 -- The agent the reader's omp is set to, and the models it can run (a live board only).
