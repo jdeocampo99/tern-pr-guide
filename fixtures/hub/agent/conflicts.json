@@ -1,0 +1,154 @@
+{
+  "transcript": [
+    {
+      "argv": [
+        "/plugin/tools/conflicts",
+        "list"
+      ],
+      "reply": {
+        "hunks": [
+          {
+            "id": "h1",
+            "path": "src/a.txt",
+            "start": 2,
+            "lines": 7
+          },
+          {
+            "id": "h2",
+            "path": "src/b.txt",
+            "start": 1,
+            "lines": 7
+          }
+        ],
+        "generated": []
+      }
+    },
+    {
+      "argv": [
+        "/plugin/tools/conflicts",
+        "show",
+        "h1"
+      ],
+      "reply": {
+        "id": "h1",
+        "path": "src/a.txt",
+        "start": 2,
+        "base": [
+          "old"
+        ],
+        "ours": [
+          "viewer"
+        ],
+        "theirs": [
+          "base branch"
+        ],
+        "context": {
+          "before": [
+            "before"
+          ],
+          "after": [
+            "after"
+          ]
+        },
+        "subjects": {
+          "ours": [
+            "Preserve viewer change"
+          ],
+          "theirs": [
+            "Update base"
+          ]
+        }
+      }
+    },
+    {
+      "argv": [
+        "/plugin/tools/conflicts",
+        "show",
+        "h2"
+      ],
+      "reply": {
+        "id": "h2",
+        "path": "src/b.txt",
+        "start": 1,
+        "base": [
+          "old"
+        ],
+        "ours": [
+          "viewer"
+        ],
+        "theirs": [
+          "base branch"
+        ],
+        "context": {
+          "before": [
+            "before"
+          ],
+          "after": [
+            "after"
+          ]
+        },
+        "subjects": {
+          "ours": [
+            "Preserve viewer change"
+          ],
+          "theirs": [
+            "Update base"
+          ]
+        }
+      }
+    },
+    {
+      "argv": [
+        "/plugin/tools/conflicts",
+        "take",
+        "h2",
+        "ours"
+      ],
+      "reply": {
+        "id": "h2",
+        "taken": "ours"
+      }
+    },
+    {
+      "argv": [
+        "/plugin/tools/conflicts",
+        "write",
+        "h1"
+      ],
+      "stdin": "viewer and base branch\n",
+      "reply": {
+        "id": "h1",
+        "lines": 1
+      }
+    },
+    {
+      "argv": [
+        "/plugin/tools/conflicts",
+        "check"
+      ],
+      "reply": {
+        "remaining": 0
+      }
+    }
+  ],
+  "resolutions": [
+    {
+      "id": "h1",
+      "lines": [
+        {
+          "tag": "agent",
+          "text": "viewer and base branch"
+        }
+      ]
+    },
+    {
+      "id": "h2",
+      "lines": [
+        {
+          "tag": "ours",
+          "text": "viewer"
+        }
+      ]
+    }
+  ]
+}

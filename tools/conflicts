@@ -1,0 +1,293 @@
+#!/usr/bin/env python3
+"""Resolve one merge hunk at a time. JSON only; no Tern or model dependency.
+
+The worktree's private git directory holds a merge-scoped journal. IDs refer to original
+hunks, even after earlier hunks disappear. show caps each section at 40 lines of 240
+characters; context at three lines and commit subjects at five of 100 characters.
+check validates marker grammar, UTF-8, JSON/Python syntax where applicable, and the
+Git index. Other languages require the repository's checks after the fix is reviewed.
+"""
+import ast
+import fcntl
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+import tempfile
+
+LOCKFILES = frozenset('package-lock.json npm-shrinkwrap.json yarn.lock pnpm-lock.yaml bun.lock bun.lockb deno.lock Cargo.lock Gemfile.lock poetry.lock Pipfile.lock uv.lock composer.lock go.sum flake.lock Package.resolved mix.lock pubspec.lock packages.lock.json'.split())
+MARK = re.compile(r'^(<{7,}|\|{7,}|={7,}|>{7,})(?: .*|\r?\n)?$')
+CAP = 40
+WIDTH = 240
+
+
+def git(*args, stdin=None, required=True):
+    out = subprocess.run(['git', '--literal-pathspecs', *args], input=stdin, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=45)
+    if required and out.returncode:
+        raise ValueError(out.stderr.decode('utf-8', 'replace').split('\n')[0][:WIDTH])
+    return out
+
+
+def text(data):
+    return data.decode('utf-8')
+
+
+def bounded(lines, cap=CAP, width=WIDTH):
+    result = [line.rstrip('\r\n')[:width] for line in lines[:cap]]
+    if len(lines) > cap:
+        result.append(f'{len(lines) - cap} more lines')
+    return result
+
+
+def parse(content):
+    lines = content.splitlines(keepends=True)
+    hunks = []
+    at = 0
+    while at < len(lines):
+        found = MARK.match(lines[at].rstrip('\r\n'))
+        if not found:
+            at += 1
+            continue
+        if found[1][0] != '<':
+            raise ValueError('stray conflict marker')
+        start = at
+        size = len(found[1])
+        sections = {'ours': [], 'base': [], 'theirs': []}
+        side = 'ours'
+        at += 1
+        while at < len(lines):
+            marker = MARK.match(lines[at].rstrip('\r\n'))
+            if not marker:
+                sections[side].append(lines[at])
+            elif len(marker[1]) != size:
+                raise ValueError('mismatched conflict marker size')
+            elif marker[1][0] == '|' and side == 'ours':
+                side = 'base'
+            elif marker[1][0] == '=' and side in ('ours', 'base'):
+                side = 'theirs'
+            elif marker[1][0] == '>' and side == 'theirs':
+                at += 1
+                hunks.append(dict(sections, start=start + 1, offset=start, end=at,
+                                  raw=''.join(lines[start:at]),
+                                  context={'before': bounded(lines[max(0, start - 3):start], 3),
+                                           'after': bounded(lines[at:at + 3], 3)}))
+                break
+            else:
+                raise ValueError('malformed conflict markers')
+            at += 1
+        else:
+            raise ValueError('unterminated conflict hunk')
+    return hunks
+
+
+def safe_path(path):
+    candidate = Path(path)
+    if candidate.is_absolute() or '..' in candidate.parts or candidate.is_symlink():
+        raise ValueError('unsafe conflict path')
+    root = Path.cwd().resolve()
+    resolved = candidate.resolve()
+    if root not in resolved.parents:
+        raise ValueError('conflict path escapes worktree')
+    return candidate
+
+
+def read(path):
+    return text(safe_path(path).read_bytes())
+
+
+def unmerged():
+    return sorted(set(text(git('diff', '--name-only', '--diff-filter=U', '-z').stdout).split('\0')) - {''})
+
+
+def subjects(ours, theirs):
+    def side(left, right):
+        out = git('log', '-5', '--format=%s', left + '..' + right, required=False)
+        return bounded(text(out.stdout).splitlines(), 5, 100)
+    return {'ours': side(theirs, ours), 'theirs': side(ours, theirs)}
+
+
+def with_base(path, hunks):
+    if not hunks or all(h['base'] for h in hunks):
+        return
+    # The hand-run tool works with Git's default two-sided markers too. Reconstruct diff3
+    # privately from index stages, then match each original pair without exposing whole files.
+    with tempfile.TemporaryDirectory(prefix='prguide-diff3-') as directory:
+        files = []
+        for stage in (2, 1, 3):
+            file = Path(directory) / str(stage)
+            file.write_bytes(git('show', f':{stage}:{path}', required=False).stdout)
+            files.append(str(file))
+        merged = git('merge-file', '-p', '--diff3', *files, required=False)
+        try:
+            triples = parse(text(merged.stdout))
+        except (ValueError, UnicodeError):
+            return
+        used = set()
+        for hunk in hunks:
+            if hunk['base']:
+                continue
+            for index, triple in enumerate(triples):
+                if index not in used and triple['ours'] == hunk['ours'] and triple['theirs'] == hunk['theirs']:
+                    hunk['base'] = triple['base']
+                    used.add(index)
+                    break
+
+
+def journal():
+    head = text(git('rev-parse', 'HEAD').stdout).strip()
+    merge = git('rev-parse', '--verify', 'MERGE_HEAD', required=False)
+    merge_head = text(merge.stdout).strip() if merge.returncode == 0 else ''
+    private = Path(text(git('rev-parse', '--absolute-git-dir').stdout).strip())
+    location = private / 'prguide-conflicts.json'
+    identity = head + ':' + merge_head
+    # Git recreates MERGE_HEAD for each merge, including a retry of the same commits.
+    # Its file identity stays fixed while hunks are resolved and the index is staged.
+    # Include nanosecond timestamps because a pooled worktree can reuse an inode.
+    merge_instance = None
+    if merge_head:
+        stat = (private / 'MERGE_HEAD').stat()
+        merge_instance = [stat.st_dev, stat.st_ino, stat.st_mtime_ns, stat.st_ctime_ns]
+    if location.exists():
+        saved = json.loads(location.read_text())
+        if saved.get('identity') == identity and saved.get('merge_instance') == merge_instance:
+            return location, saved
+    saved = {'identity': identity, 'merge_instance': merge_instance,
+             'hunks': [], 'paths': unmerged(), 'generated': []}
+    history = subjects(head, merge_head) if merge_head else {'ours': [], 'theirs': []}
+    for path in saved['paths']:
+        attr = git('check-attr', '-z', 'linguist-generated', '--', path).stdout.split(b'\0')
+        if Path(path).name in LOCKFILES or (len(attr) >= 3 and attr[2] in (b'true', b'set')):
+            saved['generated'].append(path)
+        try:
+            hunks = parse(read(path))
+        except (UnicodeError, OSError, ValueError):
+            hunks = []
+        with_base(path, hunks)
+        for hunk in hunks:
+            hunk.update(id='h' + str(len(saved['hunks']) + 1), path=path, subjects=history)
+            saved['hunks'].append(hunk)
+    save(location, saved)
+    return location, saved
+
+
+def save(location, saved):
+    temp = location.with_suffix('.tmp')
+    temp.write_text(json.dumps(saved, ensure_ascii=True), encoding='utf-8')
+    os.replace(temp, location)
+
+
+def active(saved):
+    result = []
+    for hunk in saved['hunks']:
+        if 'resolved' in hunk:
+            continue
+        content = read(hunk['path'])
+        # Locate by original bytes and original relative order, never by a re-numbered list.
+        preceding = [h for h in saved['hunks'] if h['path'] == hunk['path'] and 'resolved' not in h
+                     and h['offset'] < hunk['offset'] and h['raw'] == hunk['raw']]
+        at = -1
+        for _ in range(len(preceding) + 1):
+            at = content.find(hunk['raw'], at + 1)
+            if at < 0:
+                break
+        if at >= 0:
+            result.append((hunk, content, at))
+    return result
+
+
+def check(saved):
+    count = 0
+    unresolved = set(unmerged())
+    changed = text(git('diff', 'HEAD', '--name-only', '-z').stdout).split('\0')
+    paths = sorted(set(saved['paths']) | unresolved | (set(changed) - {''}))
+    known = {h['path'] for h in saved['hunks']}
+    for path in paths:
+        try:
+            content = read(path)
+            hunks = parse(content)
+            if hunks:
+                count += len(hunks)
+                continue
+            if path in unresolved and path not in known:
+                # Binary, rename and delete conflicts require an explicit Git resolution.
+                count += 1
+                continue
+            if path.endswith('.json'):
+                json.loads(content)
+            elif path.endswith('.py'):
+                ast.parse(content)
+            if path in unresolved:
+                git('add', '--', path)
+        except (UnicodeError, OSError):
+            # Explicitly staged deletions and unchanged binary files are resolved in the index.
+            if path in unresolved or (Path(path).exists() and path.endswith(('.json', '.py'))):
+                count += 1
+        except (ValueError, SyntaxError):
+            count += 1
+    return count
+
+
+def main(args):
+    if not args or args[0] not in ('list', 'show', 'take', 'write', 'check'):
+        return {'error': 'usage: conflicts list|show ID|take ID ours|theirs|both|write ID|check'}, 2
+    command = args[0]
+    lengths = {'list': 1, 'show': 2, 'take': 3, 'write': 2, 'check': 1}
+    if len(args) != lengths[command] or (command == 'take' and args[2] not in ('ours', 'theirs', 'both')):
+        return {'error': 'bad usage'}, 2
+    # Always work at the root, even when invoked from a nested package.
+    os.chdir(text(git('rev-parse', '--show-toplevel').stdout).strip())
+    # Serialise concurrent tool calls in this worktree, including the journal replacement.
+    private = Path(text(git('rev-parse', '--absolute-git-dir').stdout).strip())
+    lock = open(private / 'prguide-conflicts.lock', 'a')
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    location, saved = journal()
+    if command == 'check':
+        remaining = check(saved)
+        return {'remaining': remaining}, int(remaining > 0)
+    live = active(saved)
+    if command == 'list':
+        return {'hunks': [{'id': h['id'], 'path': h['path'], 'start': h['start'],
+                           'lines': len(h['raw'].splitlines())} for h, _, _ in live],
+                'generated': saved['generated']}, 0
+    found = next(((h, c, at) for h, c, at in live if h['id'] == args[1]), None)
+    if not found:
+        return {'error': 'unknown hunk'}, 1
+    hunk, content, at = found
+    if command == 'show':
+        return dict(id=hunk['id'], path=hunk['path'], start=hunk['start'],
+                    base=bounded(hunk['base']), ours=bounded(hunk['ours']), theirs=bounded(hunk['theirs']),
+                    context=hunk['context'], subjects=hunk['subjects']), 0
+    if command == 'take':
+        choice = args[2]
+        replacement = ''.join(hunk['ours'] if choice == 'ours' else hunk['theirs'] if choice == 'theirs'
+                              else hunk['ours'] + hunk['theirs'])
+        tagged = [{'tag': side, 'text': line.rstrip('\r\n')}
+                  for side in (['ours', 'theirs'] if choice == 'both' else [choice]) for line in hunk[side]]
+    else:
+        replacement = sys.stdin.read(1024 * 1024 + 1)
+        if len(replacement) > 1024 * 1024:
+            return {'error': 'replacement exceeds 1 MiB'}, 2
+        if replacement and not replacement.endswith('\n'):
+            replacement += '\n'
+        if any(MARK.match(line) for line in replacement.splitlines()):
+            return {'error': 'replacement contains conflict markers'}, 2
+        tagged = [{'tag': 'agent', 'text': line} for line in replacement.splitlines()]
+    path = safe_path(hunk['path'])
+    result = content[:at] + replacement + content[at + len(hunk['raw']):]
+    path.write_bytes(result.encode('utf-8'))
+    hunk['resolved'] = {'by': 'agent', 'lines': tagged}
+    save(location, saved)
+    # Do not stage here: check first validates complete files.
+    return ({'id': hunk['id'], 'taken': args[2]} if command == 'take'
+            else {'id': hunk['id'], 'lines': len(tagged)}), 0
+
+
+if __name__ == '__main__':
+    try:
+        value, status = main(sys.argv[1:])
+    except (ValueError, OSError, UnicodeError, json.JSONDecodeError, subprocess.TimeoutExpired) as error:
+        value, status = {'error': str(error)[:WIDTH]}, 1
+    print(json.dumps(value, ensure_ascii=True, separators=(',', ':')))
+    sys.exit(status)
