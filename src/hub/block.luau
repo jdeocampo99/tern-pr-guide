@@ -1091,7 +1091,7 @@ end
 ACTIONS["card-agent"] = function(b, cx, key)
 	local pr = State.prOf(b.s, if key ~= "" then key else b.s.selected or "")
 	if not pr then return end
-	b.botKeys[pr.key] = Model.classify(pr, b.s.now) == "in_review" and Model.botFeedback(pr)
+	b.botKeys[pr.key] = Model.classify(pr, b.s.now) == "in_review" and State.botActionable(pr)
 	beginAgent(b, cx, pr.key, "fix")
 end
 ACTIONS["card-agent-clone"] = function(b, cx, key) beginAgent(b, cx, key, "clone") end

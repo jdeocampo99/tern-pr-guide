@@ -1,6 +1,5 @@
 --!strict
 -- Pure feedback/keys/state acceptance plus injected read-only calls and the actual bot engine.
--- Register this module in tests/run.luau in the parent integration lane.
 local AgentFix = require("../src/hub/agent-fix")
 local Fixes = require("../src/hub/fixes")
 local Keys = require("../src/keys")
@@ -202,6 +201,24 @@ return function()
 	s.search.text = "filter"; assert(Keys.hubAction(s, { name = "a" } :: any) == nil)
 	s.search.text = ""; s.link.text = "link"; assert(Keys.hubAction(s, { name = "a", shift = true } :: any) == nil)
 	s.link.text = ""
+
+	-- The details read bodies only for requested changes, so a body-only bot comment review has nothing
+	-- to fix or summarize: no bot action is offered. Bot threads and bot requested changes stay actionable.
+	local quiet = fresh()
+	local botPr = State.prOf(quiet, d.bot.key) :: any
+	local function botCard(): State.Card
+		State.project(quiet)
+		return card(quiet, d.bot.key)
+	end
+	local live = botCard()
+	assert(State.botActionable(botPr) and live.main and live.main.act == "card-agent")
+	botPr.reviews.threads, botPr.reviews.unresolved = {}, 0
+	local bodyOnly = botCard()
+	assert(not State.botActionable(botPr) and bodyOnly.column == "in_review" and not bodyOnly.agentSlot)
+	assert(bodyOnly.main and bodyOnly.main.act == "card-copy" and #bodyOnly.more == 0)
+	botPr.reviews.latest[1].verdict = "changes_requested"
+	local requestedBot = botCard()
+	assert(State.botActionable(botPr) and requestedBot.main and requestedBot.main.act == "card-agent")
 
 	-- The pure plan is the same argv Block gives Fetch. The injected adapter runs only an
 	-- explicit action. Host Block/Fetch execution remains a parent integration check.

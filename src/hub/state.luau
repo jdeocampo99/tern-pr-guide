@@ -367,6 +367,21 @@ local function action(act: string, label: string, key: string?): CardAction
 	return { act = act, value = nil, label = label, key = key, confirm = false }
 end
 
+-- Bot feedback the details can supply: an unresolved bot thread, or a bot review that requested changes
+-- (the details read bodies only for those). A body-only comment review has nothing to read, so it offers no action.
+function M.botActionable(pr: HubPR): boolean
+	if not Model.botFeedback(pr) then return false end
+	if pr.reviews.threadsKnown then
+		for _, thread in pr.reviews.threads do
+			if thread.bot then return true end
+		end
+	end
+	for _, review in pr.reviews.latest do
+		if review.bot and review.verdict == "changes_requested" then return true end
+	end
+	return false
+end
+
 local function actionsFor(pr: HubPR, column: Column, reasons: { Model.Reason }, merge: Model.MergeResolution?, flake: Flake?, autoMerge: boolean?, details: FixDetails?): (CardAction?, { CardAction })
 	if column == "needs_fixes" then
 		local feedback, checks = false, false
@@ -408,7 +423,7 @@ local function actionsFor(pr: HubPR, column: Column, reasons: { Model.Reason }, 
 		local main, more = copy, {}
 		-- A reviewer waits on the author to say the fix is in: asking again is the card's job until they have been asked.
 		local again = Model.awaitingReReview(pr)
-		if Model.botFeedback(pr) then
+		if M.botActionable(pr) then
 			main, more = action("card-agent", "Fix bot comments", "A"), { copy, action("card-summarize", "Summarize", "⇧A") }
 			if again and #again.ask > 0 then table.insert(more, action("card-rerequest", "Re-request review", "Q")) end
 		elseif again and #again.ask > 0 then
@@ -590,7 +605,7 @@ local function toCard(pr: HubPR, placement: Model.Placement, s: State): Card
 	end
 	if agent then
 		message, path, commit = M.agentMessage(agent)
-		if agent.kind == "running" and placement.column == "in_review" and Model.botFeedback(pr) then
+		if agent.kind == "running" and placement.column == "in_review" and M.botActionable(pr) then
 			if agent.run.stage == "agent" then message = "Fixing bot comments…"
 			elseif agent.run.stage == "merge" then message = "Preparing worktree…" end
 		end
@@ -610,7 +625,7 @@ local function toCard(pr: HubPR, placement: Model.Placement, s: State): Card
 	return {
 		flake = if flake and flake.flaky and flake.reason then "Likely flaky: " .. flake.reason else nil,
 		pr = pr, chips = chips, detail = detail, detailKind = detailKind, column = placement.column, reasons = placement.reasons, main = main, more = more,
-		agent = agent, agentSlot = agent ~= nil or placement.column == "needs_fixes" or (placement.column == "in_review" and Model.botFeedback(pr)),
+		agent = agent, agentSlot = agent ~= nil or placement.column == "needs_fixes" or (placement.column == "in_review" and M.botActionable(pr)),
 		agentMessage = message, agentPath = path, agentCommit = commit,
 		summary = if agent then nil else summary, merge = s.merges[pr.repo], note = M.pendingNote(s, pr),
 		asking = askingOf(s, pr), busy = s.busy[pr.key],
