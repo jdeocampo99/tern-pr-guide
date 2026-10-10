@@ -1043,7 +1043,7 @@
 .gp-hub-ctl-dim { font-family: var(--sans); color: var(--t3); }
 .gp-hub-ctl-strong { font-family: var(--sans); font-weight: 600; color: var(--t1); }
 .gp-hub-up { align-self: flex-start; max-width: 100%; display: flex; gap: 10px; align-items: center; min-width: 0; padding: 7px 7px 7px 14px; border: 1px solid var(--l2); border-radius: var(--r-ctl); background: var(--sf-shade); cursor: pointer; transition: border-color 140ms ease; }
-@media (hover: hover) and (pointer: fine) { .gp-hub-up:hover { border-color: var(--l3); } }
+.gp-hub-up:hover { border-color: var(--l3); }
 .gp-hub-up-l { flex-shrink: 0; font-family: var(--sans); font-size: 12.5px; color: var(--t3); }
 .gp-hub-up-t { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--sans); font-size: 13.5px; font-weight: 500; color: var(--t1); }
 .gp-hub-up-m { flex-shrink: 0; font-size: 12px; color: var(--t3); }
