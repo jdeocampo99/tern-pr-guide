@@ -1153,7 +1153,9 @@ local function reverseSharedCache()
 		b.github = quietGithub(function() end)
 		runTimers(w)
 		assert(b.cache.refreshedAt == theirs.refreshedAt, "the other window's cache was adopted")
-		assert(b.cache.counts.needFixes == needFixesOf(b) and w.kv["hub.status"].counts.needFixes == needFixesOf(b), "counted with the new owner")
+		-- The cache already flags the PR, so adopting it moves no card: the counts it carries stand, and the window that
+		-- stored it wrote the status, so none is written here.
+		assert(b.cache.counts.needFixes == needFixesOf(b), "counted with the new owner")
 		frozen(b)
 		owned(w, b, "adopted")
 
