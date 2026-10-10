@@ -433,8 +433,68 @@ local function testCommands()
 	assert(string.find(added.calls[1].argv[5], 'added0: repository(owner: "o", name: "r") { pullRequest(number: 9) { ...Hub } }', 1, true) ~= nil)
 end
 
+-- A bot's body-only COMMENTED review is feedback; a person's comment review is never a requested change.
+local function testDetailsBotReviews()
+	local pr = byKey["acme/api#119"]
+	local head = pr.headOid
+	local function details(commented: { any }, threads: { any }?, requested: { any }?): any
+		return Github.parseDetails({ data = { node = {
+			id = pr.id, headRefOid = head, reviews = { nodes = requested or {} }, commentReviews = { nodes = commented },
+			reviewThreads = { nodes = threads or {} }, files = { nodes = {} },
+		} } }, pr)
+	end
+	local function review(login: string, typename: string, body: string, oid: string?, url: string?): any
+		return {
+			author = { __typename = typename, login = login }, body = body, submittedAt = "2026-10-10T00:00:00Z",
+			url = url or ("https://github.com/acme/api/pull/119#pullrequestreview-" .. login), commit = { oid = oid or head },
+		}
+	end
+	local function thread(login: string, body: string): any
+		return { id = "PRRT_1", isResolved = false, isOutdated = false, path = "src/a.luau", line = 3, comments = { totalCount = 1, nodes = { {
+			author = { __typename = "Bot", login = login }, body = body, url = "https://github.com/acme/api/pull/119#discussion_r1",
+			diffHunk = "@@ -1 +1 @@", pullRequestReview = { state = "COMMENTED" },
+		} } } }
+	end
+
+	local found = details({ review("review-bot[bot]", "Bot", "Guard the empty value.\nIt can be nil.") })
+	assert(#found.reviews == 0 and #found.threads == 1)
+	local row = found.threads[1]
+	assert(row.bot and row.group == "comment" and row.author == "review-bot[bot]" and row.path == "" and row.line == nil and row.hunk == nil)
+	assert(row.body == "Guard the empty value.\nIt can be nil." and row.id == "review:" .. row.url and row.replies == 0 and not row.outdated)
+
+	-- A person's comment review is dropped; their changes-requested review stays a requested change.
+	local human = details({ review("maria-k", "User", "Looks mostly fine.") }, nil, { review("devon", "User", "Add the guard.") })
+	assert(#human.threads == 0 and #human.reviews == 1 and human.reviews[1].author == "devon" and human.reviews[1].body == "Add the guard.")
+	-- Bot identity is the author's type, not its login.
+	assert(#details({ review("not-a-bot", "User", "Guard it."), review("looks-like-bot", "User", "Guard it.") }).threads == 0)
+	-- Only a bot's newest comment review at the current head counts, and an empty body says nothing.
+	local older = review("review-bot[bot]", "Bot", "Old summary.", head, "https://x/old")
+	assert(#details({ older, review("review-bot[bot]", "Bot", "", head, "https://x/new") }).threads == 0)
+	assert(details({ older, review("review-bot[bot]", "Bot", "New summary.", head, "https://x/new") }).threads[1].body == "New summary.")
+	assert(#details({ review("review-bot[bot]", "Bot", "On an old commit.", string.rep("e", 40)) }).threads == 0)
+	assert(#details({ review("review-bot[bot]", "Bot", "  \n ") }).threads == 0)
+	-- The same words as an inline thread by that bot are one comment.
+	local both = details({ review("review-bot[bot]", "Bot", "Guard the empty value.") }, { thread("review-bot[bot]", "Guard the empty value.") })
+	assert(#both.threads == 1 and both.threads[1].path == "src/a.luau")
+	assert(#details({ review("review-bot[bot]", "Bot", "A summary.") }, { thread("review-bot[bot]", "Guard the empty value.") }).threads == 2)
+	assert(#details({}).threads == 0 and Github.parseDetails({ data = { node = { id = pr.id, headRefOid = head } } }, pr) ~= nil)
+
+	-- The query asks for both review lists, comment reviews with the commit they were left on.
+	local fake = FakeRunner.new({ { prefix = BASE, contains = "query Details(", reply = { stdout = "details" } } })
+	local client = Github.client(fake.run, function(): any
+		return { data = { node = { id = pr.id, headRefOid = head } } }
+	end)
+	local _, err = first(function(done) client.details(pr, done) end)
+	assert(err == nil)
+	fake.expectOnly(1)
+	local query = fake.calls[1].argv[5]
+	assert(string.find(query, "reviews(last: 20, states: [CHANGES_REQUESTED]) { nodes { author { __typename login } body submittedAt url } }", 1, true))
+	assert(string.find(query, "commentReviews: reviews(last: 20, states: [COMMENTED]) { nodes { author { __typename login } body submittedAt url commit { oid } } }", 1, true))
+end
+
 return function()
 	assert(#ids(Cases.prs) > 0)
+	testDetailsBotReviews()
 	testCommands()
 	testParsers()
 	testParsersNeverThrow()

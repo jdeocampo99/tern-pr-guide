@@ -16,6 +16,7 @@ local Model = require("./hub/model")
 local Pr = require("./pr")
 local Review = require("./review")
 local ReviewFix = require("./hub/review-fix")
+local Summary = require("./hub/summary")
 local Sync = require("./hub/sync")
 local Text = require("./text")
 
@@ -812,20 +813,11 @@ function M.runner(argv: { string }, opts: { cwd: string?, stdin: string?, timeou
  end)
 end
 
--- Executes the read-only command plan from Summary.argv. No cwd, worktree, file or kv write.
-function M.summarizeFeedback(argv: { string }, done: (string?, string?) -> ())
- -- Fail closed if a caller stops supplying the feedback-only plan. The boundary accepts
- -- one ephemeral, tool-free omp invocation, with no workspace or additional option.
- local guards = { "-p", "--no-tools", "--no-session", "--no-extensions", "--no-skills", "--no-rules", "--no-lsp", "--no-title" }
- if (#argv ~= 14 and #argv ~= 16) or (argv[1] ~= "omp" and string.sub(argv[1], -4) ~= "/omp") then
-  return done(nil, "Invalid read-only summary command")
- end
- for index, flag in guards do
-  if argv[index + 1] ~= flag then return done(nil, "Invalid read-only summary command") end
- end
- if argv[10] ~= "--system-prompt" or argv[12] ~= "--model" or (#argv == 16 and argv[14] ~= "--thinking") then
-  return done(nil, "Invalid read-only summary command")
- end
+-- Runs the read-only summary: one ephemeral, tool-free omp call. The command is built here from the
+-- validated fields by Summary.plan, never taken from the caller. No cwd, worktree, file or kv write.
+function M.summarizeFeedback(agent: { command: string, model: string, effort: string? }, prompt: string, done: (string?, string?) -> ())
+ local argv = Summary.plan(agent.command, agent.model, agent.effort, prompt)
+ if not argv then return done(nil, "Invalid read-only summary command") end
  local called = false
  local function finish(text: string?, err: string?)
   if called then return end
@@ -920,6 +912,8 @@ function M.startAgentFix(request: AgentFixRequest, agent: Agent.Agent, now: numb
   branch = request.branch, base = request.base, headOid = request.headOid, number = request.number,
   tool = tern.plugin.dir .. "/tools/conflicts", omp = agent.command, model = agent.model,
   effort = agent.effort, regenerate = request.regenerate, input = request.input,
+  -- A bot edit runs in macOS Seatbelt; where it is missing the run fails and nothing is applied.
+  sandbox = if request.input then { exec = "/usr/bin/sandbox-exec", home = home } else nil,
  }
  local function samePath(a: string, b: string, callback: (boolean?, string?) -> ())
   -- Physical paths protect /tmp versus /private/tmp and symlinked checkouts. Also reject

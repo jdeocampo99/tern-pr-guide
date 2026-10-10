@@ -318,11 +318,20 @@ end
 
 -- Swaps in a refresh's pull requests: records the time, clears loading and the error, and rebuilds the board.
 function M.replace(s: State, prs: { HubPR }, now: number, refreshedAt: string?)
-	for key in s.summaries do
+	-- GitHub feedback changes without the head moving (a review, a resolved thread, a dismissal), so a
+	-- summary and its details are dropped whenever the board's feedback metadata for the PR changed.
+	-- An open fixes page keeps its details: its actions read live before they trust them.
+	local function changed(key: string): boolean
 		local previous = M.prOf(s, key)
 		local latest: HubPR? = nil
 		for _, pr in prs do if pr.key == key then latest = pr; break end end
-		if not latest or not previous or latest.headOid ~= previous.headOid then s.summaries[key] = nil end
+		return not latest or not previous or M.feedbackSignature(latest) ~= M.feedbackSignature(previous)
+	end
+	for key in s.summaries do
+		if changed(key) then s.summaries[key] = nil end
+	end
+	for key in s.details do
+		if changed(key) and not (s.route and s.route.key == key) then s.details[key] = nil end
 	end
 	s.prs, s.now, s.refreshedAt = prs, now, refreshedAt
 	s.loading, s.error = false, nil
@@ -367,8 +376,20 @@ local function action(act: string, label: string, key: string?): CardAction
 	return { act = act, value = nil, label = label, key = key, confirm = false }
 end
 
--- Bot feedback the details can supply: an unresolved bot thread, or a bot review that requested changes
--- (the details read bodies only for those). A body-only comment review has nothing to read, so it offers no action.
+-- What the board knows of a PR's feedback, as one string: equal strings mean the same head, reviews and threads.
+function M.feedbackSignature(pr: HubPR): string
+	local parts = { pr.headOid, pr.reviews.decision, tostring(pr.reviews.unresolved), tostring(pr.reviews.comments) }
+	for _, review in pr.reviews.latest do
+		table.insert(parts, review.author .. ":" .. review.verdict .. ":" .. review.oid .. ":" .. review.at)
+	end
+	for _, thread in pr.reviews.threads do
+		table.insert(parts, thread.author .. (if thread.bot then "!" else ""))
+	end
+	return table.concat(parts, "\n")
+end
+
+-- Bot feedback the details can supply: an unresolved bot thread, or a bot review at the current head that
+-- requested changes or commented (the details carry the bodies of both).
 function M.botActionable(pr: HubPR): boolean
 	if not Model.botFeedback(pr) then return false end
 	if pr.reviews.threadsKnown then
@@ -377,7 +398,8 @@ function M.botActionable(pr: HubPR): boolean
 		end
 	end
 	for _, review in pr.reviews.latest do
-		if review.bot and review.verdict == "changes_requested" then return true end
+		if review.bot and (review.oid == "" or review.oid == pr.headOid)
+			and (review.verdict == "changes_requested" or review.verdict == "commented") then return true end
 	end
 	return false
 end
@@ -392,7 +414,7 @@ local function actionsFor(pr: HubPR, column: Column, reasons: { Model.Reason }, 
 		local main, more
 		local commentsOnly = false
 		if details and details.headOid == pr.headOid then
-			commentsOnly = Summary.onlyComments(details)
+			commentsOnly = Summary.onlyComments(Summary.current(details, pr))
 		else
 			-- Before details arrive, a live changes-requested review keeps A on Fix with agent.
 			commentsOnly = pr.reviews.threadsKnown
@@ -1702,7 +1724,7 @@ end
 -- The details the block read: the page's steps follow them.
 function M.setDetails(s: State, details: FixDetails)
 	local known = s.details[details.key]
-	if known and (known.headOid ~= details.headOid or Summary.prompt(known) ~= Summary.prompt(details)) then s.summaries[details.key] = nil end
+	if known and (known.headOid ~= details.headOid or M.feedbackPrompt(s, known) ~= M.feedbackPrompt(s, details)) then s.summaries[details.key] = nil end
 	s.details[details.key] = details
 	if s.route and s.route.kind == "fixes" and s.route.key == details.key then
 		s.route.loading, s.route.error = false, nil
@@ -1711,11 +1733,17 @@ function M.setDetails(s: State, details: FixDetails)
 	M.project(s)
 end
 
+-- The summary prompt for the feedback that is live on the board's PR (the raw details when it has left the board).
+function M.feedbackPrompt(s: State, details: FixDetails): string
+	local pr = M.prOf(s, details.key)
+	return Summary.prompt(if pr then Summary.current(details, pr) else details)
+end
+
 -- Installs only a complete answer for the exact feedback and head still on the board. Never saved.
 function M.installSummary(s: State, details: FixDetails, text: string): boolean
 	local pr, known = M.prOf(s, details.key), s.details[details.key]
 	if not pr or pr.headOid ~= details.headOid or not known or known.headOid ~= details.headOid
-		or Summary.prompt(known) ~= Summary.prompt(details) then return false end
+		or M.feedbackPrompt(s, known) ~= M.feedbackPrompt(s, details) then return false end
 	local parsed = Summary.parse(text)
 	if not parsed or not Summary.matches(details, parsed) then return false end
 	s.summaries[details.key] = parsed

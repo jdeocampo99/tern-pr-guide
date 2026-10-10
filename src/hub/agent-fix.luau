@@ -3,6 +3,8 @@
 local Fixes = require("./fixes")
 
 export type Input = { kind: "bot", details: Fixes.FixDetails, authors: { string }? } -- review bodies have no bot flag
+-- The bot worker's write boundary: the sandbox-exec executable and the home that holds OMP's own state.
+export type Sandbox = { exec: string, home: string }
 export type LineTag = "base" | "ours" | "theirs" | "agent"
 export type ResolvedLine = { tag: LineTag, text: string }
 export type ConflictHunk = {
@@ -35,6 +37,7 @@ export type Spec = {
  -- Generated files need a repository-specific, explicitly supplied regeneration command.
  regenerate: { [string]: { string } }?,
  input: Input?, -- absent preserves the conflict workflow
+ sandbox: Sandbox?, -- required when `input` is set: a bot worker never runs unconfined
 }
 type BoundRun = Run & { spec: Spec?, usedAgent: boolean? }
 export type Out = { status: number, stdout: string, stderr: string, timed_out: boolean }
@@ -191,11 +194,41 @@ function M.botPrompt(details: Fixes.FixDetails, known: { string }?): string
  end
  for _, thread in details.threads do
   if thread.bot then
-   table.insert(out, "Bot @" .. thread.author .. " on " .. thread.path .. (if thread.line then ":" .. thread.line else "")
-    .. " (" .. #thread.body .. " bytes):\n" .. thread.body)
+   -- A review-level comment has no path.
+   local where = if thread.path == "" then "review comment" else "on " .. thread.path .. (if thread.line then ":" .. thread.line else "")
+   table.insert(out, "Bot @" .. thread.author .. " " .. where .. " (" .. #thread.body .. " bytes):\n" .. thread.body)
   end
  end
  return table.concat(out, "\n")
+end
+
+-- Seatbelt profile for the bot worker. Reads, network and processes stay open; every write is refused
+-- except under the leased worktree (its `.git` pointer excluded), OMP's own state (its configuration,
+-- extension and skill folders excluded) and the system temp folders. The clone, its worktree metadata
+-- and every other worktree are therefore read-only. Nil when a path cannot be quoted safely.
+function M.sandboxProfile(worktree: string, home: string): string?
+ for _, path in { worktree, home } do
+  if string.sub(path, 1, 1) ~= "/" or string.find(path, '[%c"\\]') or string.find(path, "/%.%./") or string.sub(path, -3) == "/.." then
+   return nil
+  end
+ end
+ local function sub(path: string): string return '(subpath "' .. path .. '")' end
+ local roots = { worktree }
+ -- The kernel matches resolved paths, and /tmp, /var and /etc are links into /private.
+ if string.match(worktree, "^/tmp/") or string.match(worktree, "^/var/") or string.match(worktree, "^/etc/") then
+  table.insert(roots, "/private" .. worktree)
+ end
+ local allow: { string } = {}
+ for _, root in roots do table.insert(allow, sub(root)) end
+ for _, path in { home .. "/.omp", "/private/tmp", "/private/var/folders" } do table.insert(allow, sub(path)) end
+ for _, path in { "/dev/null", "/dev/tty", "/dev/dtracehelper" } do table.insert(allow, '(literal "' .. path .. '")') end
+ local deny: { string } = {}
+ for _, root in roots do table.insert(deny, sub(root .. "/.git")) end
+ for _, name in { "config.yml", "extensions", "hooks", "skills", "rules", "agents", "commands" } do
+  table.insert(deny, sub(home .. "/.omp/agent/" .. name))
+ end
+ return "(version 1)\n(allow default)\n(deny file-write*)\n(allow file-write*\n  " .. table.concat(allow, "\n  ")
+  .. ")\n(deny file-write*\n  " .. table.concat(deny, "\n  ") .. ")\n"
 end
 
 -- Ordinary text edits use the unchanged Fix/Review fix contract. Every diff row is captured,
@@ -379,7 +412,7 @@ function M.engine(spec: Spec, deps: Dependencies, now: number, changed: (Outcome
    local handled, problem = pcall(ok, out)
    if not handled then fail(tostring(problem)) end
   end
-  local ran, problem = pcall(deps.runner, argv, { cwd = cwd, timeout_ms = if argv[1] == spec.omp then 20 * 60_000 else 60_000 }, settle)
+  local ran, problem = pcall(deps.runner, argv, { cwd = cwd, timeout_ms = if argv[1] == spec.omp or (spec.sandbox ~= nil and argv[1] == spec.sandbox.exec) then 20 * 60_000 else 60_000 }, settle)
   if not ran then settle({ status = -1, stdout = "", stderr = tostring(problem), timed_out = false }) end
  end
  local function git(args: { string }, ok: (Out) -> (), acceptConflict: boolean?)
@@ -516,8 +549,12 @@ function M.engine(spec: Spec, deps: Dependencies, now: number, changed: (Outcome
   if input.details.key ~= spec.key or input.details.headOid ~= spec.headOid or not M.hasBotFeedback(input.details, input.authors) then
    return fail("Bot feedback is missing or belongs to a different PR head")
   end
+  -- Prompt instructions are not a boundary: the worker only runs where the kernel refuses writes outside the worktree.
+  local box = spec.sandbox
+  local profile = if box and string.sub(spec.omp, 1, 1) ~= "-" then M.sandboxProfile(state.worktree :: string, box.home) else nil
+  if not box or not profile then return fail("The bot fix needs a write sandbox for its worktree") end
   emit({ kind = "stage", stage = "agent" })
-  local argv = { spec.omp, "-p", "--no-session", "--no-extensions", "--no-skills", "--no-rules", "--no-lsp", "--no-title",
+  local argv = { box.exec, "-p", profile, spec.omp, "-p", "--no-session", "--no-extensions", "--no-skills", "--no-rules", "--no-lsp", "--no-title",
    "--tools", "read,edit,write,grep,glob", "--model", spec.model }
   if spec.effort then table.insert(argv, "--thinking"); table.insert(argv, spec.effort) end
   table.insert(argv, M.botPrompt(input.details, input.authors))

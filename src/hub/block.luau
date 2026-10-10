@@ -416,26 +416,32 @@ local function settleAgent(b: Block, cx: BlockCx, flight: AgentFlight, outcome: 
 	if not b.closed then draw(b, cx) end
 end
 
--- Feedback consumers share #12's details, without opening a checkout or reading annotated code.
+-- Feedback consumers share #12's details, without opening a checkout or reading annotated code. GitHub's
+-- feedback changes without a new head, so a live board reads it again for every explicit action. A read
+-- is rejected when the board's feedback for the PR changed while it was out. The result is the feedback
+-- that is still live on the PR (`Summary.current`).
 local function readFeedback(b: Block, pr: Model.HubPR, done: (Fixes.FixDetails?, string?) -> ())
 	local known = b.s.details[pr.key]
-	if known and known.headOid == pr.headOid then return done(known, nil) end
 	if b.fixture then
-		local d = sampleDetails(pr)
+		local d = if known and known.headOid == pr.headOid then known else sampleDetails(pr)
 		State.setDetails(b.s, d)
-		return done(d, nil)
+		return done(Summary.current(d, pr), nil)
 	end
+	local signature = State.feedbackSignature(pr)
 	local called = false
 	local function received(d: Fixes.FixDetails?, err: Model.Error?)
 		if called then return end
 		called = true
 		if b.closed then return end
 		local latest = State.prOf(b.s, pr.key)
-		if not latest or latest.headOid ~= pr.headOid or not d or d.headOid ~= pr.headOid then
+		if not latest or latest.headOid ~= pr.headOid or State.feedbackSignature(latest) ~= signature
+			or not d or d.headOid ~= pr.headOid then
 			return done(nil, if err then err.message else "Feedback changed or is unavailable; refresh the board")
 		end
+		-- The same commit keeps what git said last time, as the fixes page does.
+		if known and known.headOid == d.headOid then d.conflicts, d.conflictNote, d.files = known.conflicts, known.conflictNote, known.files end
 		State.setDetails(b.s, d)
-		done(d, nil)
+		done(Summary.current(d, latest), nil)
 	end
 	local ok, err = pcall(b.github.details, pr, received)
 	if not ok then received(nil, { operation = "details", message = tostring(err) }) end
@@ -1155,6 +1161,7 @@ ACTIONS["card-summarize"] = function(b, cx, key)
 	local pr = State.prOf(s, if key ~= "" then key else s.selected or "")
 	if b.closed or not pr or s.busy[pr.key] or s.agents[pr.key] then return end
 	if not b.fixture and not b.agent then return cx:toast("error", "Couldn't summarize feedback: no agent is available") end
+	local signature = State.feedbackSignature(pr)
 	State.setBusy(s, pr.key, State.SUMMARIZING)
 	draw(b, cx)
 	readFeedback(b, pr, function(details, problem)
@@ -1162,7 +1169,10 @@ ACTIONS["card-summarize"] = function(b, cx, key)
 		local function complete(text: string?, err: string?)
 			if b.closed then return end
 			State.setBusy(s, pr.key, nil)
-			if not text or not details or not State.installSummary(s, details, text) then
+			-- An answer for feedback the board has since replaced is dropped, never installed.
+			local latest = State.prOf(s, pr.key)
+			local current = latest ~= nil and State.feedbackSignature(latest) == signature
+			if not text or not details or not current or not State.installSummary(s, details, text) then
 				cx:toast("error", "Couldn't summarize feedback: " .. reasonOf(err or "The answer is incomplete or feedback changed"))
 			end
 			draw(b, cx)
@@ -1173,9 +1183,7 @@ ACTIONS["card-summarize"] = function(b, cx, key)
 			local fixture: any = require("../../fixtures/hub/summary")
 			return complete(fixture.answer(details), nil)
 		end
-		local agent = b.agent :: Agent.Agent
-		local argv = Summary.argv(agent.command, agent.model, agent.effort, Summary.prompt(details))
-		Fetch.summarizeFeedback(argv, complete)
+		Fetch.summarizeFeedback(b.agent :: Agent.Agent, Summary.prompt(details), complete)
 	end)
 end
 ACTIONS["card-method"] = function(b, cx, key)
@@ -1957,6 +1965,13 @@ sampleDetails = function(pr: Model.HubPR): Fixes.FixDetails
 	local summaries: any = require("../../fixtures/hub/summary")
 	for _, details in summaries.details do
 		if details.key == pr.key then return table.clone(details) end
+	end
+	-- Comments-only boards of fixture=cases: the thread the board records, so Summarize stays the action.
+	local commented = summaries.cases[pr.key]
+	if commented then
+		local d = table.clone(commented)
+		d.headOid = pr.headOid
+		return d
 	end
 	if Model.botFeedback(pr) then
 		local fixture = summaries

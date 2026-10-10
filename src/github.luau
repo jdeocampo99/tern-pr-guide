@@ -155,6 +155,7 @@ query Details($id: ID!) {
     id
     headRefOid
     reviews(last: 20, states: [CHANGES_REQUESTED]) { nodes { author { __typename login } body submittedAt url } }
+    commentReviews: reviews(last: 20, states: [COMMENTED]) { nodes { author { __typename login } body submittedAt url commit { oid } } }
     reviewThreads(first: 50) { nodes {
       id isResolved isOutdated path line
       comments(first: 1) { totalCount nodes { author { __typename login } body url diffHunk pullRequestReview { state } } }
@@ -523,8 +524,39 @@ function M.parseDetails(raw: any, pr: HubPR): FixDetails?
 		local path = str(row.path)
 		if path then table.insert(changed, path) end
 	end
+	-- A bot's comment review with a body but no inline thread: only the bot's newest review at this head, and
+	-- never a person's (their comment reviews are not requested changes). Carried as a thread with no path.
+	local head = str(node.headRefOid) or pr.headOid
+	local newest: { [string]: any } = {}
+	local order: { string } = {}
+	for _, row in list(tbl(node.commentReviews) and node.commentReviews.nodes) do
+		local author = tbl(row.author)
+		local login = author and str(author.login)
+		if login and author.__typename == "Bot" then
+			if newest[login] == nil then table.insert(order, login) end
+			newest[login] = row
+		end
+	end
+	for _, login in order do
+		local row = newest[login]
+		local body = str(row.body) or ""
+		local commit = tbl(row.commit)
+		local oid = commit and str(commit.oid)
+		local text = string.match(body, "^%s*(.-)%s*$") :: string
+		local duplicate = false
+		for _, thread in threads do
+			if thread.author == login and string.match(thread.body, "^%s*(.-)%s*$") == text then duplicate = true end
+		end
+		if text ~= "" and (oid == nil or oid == head) and not duplicate then
+			local url = str(row.url) or pr.url
+			table.insert(threads, {
+				id = "review:" .. url, group = "comment", author = login, bot = true, path = "", line = nil,
+				outdated = false, body = body, replies = 0, url = url, hunk = nil,
+			})
+		end
+	end
 	return {
-		key = pr.key, headOid = str(node.headRefOid) or pr.headOid, fetchedAt = "",
+		key = pr.key, headOid = head, fetchedAt = "",
 		reviews = reviews, threads = threads, checks = failingChecks(node), changedPaths = changed,
 		conflicts = nil, conflictNote = nil, files = nil,
 	}

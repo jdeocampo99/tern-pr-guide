@@ -44,19 +44,22 @@ end
 
 -- These are the engine's actual injected effects. Unexpected commands fail, including any push,
 -- conflicts-tool call, merge or journal read on the bot path.
-local function botEngine(stopDuringAgent: boolean)
+local SANDBOX = "/usr/bin/sandbox-exec"
+local function botEngine(mode: "ready" | "stop" | "unsandboxed")
+	local stopDuringAgent = mode == "stop"
 	local s = fresh()
 	local key = Fixture.details.bot.key
 	local spec = Fixture.spec(key)
+	if mode == "unsandboxed" then spec.sandbox = nil end
 	local entries: { Entry } = {
 		{ argv = { "treehouse", "--root", "/pool", "get", "--lease", "--lease-holder", "prguide", "--no-fetch", "--json" }, cwd = "/clone", stdout = "lease" },
 		git({ "status", "--porcelain" }), git({ "rev-parse", "HEAD" }, POOL_HEAD .. "\n"),
 		git({ "fetch", "--no-tags", "origin", "+refs/pull/1904/head:refs/prguide/agent/head", "+refs/heads/main:refs/remotes/origin/main" }),
 		git({ "rev-parse", "refs/prguide/agent/head" }, HEAD .. "\n"),
 		git({ "-c", "core.hooksPath=/dev/null", "switch", "--detach", HEAD }),
-		{ argv = { "/omp" }, cwd = WORKTREE, stdout = Fixture.transcripts.bot.stdout },
 	}
-	if not stopDuringAgent then
+	if mode ~= "unsandboxed" then table.insert(entries, { argv = { SANDBOX }, cwd = WORKTREE, stdout = Fixture.transcripts.bot.stdout }) end
+	if mode == "ready" then
 		for _, entry in {
 			git({ "rev-parse", "HEAD" }, HEAD .. "\n"), git({ "diff", "--name-only", "--diff-filter=U" }),
 			git({ "add", "--all" }),
@@ -80,11 +83,18 @@ local function botEngine(stopDuringAgent: boolean)
 			local entry = entries[#calls + 1]
 			assert(entry, "unexpected call " .. table.concat(argv, " "))
 			assert(opts.cwd == entry.cwd and opts.stdin == nil)
-			if argv[1] == "/omp" then
-				equal(argv, Fixture.transcripts.bot.argv)
-				equal(argv, { "/omp", "-p", "--no-session", "--no-extensions", "--no-skills", "--no-rules", "--no-lsp", "--no-title",
+			if argv[1] == SANDBOX then
+				-- The worker runs only inside the write sandbox, with the unchanged omp argv behind it.
+				local profile = AgentFix.sandboxProfile(WORKTREE, "/home/prguide") :: string
+				assert(argv[2] == "-p" and argv[3] == profile and opts.timeout_ms == 20 * 60_000)
+				local inner = table.move(argv, 4, #argv, 1, {})
+				equal(inner, Fixture.transcripts.bot.argv)
+				equal(inner, { "/omp", "-p", "--no-session", "--no-extensions", "--no-skills", "--no-rules", "--no-lsp", "--no-title",
 					"--tools", "read,edit,write,grep,glob", "--model", "provider/model", "--thinking", "high", AgentFix.botPrompt(Fixture.details.bot) })
-			else equal(argv, entry.argv) end
+			else
+				assert(argv[1] ~= "/omp", "the bot worker must never run unwrapped")
+				equal(argv, entry.argv)
+			end
 			for _, word in argv do assert(word ~= "push" and word ~= "--force" and word ~= "--force-with-lease") end
 			table.insert(calls, { argv = argv, cwd = opts.cwd })
 			local function resume()
@@ -92,7 +102,7 @@ local function botEngine(stopDuringAgent: boolean)
 				-- Duplicate responses cannot start a second commit or return.
 				done({ status = 0, stdout = entry.stdout or "", stderr = "", timed_out = false })
 			end
-			if argv[1] == "/omp" and stopDuringAgent then pending = resume else resume() end
+			if argv[1] == SANDBOX and stopDuringAgent then pending = resume else resume() end
 		end,
 		decode = function(text)
 			assert(text == "lease")
@@ -106,11 +116,14 @@ local function botEngine(stopDuringAgent: boolean)
 	end, function(result, err)
 		finished += 1
 		fix = result
-		assert((err == "stopped") == stopDuringAgent)
+		if mode == "unsandboxed" then assert(result == nil and err and string.find(err, "write sandbox", 1, true))
+		else assert((err == "stopped") == stopDuringAgent) end
 	end)
 	assert(#calls == 0, "constructing an engine is lazy")
 	engine.begin()
-	if stopDuringAgent then
+	if mode == "unsandboxed" then
+		assert(finished == 1 and fix == nil and engine.held() == nil, "no sandbox: nothing runs and the lease returns")
+	elseif stopDuringAgent then
 		assert(#calls == 7 and pending ~= nil)
 		engine.stop()
 		assert(#calls == 7 and finished == 0 and engine.held() ~= nil, "Stop waits for the child before cleanup")
@@ -202,8 +215,8 @@ return function()
 	s.search.text = ""; s.link.text = "link"; assert(Keys.hubAction(s, { name = "a", shift = true } :: any) == nil)
 	s.link.text = ""
 
-	-- The details read bodies only for requested changes, so a body-only bot comment review has nothing
-	-- to fix or summarize: no bot action is offered. Bot threads and bot requested changes stay actionable.
+	-- A bot's body-only comment review at the current head is actionable (its body is in the details as a
+	-- review-level thread); one on an older head is not. Bot threads and bot requested changes stay actionable.
 	local quiet = fresh()
 	local botPr = State.prOf(quiet, d.bot.key) :: any
 	local function botCard(): State.Card
@@ -214,11 +227,114 @@ return function()
 	assert(State.botActionable(botPr) and live.main and live.main.act == "card-agent")
 	botPr.reviews.threads, botPr.reviews.unresolved = {}, 0
 	local bodyOnly = botCard()
-	assert(not State.botActionable(botPr) and bodyOnly.column == "in_review" and not bodyOnly.agentSlot)
-	assert(bodyOnly.main and bodyOnly.main.act == "card-copy" and #bodyOnly.more == 0)
+	assert(State.botActionable(botPr) and bodyOnly.column == "in_review" and bodyOnly.agentSlot)
+	assert(bodyOnly.main and bodyOnly.main.act == "card-agent" and bodyOnly.main.label == "Fix bot comments")
+	botPr.reviews.latest[1].oid = COMMIT
+	assert(not State.botActionable(botPr) and botCard().main.act == "card-copy", "a bot review on an older head offers nothing")
+	botPr.reviews.latest[1].oid = HEAD
 	botPr.reviews.latest[1].verdict = "changes_requested"
 	local requestedBot = botCard()
 	assert(State.botActionable(botPr) and requestedBot.main and requestedBot.main.act == "card-agent")
+
+	-- The review-level bot comment reaches both consumers once, as a bot comment.
+	local review = copy(Fixture.reviewBot)
+	assert(Summary.authors(review)[1] == "review-bot[bot]" and string.find(Summary.prompt(review), "Comment by @review-bot[bot] (bot) (22 bytes):\nGuard the empty value.", 1, true))
+	assert(AgentFix.hasBotFeedback(review, nil))
+	local reviewPrompt = AgentFix.botPrompt(review)
+	assert(string.find(reviewPrompt, "Bot @review-bot[bot] review comment (22 bytes):\nGuard the empty value.", 1, true))
+	assert(not string.find(reviewPrompt, " on  ", 1, true))
+
+	-- Only feedback still live on the PR is read: a requested change the reviewer has since approved is a
+	-- plain comment, not a request, and an active request is kept.
+	local function livePr(verdict: string, oid: string?): any
+		local pr = copy(State.prOf(fresh(), d.requested.key))
+		pr.reviews.latest = { { author = "devon", bot = false, verdict = verdict, at = Fixture.asOfIso, oid = oid or HEAD } }
+		return pr
+	end
+	local withComment = copy(d.requested)
+	table.insert(withComment.threads, { id = "c2", author = "maria-k", body = "Why three retries?", bot = false, group = "comment",
+		path = "src/retry.luau", line = 5, outdated = false, replies = 0, url = "", hunk = nil })
+	local active = Summary.current(withComment, livePr("changes_requested"))
+	assert(#active.reviews == 1 and active.threads[1].group == "requested" and not Summary.onlyComments(active))
+	assert(string.find(Summary.prompt(active), "Requested changes by @devon", 1, true))
+	local superseded = Summary.current(withComment, livePr("approved"))
+	assert(#superseded.reviews == 0 and superseded.threads[1].group == "comment" and Summary.onlyComments(superseded))
+	local supersededPrompt = Summary.prompt(superseded)
+	assert(not string.find(supersededPrompt, "Requested change", 1, true) and not string.find(supersededPrompt, "Add the guard before retrying.", 1, true))
+	assert(string.find(supersededPrompt, "Comment by @devon", 1, true) and string.find(supersededPrompt, "Why three retries?", 1, true))
+	assert(#Summary.current(withComment, livePr("changes_requested", COMMIT)).reviews == 0, "a request on an older head is superseded")
+	assert(#Summary.current(withComment, livePr("dismissed")).reviews == 0)
+	local approvedState = fresh()
+	local approvedPr = State.prOf(approvedState, d.requested.key) :: any
+	approvedPr.reviews.latest[1].verdict = "approved"
+	State.project(approvedState)
+	-- The cached details still hold the review, but it is not current: A summarizes the comment instead.
+	local comment = copy(d.requested)
+	comment.threads = { { id = "c", author = "maria-k", body = "Why three retries?", bot = false, group = "comment",
+		path = "src/retry.luau", line = 5, outdated = false, replies = 0, url = "", hunk = nil } }
+	State.setDetails(approvedState, comment)
+	approvedPr.reviews.threads = { { author = "maria-k", bot = false } }
+	approvedPr.reviews.unresolved = 1
+	State.project(approvedState)
+	local approvedCard = card(approvedState, d.requested.key)
+	assert(approvedCard.reasons[1] == "feedback" and approvedCard.main and approvedCard.main.act == "card-summarize")
+	local bodyBot = livePr("commented")
+	bodyBot.reviews.latest = { { author = "review-bot[bot]", bot = true, verdict = "commented", at = Fixture.asOfIso, oid = HEAD } }
+	assert(#Summary.current(review, bodyBot).threads == 1)
+	bodyBot.reviews.latest[1].verdict = "approved"
+	assert(#Summary.current(review, bodyBot).threads == 0, "a bot that later approved has no live review comment")
+
+	-- The summary command is built only from validated fields: an option, an @file attachment or a prompt that
+	-- does not start with the fixed line never produces a command, so the runner is never reached.
+	local goodPrompt = Summary.prompt(d.comments)
+	assert(Summary.plan("/omp", "provider/model", "high", goodPrompt) ~= nil and Summary.plan("omp", "provider/model:high", nil, goodPrompt) ~= nil)
+	for _, bad in {
+		{ "/omp", "provider/model", "high", "@/etc/passwd" }, { "/omp", "provider/model", "high", "--tools=bash" },
+		{ "/omp", "provider/model", "high", "-p" }, { "/omp", "provider/model", "high", "\n" .. goodPrompt },
+		{ "/omp", "provider/model", "high", " " .. goodPrompt }, { "/omp", "provider/model", "high", "@" .. goodPrompt },
+		{ "/omp", "provider/model", "high", goodPrompt .. "\0" }, { "/omp", "--tools=bash", "high", goodPrompt },
+		{ "/omp", "@/etc/passwd", "high", goodPrompt }, { "/omp", "provider/model", "--tools", goodPrompt },
+		{ "/omp", "provider/model", "high;rm", goodPrompt }, { "--version", "provider/model", "high", goodPrompt },
+		{ "/bin/sh", "provider/model", "high", goodPrompt }, { "/omp\n", "provider/model", "high", goodPrompt },
+		{ "relative/omp", "provider/model", "high", goodPrompt },
+	} do assert(Summary.plan(bad[1], bad[2], bad[3], bad[4]) == nil, table.concat(bad, " | ")) end
+	local planned = Summary.plan("/omp", "provider/model", "high", goodPrompt) :: { string }
+	assert(planned[#planned] == goodPrompt and string.sub(planned[#planned], 1, 1) ~= "@" and string.sub(planned[#planned], 1, 1) ~= "-")
+
+	-- The bot worker's profile: writes only under the worktree (not its .git pointer), OMP state and temp.
+	local profile = AgentFix.sandboxProfile(WORKTREE, "/home/prguide") :: string
+	assert(string.find(profile, "(deny file-write*)", 1, true) and string.find(profile, '(subpath "' .. WORKTREE .. '")', 1, true))
+	assert(string.find(profile, '(subpath "' .. WORKTREE .. '/.git")', 1, true) and string.find(profile, '(subpath "/home/prguide/.omp")', 1, true))
+	assert(not string.find(profile, '"/clone', 1, true) and not string.find(profile, '(subpath "/")', 1, true) and not string.find(profile, "(allow file-write*)", 1, true))
+	assert(string.find(AgentFix.sandboxProfile("/tmp/pool/wt", "/home/prguide") :: string, '(subpath "/private/tmp/pool/wt")', 1, true))
+	for _, bad in { "relative", '/pool/"quote', "/pool/back\\slash", "/pool/new\nline", "/pool/../outside", "/pool/.." } do
+		assert(AgentFix.sandboxProfile(bad, "/home/prguide") == nil, bad)
+	end
+
+	-- GitHub feedback can change with no new head: a refresh with different review metadata drops the summary
+	-- and the details, and a read that was out while that happened is rejected by its signature.
+	local refreshed = fresh()
+	State.installSummary(refreshed, d.comments, Fixture.transcripts.comments.stdout)
+	assert(refreshed.summaries[d.comments.key] ~= nil and refreshed.details[d.comments.key] ~= nil)
+	local before = State.feedbackSignature(State.prOf(refreshed, d.comments.key) :: any)
+	local same = copy(refreshed.prs)
+	State.replace(refreshed, same, Fixture.asOf, nil)
+	assert(refreshed.summaries[d.comments.key] ~= nil and refreshed.details[d.comments.key] ~= nil, "identical feedback keeps both")
+	local resolved = copy(refreshed.prs)
+	for _, pr in resolved do
+		if pr.key == d.comments.key then pr.reviews.threads, pr.reviews.unresolved = {}, 0 end
+	end
+	State.replace(refreshed, resolved, Fixture.asOf, nil)
+	assert(refreshed.summaries[d.comments.key] == nil and refreshed.details[d.comments.key] == nil)
+	assert(State.feedbackSignature(State.prOf(refreshed, d.comments.key) :: any) ~= before)
+
+	-- fixture=cases: the comments-only boards keep Summarize with the details that load for them.
+	for _, key in { "acme/api#118", "acme/api#119" } do
+		local recorded = Fixture.cases[key]
+		assert(recorded and Summary.onlyComments(recorded) and #recorded.threads == 1 and not recorded.threads[1].bot)
+		local parsed = Summary.parse(Fixture.answer(recorded))
+		assert(parsed and Summary.matches(recorded, parsed) and string.find(parsed.verdict, "^Reply to @"))
+	end
 
 	-- The pure plan is the same argv Block gives Fetch. The injected adapter runs only an
 	-- explicit action. Host Block/Fetch execution remains a parent integration check.
@@ -268,6 +384,7 @@ return function()
 	local botPrompt = AgentFix.botPrompt(d.three)
 	assert(string.find(botPrompt, "Guard the empty value.", 1, true) and not string.find(botPrompt, "Explain the retry limit.", 1, true))
 	assert(not string.find(botPrompt, "DIFF_HUNK_SENTINEL", 1, true))
-	botEngine(false)
-	botEngine(true)
+	botEngine("ready")
+	botEngine("stop")
+	botEngine("unsandboxed")
 end

@@ -44,6 +44,22 @@ requested.reviews = { { author = "devon", body = "Add the guard before retrying.
 local bot = details(1904, { thread("b", "review-bot[bot]", "Guard the empty value.", true, "comment") })
 bot.threads[1].path = "src/retry.luau"
 M.details = { three = three, comments = comments, requested = requested, bot = bot }
+
+-- A bot's body-only COMMENTED review, as github.parseDetails reads it: a review-level thread with no path.
+local reviewBot = details(1905, { thread("review:https://github.com/acme/web/pull/1905#pullrequestreview-1", "review-bot[bot]", "Guard the empty value.", true, "comment") })
+reviewBot.threads[1].path, reviewBot.threads[1].line, reviewBot.threads[1].hunk = "", nil, nil
+M.reviewBot = reviewBot
+
+-- fixture=cases: the one thread each comments-only PR records (threads in cases.luau), so A stays Summarize.
+local function caseDetails(number: number, author: string, body: string): Fixes.FixDetails
+	local d = details(number, { thread("case-" .. number, author, body, false, "comment") })
+	d.key = "acme/api#" .. number
+	return d
+end
+M.cases = {
+	["acme/api#118"] = caseDetails(118, "dave", "Should opted-out learners still count toward the weekly totals?"),
+	["acme/api#119"] = caseDetails(119, "erin", "Does restore purchases also cover a fresh install on a second device?"),
+} :: { [string]: Fixes.FixDetails }
 M.transcripts = { three = Three, comments = Comments, requested = Requested, bot = Bot }
 M.botDiff = "diff --git a/src/retry.luau b/src/retry.luau\nindex 1111111..2222222 100644\n--- a/src/retry.luau\n+++ b/src/retry.luau\n@@ -1,3 +1,3 @@\n local function valueOrZero(value)\n-return value\n+return value or 0\n end\n"
 M.botFile = "local function valueOrZero(value)\nreturn value or 0\nend\n"
@@ -78,9 +94,16 @@ function M.answer(d: Fixes.FixDetails): string
 	end
 	-- Other sample boards reuse their own identities without starting a model.
 	local authors: { string } = {}
+	local human: string? = nil
+	local requested = #d.reviews > 0
 	for _, review in d.reviews do if not table.find(authors, review.author) then table.insert(authors, review.author) end end
-	for _, t in d.threads do if not table.find(authors, t.author) then table.insert(authors, t.author) end end
-	local out = { "PRGUIDE_SUMMARY_V1", "Verdict: Review feedback" }
+	for _, t in d.threads do
+		if not table.find(authors, t.author) then table.insert(authors, t.author) end
+		if not t.bot and not human then human = t.author end
+		if not t.bot and t.group == "requested" then requested = true end
+	end
+	local verdict = if requested then "Address requested changes" elseif human then "Reply to @" .. human else "Review feedback"
+	local out = { "PRGUIDE_SUMMARY_V1", "Verdict: " .. verdict }
 	for _, author in authors do table.insert(out, "Comment: @" .. author .. "\tReview the feedback from this commenter.") end
 	table.insert(out, "End")
 	return table.concat(out, "\n")
@@ -93,6 +116,7 @@ function M.spec(key: string): AgentFix.Spec
 		key = key, clone = "/clone", checkout = "/reader", pool = "/pool", branch = "topic", base = "main", headOid = HEAD,
 		number = tonumber(string.match(key, "#(%d+)$")) :: number, tool = "/plugin/tools/conflicts", omp = "/omp", model = "provider/model", effort = "high",
 		input = { kind = "bot", details = d },
+		sandbox = { exec = "/usr/bin/sandbox-exec", home = "/home/prguide" },
 	}
 end
 
