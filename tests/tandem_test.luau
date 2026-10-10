@@ -3539,6 +3539,7 @@ local function replayedEdits()
 		local b = agentBoard(w, Fetch, Block)
 		holdCache(w, b)
 		w.runs = {}
+		b.github = quietGithub(function() end)
 		b.github.run = function(command: any, done: any) table.insert(w.runs, { command = command, done = done }) end
 		b.s.merges["acme/api"] = { method = { kind = "comment", command = "/merge" }, source = "declared", ask = false }
 		b.s.autoMerge["acme/api"] = true
