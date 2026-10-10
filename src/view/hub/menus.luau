@@ -69,7 +69,7 @@ local function mergeFoot(s: State.State): Node?
 	local edit = s.methodEdit
 	if edit then
 		local what = if edit.kind == "comment" then "Command" else "Label"
-		local placeholder = if edit.kind == "comment" then "/merge | /cancel (cancel is optional)" else "ready-to-merge"
+		local placeholder = if edit.kind == "comment" then "/merge | /cancel" else "ready-to-merge"
 		return el("div", { class = "gp-md-foot gp-hm-edit", key = "edit" }, {
 			span("gp-md-label", what),
 			el("div", { class = "gp-sr-box gp-hm-field", key = "box" }, { Fields.node(edit.field, "field", placeholder) }),

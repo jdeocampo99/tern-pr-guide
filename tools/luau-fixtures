@@ -19,7 +19,8 @@ FIXTURES = os.path.join(ROOT, "fixtures", "hub")
 QUERIES = os.path.join(ROOT, "docs", "hub", "queries")
 GITHUB = os.path.join(ROOT, "src", "github.luau")
 # `local <NAME>_QUERY = [=[ ... ]=]` in src/github.luau mirrors docs/hub/queries/<file>.graphql.
-EMBEDDED = {"HUB": "hub-f", "THREADS": "threads", "CHECKS": "checks"}
+EMBEDDED = {"HUB": "hub-f", "THREADS": "threads", "CHECKS": "checks",
+            "MERGE_DETECT": "merge-detect", "MERGE_FAILURE": "merge-failure"}
 IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 KEYWORDS = {"and", "break", "do", "else", "elseif", "end", "false", "for", "function", "if", "in",
             "local", "nil", "not", "or", "repeat", "return", "then", "true", "until", "while", "continue"}

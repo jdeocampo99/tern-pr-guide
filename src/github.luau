@@ -112,7 +112,7 @@ query Checks($ids: [ID!]!) {
 }]=]
 
 -- These two mirror docs/hub/queries/merge-detect.graphql and merge-failure.graphql the same way.
-local DETECT_QUERY = [=[
+local MERGE_DETECT_QUERY = [=[
 query MergeDetect($owner: String!, $name: String!) {
   rateLimit { cost remaining limit resetAt }
   repository(owner: $owner, name: $name) {
@@ -125,7 +125,7 @@ query MergeDetect($owner: String!, $name: String!) {
   }
 }]=]
 
-local FAILURE_QUERY = [=[
+local MERGE_FAILURE_QUERY = [=[
 query MergeFailure($ids: [ID!]!) {
   rateLimit { cost remaining limit resetAt }
   nodes(ids: $ids) { ... on PullRequest { id headRefOid
@@ -734,7 +734,7 @@ function M.client(run: Runner, decode: Decode): Client
 				if #inFlight == 0 then return done(result, nil) end
 				local ids: { string } = {}
 				for _, pr in inFlight do table.insert(ids, pr.id) end
-				graphql(FAILURE_QUERY, idArgs(ids), "gh api graphql: merge failures", "check merges in flight", function(failDoc, failErr)
+				graphql(MERGE_FAILURE_QUERY, idArgs(ids), "gh api graphql: merge failures", "check merges in flight", function(failDoc, failErr)
 					if failErr then
 						result.partial = result.partial or failErr
 						if failErr.rateLimit then
@@ -832,7 +832,7 @@ function M.client(run: Runner, decode: Decode): Client
 		if owner == nil or name == nil then
 			return done(nil, failure("gh api graphql: merge-detect", "detect how " .. repo .. " merges", "not an owner/repo name", nil))
 		end
-		graphql(DETECT_QUERY, { "-f", "owner=" .. owner, "-f", "name=" .. name }, "gh api graphql: merge-detect", "detect how " .. repo .. " merges", function(doc, err)
+		graphql(MERGE_DETECT_QUERY, { "-f", "owner=" .. owner, "-f", "name=" .. name }, "gh api graphql: merge-detect", "detect how " .. repo .. " merges", function(doc, err)
 			if err then return done(nil, err) end
 			local detected = M.parseDetect(doc)
 			if detected == nil then
