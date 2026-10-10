@@ -51,6 +51,8 @@ export type Block = {
 	github: Github.Client, timers: Timers,
 	flights: { refresh: boolean, checks: boolean, probe: boolean, flake: boolean, tandem: boolean }, -- one call of each kind at a time
 	watched: { [string]: boolean }, -- the PRs Tandem watches (lowercase "owner/repo#123"), from its last read
+	root: string?, -- the repository root `cx.cwd` is in, found once (Tandem's calls name the project by it)
+	rootWaiters: { (string?) -> () }?, -- the callers waiting on that lookup while it runs
 	sched: Sched,
 	closed: boolean, -- a render failed: the window is gone, so no timer starts anything
 	refetch: boolean, -- a refresh was asked for while one was running: run another when it ends
@@ -925,11 +927,34 @@ local function loadFlakes(b: Block, cx: BlockCx)
 	step(1)
 end
 
+-- The repository root `cx.cwd` is in, which is the project Tandem knows: `cx.cwd` itself may be a subfolder. Found
+-- once and kept; callers that ask while it is being found share the one lookup. `done` gets nil when it cannot be
+-- found (nothing is kept, so a later call tries again) or when there is no `cx.cwd`.
+local function projectRoot(b: Block, cx: BlockCx, done: (string?) -> ())
+	if b.root then return done(b.root) end
+	local dir = cx.cwd
+	if not dir then return done(nil) end
+	local waiters = b.rootWaiters
+	if waiters then return table.insert(waiters, done) end
+	local mine: { (string?) -> () } = { done }
+	b.rootWaiters = mine
+	local settled = false
+	local function found(repo: Fetch.Repo?)
+		if settled then return end
+		settled = true
+		if b.rootWaiters == mine then b.rootWaiters = nil end
+		local root = if repo then repo.root else nil
+		if root then b.root = root end
+		for _, waiting in mine do waiting(root) end
+	end
+	local ok = pcall(Fetch.findRepo, dir, found)
+	if not ok then found(nil) end
+end
+
 -- Reads which PRs Tandem watches and flags them, one read at a time. With no project folder, or when the read
 -- fails, the flags stay as they were (none before a first good read) and the board carries on.
 local function loadTandem(b: Block, cx: BlockCx)
-	local root = cx.cwd
-	if b.fixture or b.closed or b.flights.tandem or not root then return end
+	if b.fixture or b.closed or b.flights.tandem or not cx.cwd then return end
 	b.flights.tandem = true
 	local replied = false
 	local function apply(watched: { [string]: boolean }?, err: string?)
@@ -949,8 +974,11 @@ local function loadTandem(b: Block, cx: BlockCx)
 		persist(b)
 		draw(b, cx)
 	end
-	local ok, err = pcall(Fetch.tandemWatch, root, apply)
-	if not ok then apply(nil, tostring(err)) end
+	projectRoot(b, cx, function(root)
+		if b.closed or not root then return apply(nil, "The project folder is unknown") end
+		local ok, err = pcall(Fetch.tandemWatch, root, apply)
+		if not ok then apply(nil, tostring(err)) end
+	end)
 end
 
 startRefresh = function(b: Block, cx: BlockCx)
@@ -1342,25 +1370,27 @@ local function keepCache(b: Block)
 	end
 end
 
--- Hand off to Tandem (A on a card Tandem watches): one `pr-fix` request, sent only now. Tandem's answer is
--- dropped when the card is gone or its head moved meanwhile. A refusal shows Tandem's notice and changes nothing.
-ACTIONS["card-handoff"] = function(b, cx, key)
+-- Hand off to Tandem (A on a card Tandem watches): one `pr-fix` request, sent only now, from the repository root.
+-- Tandem's answer is dropped when the card is gone or its head moved meanwhile. A refusal shows Tandem's notice
+-- and changes nothing.
+local HANDOFF_BUSY = "Handing off to Tandem…"
+
+ACTIONS["card-handoff"] = function(b, cx, asked)
 	local s = b.s
-	local pr = State.prOf(s, if key ~= "" then key else s.selected or "")
+	local pr = State.prOf(s, if asked ~= "" then asked else s.selected or "")
 	if b.closed or not pr or s.busy[pr.key] then return end
 	if b.fixture then return cx:toast("info", "The sample board doesn't hand off to Tandem", pr.key) end
-	local root = cx.cwd
-	if not root then return cx:toast("error", "Couldn't hand off to Tandem: the project folder is unknown", pr.key) end
-	local head, repo, number = pr.headOid, pr.repo, pr.number
+	if not cx.cwd then return cx:toast("error", "Couldn't hand off to Tandem: the project folder is unknown", pr.key) end
+	local head, repo, number, key = pr.headOid, pr.repo, pr.number, pr.key
 	local reason = Model.handoffReason(pr, s.now)
-	State.setBusy(s, pr.key, "Handing off to Tandem…")
+	State.setBusy(s, key, HANDOFF_BUSY)
 	draw(b, cx)
 	local replied = false
 	local function answered(outcome: Fetch.TandemOutcome?, err: string?)
 		if replied then return end
 		replied = true
 		if b.closed then return end
-		State.setBusy(s, key, nil)
+		if s.busy[key] == HANDOFF_BUSY then State.setBusy(s, key, nil) end
 		local current = State.prOf(s, key)
 		if not current or current.headOid ~= head then return draw(b, cx) end
 		if not outcome then
@@ -1376,8 +1406,15 @@ ACTIONS["card-handoff"] = function(b, cx, key)
 		end
 		draw(b, cx)
 	end
-	local ok, err = pcall(Fetch.tandemHandoff, root, repo, number, reason, answered)
-	if not ok then answered(nil, tostring(err)) end
+	projectRoot(b, cx, function(root)
+		if replied then return end
+		local current = State.prOf(s, key)
+		-- Nothing is sent for a card that is gone or moved while the root was being found; `answered` settles it quietly.
+		if b.closed or not current or current.headOid ~= head then return answered(nil, "stale") end
+		if not root then return answered(nil, "the project folder is unknown") end
+		local ok, err = pcall(Fetch.tandemHandoff, root, repo, number, reason, answered)
+		if not ok then answered(nil, tostring(err)) end
+	end)
 end
 
 -- Copy link (C): "title url" as plain text, which is all Tern's clipboard takes.
@@ -2328,7 +2365,7 @@ local block: BlockDef<Block> = {
 		local b: Block = {
 			s = s, cache = cache, fixture = fixture, generate = opts ~= nil and opts.generate, agent = nil, agentFlight = nil, botKeys = {},
 			github = Github.client(Fetch.runner, tern.json.decode), timers = {},
-			flights = { refresh = false, checks = false, probe = false, flake = false, tandem = false }, watched = watched,
+			flights = { refresh = false, checks = false, probe = false, flake = false, tandem = false }, watched = watched, root = nil, rootWaiters = nil,
 			sched = {
 				probedAt = now, probeChanged = false, focusedAt = if live then now else nil, checksAt = nil,
 				refreshTried = nil, lastModified = if cache then cache.lastModified else nil,

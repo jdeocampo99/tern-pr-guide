@@ -136,12 +136,19 @@ local function placement()
 	for _, forbidden in { "card-agent", "card-summarize" } do assert(not offers(watchedBot, forbidden), forbidden) end
 	assert(bot.agentSlot and not watchedBot.agentSlot)
 
-	-- Draft, inactive and review-role PRs keep their own places, and a quiet watched PR stays where it is.
+	-- Draft, inactive and review-role PRs keep their own places; every other watched PR of the viewer is In review.
 	local draft = Model.placement(pr("acme/web#113", { tandem = true }), Cases.asOf)
 	assert(draft.column == "inactive")
 	assert(Model.placement(pr("acme/web#102", { tandem = true }), Cases.asOf).column == "inactive")
 	assert(Model.placement(pr("acme/web#301", { tandem = true }), Cases.asOf).column == "to_review")
-	assert(Model.placement(pr("acme/api#109", { tandem = true }), Cases.asOf).column == "ready")
+	assert(Model.classify(pr("acme/api#109"), Cases.asOf) == "ready")
+	local readyPlaced = Model.placement(pr("acme/api#109", { tandem = true }), Cases.asOf)
+	assert(readyPlaced.column == "in_review" and #readyPlaced.reasons == 0, "a watched PR that could merge waits in In review")
+	local owned = card(board({ pr("acme/api#109", { tandem = true }) }), "acme/api#109")
+	assert(owned.column == "in_review" and owned.chips[1].text == "Waiting on Tandem")
+	assert(owned.main and owned.main.act == "card-handoff" and owned.main.act ~= "card-merge")
+	for _, forbidden in { "card-merge", "card-update", "card-agent", "card-summarize" } do assert(not offers(owned, forbidden), forbidden) end
+	assert(Model.selectGroup(owned.pr, Cases.asOf) == nil, "a watched PR is not selected for a merge")
 	local waiting = card(board({ pr("acme/api#114", { tandem = true }) }), "acme/api#114")
 	assert(waiting.column == "in_review" and waiting.chips[1].text == "Waiting on Tandem")
 
@@ -156,6 +163,7 @@ end
 -- The stub `tern` shared by the block's and fetch's module environments. Decoded text is looked up, and an
 -- encoded value is recorded so the test can compare the exact request table that would be written.
 local REPO_ROOT = "/Users/reader/project"
+local SUBFOLDER = REPO_ROOT .. "/src/deep"
 
 local function stubTern(w: any): any
 	return {
@@ -183,16 +191,28 @@ local function withWorld(run: (w: any, Fetch: any, Block: any) -> ())
 	local Block: any = require("../src/hub/block")
 	local Fetch: any = require("../src/fetch")
 	local blockEnv: any, fetchEnv: any = getfenv(Block.init), getfenv(Fetch.tandemWatch)
-	local hostBlock, hostFetch, hostRunner = blockEnv.tern, fetchEnv.tern, Fetch.runner
-	local w: any = { decoded = {}, encoded = {}, timers = {}, calls = {}, toasts = {}, renders = 0, throws = false, Block = Block }
+	local hostBlock, hostFetch, hostRunner, hostFind = blockEnv.tern, fetchEnv.tern, Fetch.runner, Fetch.findRepo
+	local w: any = {
+		decoded = {}, encoded = {}, timers = {}, calls = {}, toasts = {}, renders = 0, throws = false, Block = Block,
+		finds = {}, holdRoot = false, rootFails = false, findThrows = false,
+	}
 	local stub = stubTern(w)
 	blockEnv.tern, fetchEnv.tern = stub, stub
+	-- Finding the repository root is a recorded call too: answered at once with REPO_ROOT unless a scenario holds
+	-- it (settled by hand through `finds[n].done`) or makes it fail or throw.
+	Fetch.findRepo = function(dir: string, done: (any, string?) -> ())
+		table.insert(w.finds, { dir = dir, done = done })
+		if w.findThrows then error("git failed", 0) end
+		if w.holdRoot then return end
+		if w.rootFails then return done(nil, "No checkout at " .. dir) end
+		done({ root = REPO_ROOT, guides = REPO_ROOT .. "/.git/prguide" }, nil)
+	end
 	Fetch.runner = function(argv: { string }, opts: any, done: (any) -> ())
 		table.insert(w.calls, { argv = table.clone(argv), opts = opts, done = done })
 		if w.throws then error("spawn failed", 0) end
 	end
 	local ok, err = pcall(run, w, Fetch, Block)
-	blockEnv.tern, fetchEnv.tern, Fetch.runner = hostBlock, hostFetch, hostRunner
+	blockEnv.tern, fetchEnv.tern, Fetch.runner, Fetch.findRepo = hostBlock, hostFetch, hostRunner, hostFind
 	if not ok then error(err, 0) end
 end
 
@@ -311,9 +331,10 @@ local function runTimers(w: any)
 	for _, fn in pending do fn() end
 end
 
--- A live board (opened with a real cwd, so the block reads Tandem) over the cases, with every effect recorded.
+-- A live board (opened in a subfolder of the repository, so the block finds the root and reads Tandem) over the
+-- cases, with every effect recorded.
 local function live(w: any, Block: any): any
-	local cx: any = { cwd = REPO_ROOT }
+	local cx: any = { cwd = SUBFOLDER }
 	function cx:render() w.renders += 1 end
 	function cx:toast(kind: string, title: string, detail: string?) table.insert(w.toasts, { kind = kind, title = title, detail = detail }) end
 	function cx:frame() end
@@ -344,7 +365,8 @@ local function blockPaths()
 		-- Opening the block reads Tandem once, in the project root, and nothing else runs.
 		assert(#w.calls == 1)
 		equal(w.calls[1].argv, { "tandem", "watch", "--json" })
-		assert(w.calls[1].opts.cwd == REPO_ROOT and #handoffs(w) == 0)
+		assert(w.calls[1].opts.cwd == REPO_ROOT and #handoffs(w) == 0, "Tandem runs in the repository root, not the subfolder")
+		assert(#w.finds == 1 and w.finds[1].dir == SUBFOLDER and b.root == REPO_ROOT)
 		assert(card(b.s, "acme/web#104").column == "needs_fixes", "before the read, nothing is flagged")
 		w.calls[1].done(out("WATCH"))
 		local web, api, other = card(b.s, "acme/web#104"), card(b.s, "acme/api#114"), card(b.s, "acme/api#105")
@@ -365,7 +387,7 @@ local function blockPaths()
 				assert(call.opts.cwd == REPO_ROOT)
 			end
 		end
-		assert(reads == 2 and #handoffs(w) == 0)
+		assert(reads == 2 and #handoffs(w) == 0 and #w.finds == 1, "the root is found once")
 		w.calls[2].done(out("WATCH"))
 		assert(b.flights.tandem == false and card(b.s, "acme/web#104").pr.tandem)
 		w.calls = {}
@@ -406,6 +428,8 @@ local function blockPaths()
 		w.calls = {}
 		w.encoded = {}
 		Block.event(b, { ev = "action", act = "card-handoff", value = "acme/api#105" } :: any, w.cx)
+		assert(#w.finds == 1, "the hand-off reuses the root")
+		assert(#w.calls == 1 and w.calls[1].opts.cwd == REPO_ROOT and same(w.encoded[1].origin, { plugin = "prguide", repoPath = REPO_ROOT }))
 		assert(#w.calls == 1 and same(w.encoded[1].action, { verb = "pr-fix", repo = "acme/api", number = 105, reason = "PR hub: merge conflicts" }))
 		w.calls[1].done(out("DONE"))
 		local moved = card(b.s, "acme/api#105")
@@ -485,7 +509,95 @@ local function blockPaths()
 		function cx:toast() end
 		function cx:frame() end
 		local b: any = Block.init(cx, {}, nil)
-		assert(#w.calls == 0 and b.flights.tandem == false, "no project folder, no read")
+		assert(#w.calls == 0 and #w.finds == 0 and b.flights.tandem == false, "no project folder, no read")
+	end)
+end
+
+local function rootPaths()
+	-- The root is found while a watch and two hand-offs wait: one lookup, nothing sent until it answers, and then
+	-- every call runs in the repository root with that root as the origin.
+	withWorld(function(w, Fetch, Block)
+		w.holdRoot = true
+		local b = live(w, Block)
+		assert(#w.finds == 1 and #w.calls == 0 and b.flights.tandem == true and b.root == nil)
+		b.github = { refresh = function() end }
+		Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+		Block.event(b, { ev = "action", act = "card-handoff", value = "acme/api#105" } :: any, w.cx)
+		Block.event(b, { ev = "action", act = "card-handoff", value = "acme/api#116" } :: any, w.cx)
+		assert(#w.finds == 1 and #w.calls == 0 and #w.encoded == 0, "one lookup, no process before the root")
+		assert(b.s.busy["acme/api#105"] ~= nil and b.s.busy["acme/api#116"] ~= nil)
+		Block.event(b, { ev = "action", act = "card-handoff", value = "acme/api#105" } :: any, w.cx)
+		assert(#w.finds == 1 and #w.calls == 0, "a press on a card that is already out sends nothing")
+		w.finds[1].done({ root = REPO_ROOT }, nil)
+		w.finds[1].done({ root = "/elsewhere" }, nil)
+		assert(b.root == REPO_ROOT and #w.finds == 1)
+		assert(#w.calls == 3 and #handoffs(w) == 2, "one watch and two hand-offs")
+		equal(w.calls[1].argv, { "tandem", "watch", "--json" })
+		for _, call in w.calls do assert(call.opts.cwd == REPO_ROOT) end
+		for _, envelope in w.encoded do assert(envelope.origin.repoPath == REPO_ROOT and envelope.origin.plugin == "prguide") end
+		assert(#w.encoded == 2 and w.encoded[1].action.number == 105 and w.encoded[2].action.number == 116)
+		w.finds[1].done({ root = REPO_ROOT }, nil)
+		assert(#w.calls == 3, "a second answer from the lookup sends nothing")
+	end)
+
+	-- No root: the watch is quiet and the board usable; a press says so, sends nothing and frees the card; the
+	-- next try looks again.
+	for name, how in { fails = "rootFails", throws = "findThrows" } do
+		withWorld(function(w, Fetch, Block)
+			w[how] = true
+			local b = live(w, Block)
+			assert(#w.calls == 0 and b.flights.tandem == false and b.root == nil and #w.toasts == 0 and b.s.error == nil, name)
+			local plain = card(b.s, "acme/web#104")
+			assert(plain.column == "needs_fixes" and plain.main and plain.main.label == "Fix with agent", name)
+			Block.event(b, { ev = "action", act = "card-handoff", value = "acme/api#116" } :: any, w.cx)
+			assert(#w.calls == 0 and #w.encoded == 0 and b.s.busy["acme/api#116"] == nil, name)
+			assert(#w.toasts == 1 and w.toasts[1].kind == "error" and string.find(w.toasts[1].title, "Couldn't hand off to Tandem", 1, true), name)
+			assert(not card(b.s, "acme/api#116").pr.tandem and card(b.s, "acme/api#116").column == "needs_fixes", name)
+			w[how] = false
+			Block.event(b, { ev = "action", act = "card-handoff", value = "acme/api#116" } :: any, w.cx)
+			assert(#w.finds == 3 and b.root == REPO_ROOT and #handoffs(w) == 1 and handoffs(w)[1].opts.cwd == REPO_ROOT, name)
+		end)
+	end
+
+	-- A card that went away or moved while the root was found gets nothing sent; another card's busy state stays its own.
+	withWorld(function(w, Fetch, Block)
+		w.holdRoot = true
+		local b = live(w, Block)
+		Block.event(b, { ev = "action", act = "card-handoff", value = "acme/api#105" } :: any, w.cx)
+		Block.event(b, { ev = "action", act = "card-handoff", value = "acme/api#116" } :: any, w.cx)
+		Block.event(b, { ev = "action", act = "card-handoff", value = "acme/api#119" } :: any, w.cx)
+		State.dropPr(b.s, "acme/api#105")
+		local moved: any = State.prOf(b.s, "acme/api#116")
+		moved.headOid = "moved"
+		b.s.busy["acme/api#119"] = "Merging…"
+		w.finds[1].done({ root = REPO_ROOT }, nil)
+		assert(#handoffs(w) == 1 and #w.encoded == 1 and w.encoded[1].action.number == 119, "only the card that is still there is sent")
+		assert(b.s.busy["acme/api#116"] == nil and b.s.busy["acme/api#105"] == nil and #w.toasts == 0)
+		handoffs(w)[1].done(out("DONE"))
+		assert(b.s.busy["acme/api#119"] == "Merging…", "another action's busy state is not cleared by the answer")
+	end)
+	withWorld(function(w, Fetch, Block)
+		w.holdRoot = true
+		local b = live(w, Block)
+		Block.event(b, { ev = "action", act = "card-handoff", value = "acme/api#116" } :: any, w.cx)
+		Block.event(b, { ev = "action", act = "card-handoff", value = "acme/api#119" } :: any, w.cx)
+		State.dropPr(b.s, "acme/api#116")
+		b.s.busy["acme/api#119"] = "Merging…"
+		w.finds[1].done(nil, "No checkout")
+		assert(#w.calls == 0 and #w.encoded == 0, "nothing is sent")
+		assert(#w.toasts == 1 and w.toasts[1].detail == "acme/api#119" and string.find(w.toasts[1].title, "Couldn't hand off to Tandem", 1, true), "only the card still there is told")
+		assert(b.s.busy["acme/api#119"] == "Merging…", "another action's busy state is not cleared")
+	end)
+
+	-- A closed block does nothing with the answer.
+	withWorld(function(w, Fetch, Block)
+		w.holdRoot = true
+		local b = live(w, Block)
+		Block.event(b, { ev = "action", act = "card-handoff", value = "acme/api#116" } :: any, w.cx)
+		b.closed = true
+		local rendered = w.renders
+		w.finds[1].done({ root = REPO_ROOT }, nil)
+		assert(#w.calls == 0 and w.renders == rendered and #w.toasts == 0 and b.flights.tandem == false)
 	end)
 end
 
@@ -501,7 +613,7 @@ local function fixture()
 		local function chip(key: string): string
 			return card(b.s, key).chips[1].text
 		end
-		assert(#w.calls == 0 and b.s.error == nil, "the sample board runs no process")
+		assert(#w.calls == 0 and #w.finds == 0 and b.s.error == nil, "the sample board runs no process")
 		assert(chip("acme/web#104") == "Waiting on Tandem" and card(b.s, "acme/web#104").column == "in_review")
 		assert(chip("acme/api#114") == "Waiting on Tandem" and not Cases.prs[1].tandem, "the recorded boards are not edited")
 		for _, source in Cases.prs do assert(source.tandem == false, source.key) end
@@ -510,7 +622,7 @@ local function fixture()
 		for _ = 1, 3 do
 			Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, cx)
 			runTimers(w)
-			assert(#w.calls == 0)
+			assert(#w.calls == 0 and #w.finds == 0)
 			assert(chip("acme/web#104") == "Waiting on Tandem" and card(b.s, "acme/web#104").pr.tandem)
 			assert(card(b.s, "acme/api#112").column == "needs_fixes" and not card(b.s, "acme/api#112").pr.tandem)
 		end
@@ -519,7 +631,7 @@ local function fixture()
 		w.toasts = {}
 		State.select(b.s, "acme/web#104")
 		press(w, "a")
-		assert(#w.calls == 0 and #w.toasts == 1 and w.toasts[1].kind == "info")
+		assert(#w.calls == 0 and #w.finds == 0 and #w.toasts == 1 and w.toasts[1].kind == "info")
 		for _, source in Cases.prs do assert(source.tandem == false, source.key) end
 	end)
 end
@@ -529,5 +641,6 @@ return function()
 	placement()
 	fetching()
 	blockPaths()
+	rootPaths()
 	fixture()
 end

@@ -249,9 +249,9 @@ function M.placement(pr: HubPR, now: number): Placement
 		return { tab = "review", column = column, reasons = {} }
 	end
 	if pr.draft or not active(pr, now) then return { tab = "mine", column = "inactive", reasons = {} } end
+	-- Tandem owns the branch it watches: the PR waits in In review, whatever is wrong with it or not.
+	if pr.tandem then return { tab = "mine", column = "in_review", reasons = {} } end
 	local reasons = M.reasons(pr, now)
-	-- Tandem owns the branch it watches: what is wrong with it waits in In review, not on the viewer's list.
-	if #reasons > 0 and pr.tandem then return { tab = "mine", column = "in_review", reasons = {} } end
 	if #reasons > 0 then return { tab = "mine", column = "needs_fixes", reasons = reasons } end
 	local passing = pr.checks.state == "passing" or pr.checks.state == "none"
 	if pr.reviews.decision == "approved" and passing and not pr.conflicts then

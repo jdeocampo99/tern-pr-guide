@@ -128,8 +128,8 @@ local function testMerge()
 	-- A moved head drops it.
 	fresh.headOid = "other"
 	assert(Sync.merge(refresh, previous, localFacts, NOW).prs[1].pending == nil)
-	-- Counts rebuilt: #104 (failing, active) and #999 are both in Needs fixes; flash rises with the count.
-	assert(merged.counts.needFixes == 2 and merged.counts.toReview == 0 and merged.counts.flashAt == NOW)
+	-- Counts rebuilt: #104 is watched by Tandem, so it waits in In review and only #999 is in Needs fixes; flash rises with the count.
+	assert(merged.counts.needFixes == 1 and merged.counts.toReview == 0 and merged.counts.flashAt == NOW)
 	local calm = Sync.merge({ prs = {}, viewer = "jubbydev", rateLimit = refresh.rateLimit, calls = {}, truncated = false } :: any, merged, { added = {}, tandem = {} }, NOW + 60)
 	assert(calm.counts.needFixes == 0 and calm.counts.flashAt == NOW and calm.refreshedAt == "2026-10-09T12:01:00Z")
 	-- Counts over the whole fixture.
