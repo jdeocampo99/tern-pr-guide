@@ -377,8 +377,9 @@ local function action(act: string, label: string, key: string?): CardAction
 end
 
 -- What the board knows of a PR's feedback, as one string: equal strings mean the same head, reviews and threads.
+-- The PR's last activity stands in for an edited comment, which changes no other field the board reads.
 function M.feedbackSignature(pr: HubPR): string
-	local parts = { pr.headOid, pr.reviews.decision, tostring(pr.reviews.unresolved), tostring(pr.reviews.comments) }
+	local parts = { pr.headOid, pr.reviews.decision, tostring(pr.reviews.unresolved), tostring(pr.reviews.comments), pr.lastActivityAt }
 	for _, review in pr.reviews.latest do
 		table.insert(parts, review.author .. ":" .. review.verdict .. ":" .. review.oid .. ":" .. review.at)
 	end
@@ -398,10 +399,25 @@ function M.botActionable(pr: HubPR): boolean
 		end
 	end
 	for _, review in pr.reviews.latest do
-		if review.bot and (review.oid == "" or review.oid == pr.headOid)
-			and (review.verdict == "changes_requested" or review.verdict == "commented") then return true end
+		if review.bot and ((review.verdict == "changes_requested" and (review.oid == "" or review.oid == pr.headOid))
+			or (review.verdict == "commented" and review.oid ~= "" and review.oid == pr.headOid)) then return true end
 	end
 	return false
+end
+
+-- What Fix bot comments would hand the agent right now: the cached details narrowed to the feedback that is
+-- live on the PR, its bot reviewers, and the exact prompt. Equal prompts mean the same feedback; nil when the
+-- details are missing, belong to another head or hold no bot feedback.
+function M.botFeedback(s: State, key: string): (AgentFix.Input?, string?)
+	local pr, known = M.prOf(s, key), s.details[key]
+	if not pr or not known or known.headOid ~= pr.headOid then return nil, nil end
+	local authors: { string } = {}
+	for _, review in pr.reviews.latest do
+		if review.bot and not table.find(authors, review.author) then table.insert(authors, review.author) end
+	end
+	local details = Summary.current(known, pr)
+	if not AgentFix.hasBotFeedback(details, authors) then return nil, nil end
+	return { kind = "bot", details = details, authors = authors }, AgentFix.botPrompt(details, authors)
 end
 
 local function actionsFor(pr: HubPR, column: Column, reasons: { Model.Reason }, merge: Model.MergeResolution?, flake: Flake?, autoMerge: boolean?, details: FixDetails?): (CardAction?, { CardAction })

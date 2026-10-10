@@ -452,6 +452,8 @@ local function startAgentEngine(b: Block, cx: BlockCx, flight: AgentFlight, clon
 	-- HubPR has baseBranch and headOid, but no head branch. Read and revalidate all three
 	-- together; never guess a branch from a local checkout or pass a stale head to the engine.
 	local replied = false
+	-- A bot fix reads its feedback before the refs: what it read must still be what the board has when the refs arrive.
+	local expected: { signature: string, prompt: string }? = nil
 	local function metadata(out: Github.Out)
 		if replied then return end
 		replied = true
@@ -466,6 +468,13 @@ local function startAgentEngine(b: Block, cx: BlockCx, flight: AgentFlight, clon
 			or type(meta.headRefName) ~= "string" or meta.headRefName == "" then
 			settleAgent(b, cx, flight, { kind = "failed", reason = "PR refs changed or are missing; refresh the board" })
 			return forgetReturned(b, flight)
+		end
+		if flight.bot then
+			local _, prompt = State.botFeedback(b.s, pr.key)
+			if not expected or State.feedbackSignature(latest) ~= expected.signature or prompt ~= expected.prompt then
+				settleAgent(b, cx, flight, { kind = "failed", reason = "Feedback changed; refresh the board" })
+				return forgetReturned(b, flight)
+			end
 		end
 		local doneCalled = false
 		local function completed(fix: AgentFix.Fix?, err: string?)
@@ -508,15 +517,13 @@ local function startAgentEngine(b: Block, cx: BlockCx, flight: AgentFlight, clon
 	if flight.bot then
 		readFeedback(b, pr, function(details, err)
 			if not currentFlight(b, flight) then return end
-			local authors: { string } = {}
 			local latest = State.prOf(b.s, pr.key)
-			for _, review in (if latest then latest.reviews.latest else {}) do
-				if review.bot and not table.find(authors, review.author) then table.insert(authors, review.author) end
-			end
-			if not details or not AgentFix.hasBotFeedback(details, authors) then
+			local input, prompt = State.botFeedback(b.s, pr.key)
+			if not details or not latest or not input or not prompt then
 				return settleAgent(b, cx, flight, { kind = "failed", reason = err or "No bot feedback bodies are available" })
 			end
-			flight.input = { kind = "bot", details = details, authors = authors }
+			expected = { signature = State.feedbackSignature(latest), prompt = prompt }
+			flight.input = input
 			refs()
 		end)
 	else refs() end
@@ -1168,14 +1175,21 @@ ACTIONS["card-summarize"] = function(b, cx, key)
 		if b.closed then return end
 		local function complete(text: string?, err: string?)
 			if b.closed then return end
-			State.setBusy(s, pr.key, nil)
-			-- An answer for feedback the board has since replaced is dropped, never installed.
-			local latest = State.prOf(s, pr.key)
-			local current = latest ~= nil and State.feedbackSignature(latest) == signature
-			if not text or not details or not current or not State.installSummary(s, details, text) then
-				cx:toast("error", "Couldn't summarize feedback: " .. reasonOf(err or "The answer is incomplete or feedback changed"))
+			-- A comment edit changes no metadata the board reads, so the answer is installed only after the
+			-- feedback is read again and its text is the text that was summarized.
+			local function install(fresh: Fixes.FixDetails?, why: string?)
+				if b.closed then return end
+				State.setBusy(s, pr.key, nil)
+				local latest = State.prOf(s, pr.key)
+				local current = latest ~= nil and State.feedbackSignature(latest) == signature
+				if not text or not details or not fresh or not current or Summary.prompt(fresh) ~= Summary.prompt(details)
+					or not State.installSummary(s, fresh, text) then
+					cx:toast("error", "Couldn't summarize feedback: " .. reasonOf(err or why or "The answer is incomplete or feedback changed"))
+				end
+				draw(b, cx)
 			end
-			draw(b, cx)
+			if not text or not details then return install(nil, nil) end
+			readFeedback(b, pr, install)
 		end
 		if not details then return complete(nil, problem) end
 		if #Summary.authors(details) == 0 then return complete(nil, "No feedback is available") end

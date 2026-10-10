@@ -524,8 +524,9 @@ function M.parseDetails(raw: any, pr: HubPR): FixDetails?
 		local path = str(row.path)
 		if path then table.insert(changed, path) end
 	end
-	-- A bot's comment review with a body but no inline thread: only the bot's newest review at this head, and
-	-- never a person's (their comment reviews are not requested changes). Carried as a thread with no path.
+	-- A bot's comment review with a body but no inline thread: only the bot's newest review, left on this head
+	-- (a review with no commit is never trusted), and never a person's (their comment reviews are not requested
+	-- changes). Carried as a thread with no path.
 	local head = str(node.headRefOid) or pr.headOid
 	local newest: { [string]: any } = {}
 	local order: { string } = {}
@@ -547,7 +548,7 @@ function M.parseDetails(raw: any, pr: HubPR): FixDetails?
 		for _, thread in threads do
 			if thread.author == login and string.match(thread.body, "^%s*(.-)%s*$") == text then duplicate = true end
 		end
-		if text ~= "" and (oid == nil or oid == head) and not duplicate then
+		if text ~= "" and oid ~= nil and oid == head and not duplicate then
 			local url = str(row.url) or pr.url
 			table.insert(threads, {
 				id = "review:" .. url, group = "comment", author = login, bot = true, path = "", line = nil,

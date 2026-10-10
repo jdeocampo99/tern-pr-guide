@@ -472,6 +472,12 @@ local function testDetailsBotReviews()
 	assert(#details({ older, review("review-bot[bot]", "Bot", "", head, "https://x/new") }).threads == 0)
 	assert(details({ older, review("review-bot[bot]", "Bot", "New summary.", head, "https://x/new") }).threads[1].body == "New summary.")
 	assert(#details({ review("review-bot[bot]", "Bot", "On an old commit.", string.rep("e", 40)) }).threads == 0)
+	-- A review with no commit is never trusted as current feedback.
+	local uncommitted = review("review-bot[bot]", "Bot", "No commit recorded.")
+	uncommitted.commit = nil
+	assert(#details({ uncommitted }).threads == 0)
+	uncommitted.commit = { oid = head }
+	assert(#details({ uncommitted }).threads == 1)
 	assert(#details({ review("review-bot[bot]", "Bot", "  \n ") }).threads == 0)
 	-- The same words as an inline thread by that bot are one comment.
 	local both = details({ review("review-bot[bot]", "Bot", "Guard the empty value.") }, { thread("review-bot[bot]", "Guard the empty value.") })

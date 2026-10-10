@@ -18,7 +18,7 @@ local HEAD_LINE = "Summarize this pull request's feedback using only the supplie
 -- the details list every recent requested-changes review, after the reviewer approved or the head moved on.
 -- A review counts only while its author's latest review still requests changes at the current head; a
 -- thread of an author who no longer does is a plain comment. A bot's review-level comment (a thread with no
--- path and a `review:` id) counts only while that bot's latest review is a comment at the current head.
+-- path and a `review:` id) counts only while that bot's latest review is a comment left on the current head.
 function M.current(details: Fixes.FixDetails, pr: Model.HubPR): Fixes.FixDetails
 	local latest: { [string]: Model.Review } = {}
 	for _, review in pr.reviews.latest do latest[review.author] = review end
@@ -40,7 +40,10 @@ function M.current(details: Fixes.FixDetails, pr: Model.HubPR): Fixes.FixDetails
 	for _, thread in details.threads do
 		if thread.path == "" and string.sub(thread.id, 1, 7) == "review:" then
 			local review = latest[thread.author]
-			if review ~= nil and review.verdict == "commented" and atHead(review) then table.insert(out.threads, thread) end
+			-- A body-only review is trusted only with the commit it was left on, so a missing one never counts.
+			if review ~= nil and review.verdict == "commented" and review.oid ~= "" and review.oid == pr.headOid then
+				table.insert(out.threads, thread)
+			end
 		elseif thread.group == "requested" and not requesting(thread.author) then
 			local plain = table.clone(thread)
 			plain.group = "comment"

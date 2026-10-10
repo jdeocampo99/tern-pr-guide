@@ -299,6 +299,15 @@ return function()
 	local bodyBot = livePr("commented")
 	bodyBot.reviews.latest = { { author = "review-bot[bot]", bot = true, verdict = "commented", at = Fixture.asOfIso, oid = HEAD } }
 	assert(#Summary.current(review, bodyBot).threads == 1)
+	-- A body-only review with no recorded commit is never current, here or for the card's A.
+	bodyBot.reviews.latest[1].oid = ""
+	assert(#Summary.current(review, bodyBot).threads == 0, "a review with no commit is not current feedback")
+	bodyBot.reviews.threadsKnown, bodyBot.reviews.threads = false, {}
+	assert(not State.botActionable(bodyBot), "a commented bot review with no commit is not actionable")
+	bodyBot.reviews.latest[1].verdict = "changes_requested"
+	assert(State.botActionable(bodyBot), "a requested-changes review keeps its compatibility rule")
+	bodyBot.reviews.latest[1].verdict, bodyBot.reviews.latest[1].oid = "commented", HEAD
+	assert(State.botActionable(bodyBot))
 	bodyBot.reviews.latest[1].verdict = "approved"
 	assert(#Summary.current(review, bodyBot).threads == 0, "a bot that later approved has no live review comment")
 
@@ -355,6 +364,61 @@ return function()
 	State.replace(refreshed, resolved, Fixture.asOf, nil)
 	assert(refreshed.summaries[d.comments.key] == nil and refreshed.details[d.comments.key] == nil)
 	assert(State.feedbackSignature(State.prOf(refreshed, d.comments.key) :: any) ~= before)
+
+	-- An edited comment changes no review field the board reads, only the PR's last activity: that alone drops
+	-- the summary and the details, and a summary for the old text can no longer be installed.
+	local edited = fresh()
+	State.installSummary(edited, d.comments, Fixture.transcripts.comments.stdout)
+	local activity = copy(edited.prs)
+	for _, pr in activity do
+		if pr.key == d.comments.key then pr.lastActivityAt = "2026-10-10T12:00:00Z" end
+	end
+	State.replace(edited, activity, Fixture.asOf, nil)
+	assert(edited.summaries[d.comments.key] == nil and edited.details[d.comments.key] == nil, "an edit drops the summary")
+	assert(not State.installSummary(edited, d.comments, Fixture.transcripts.comments.stdout), "no details: nothing installs")
+	local rewritten = copy(d.comments)
+	rewritten.threads[1].body = "Edited after the model started."
+	State.setDetails(edited, rewritten)
+	assert(not State.installSummary(edited, d.comments, Fixture.transcripts.comments.stdout), "an answer for the old text is dropped")
+	assert(Summary.prompt(rewritten) ~= Summary.prompt(d.comments))
+
+	-- Fix bot comments reads its feedback before the PR refs. What it read is the prompt and board signature it
+	-- must still match when the refs arrive, so a thread resolved or a review superseded meanwhile is caught.
+	local live = fresh()
+	local botKey = d.bot.key
+	local input, expectedPrompt = State.botFeedback(live, botKey)
+	assert(input and expectedPrompt and string.find(expectedPrompt, "Guard the empty value.", 1, true))
+	local expectedSignature = State.feedbackSignature(State.prOf(live, botKey) :: any)
+	local again, samePrompt = State.botFeedback(live, botKey)
+	assert(again and samePrompt == expectedPrompt, "unchanged feedback is the same prompt")
+	local resolvedBot = copy(live.prs)
+	for _, pr in resolvedBot do
+		if pr.key == botKey then pr.reviews.threads, pr.reviews.unresolved = {}, 0 end
+	end
+	State.replace(live, resolvedBot, Fixture.asOf, nil)
+	local afterResolve, resolvedPrompt = State.botFeedback(live, botKey)
+	assert(afterResolve == nil and resolvedPrompt == nil, "a resolved thread leaves no details to start from")
+	-- With the fixes page open the details stay, and the signature alone must refuse the start.
+	local open = fresh()
+	State.openFixes(open, botKey)
+	local openPrs = copy(open.prs)
+	for _, pr in openPrs do
+		if pr.key == botKey then pr.reviews.threads, pr.reviews.unresolved = {}, 0 end
+	end
+	State.replace(open, openPrs, Fixture.asOf, nil)
+	assert(open.details[botKey] ~= nil)
+	assert(State.feedbackSignature(State.prOf(open, botKey) :: any) ~= expectedSignature, "the start is refused by signature")
+	-- A body-only review superseded while the refs were out leaves no feedback to start from.
+	local bodyOnly = fresh()
+	local bodyDetails = copy(Fixture.reviewBot)
+	bodyDetails.key = botKey
+	State.setDetails(bodyOnly, bodyDetails)
+	local bodyInput, bodyPrompt = State.botFeedback(bodyOnly, botKey)
+	assert(bodyInput and bodyPrompt and string.find(bodyPrompt, "review comment", 1, true))
+	local bodyPr = State.prOf(bodyOnly, botKey) :: any
+	bodyPr.reviews.latest[1].oid = COMMIT
+	local gone, gonePrompt = State.botFeedback(bodyOnly, botKey)
+	assert(gone == nil and gonePrompt == nil, "a review left on another commit is not the feedback that was read")
 
 	-- fixture=cases: the comments-only boards keep Summarize with the details that load for them.
 	for _, key in { "acme/api#118", "acme/api#119" } do
