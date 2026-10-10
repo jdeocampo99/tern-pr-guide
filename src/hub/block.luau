@@ -1155,6 +1155,9 @@ onChecks = function(b, cx)
 		if b.closed then return end
 		b.sched.checksAt = os.time()
 		if update then
+			-- The results land on the newest cache there is: one stored strictly newer than this block's own becomes the board
+			-- first (its stamp stays), and a PR whose head it moved is skipped below like any other moved head.
+			adoptShared(b, cx)
 			local changed = false
 			for _, pr in b.s.prs do
 				local result = update.byId[pr.id]
@@ -1484,9 +1487,14 @@ ACTIONS["hub-refresh"] = function(b, cx)
 	refetch(b, cx)
 end
 
--- Keeps the cache in step with a change the viewer just made to the board. The change says nothing about Tandem, so
--- ownership another window stored at this stamp or later joins first and is never written back as false.
-local function keepCache(b: Block, cx: BlockCx)
+-- Keeps the cache in step with a change the viewer just made to the board. `edit` is that change, applied here and
+-- nowhere else (nil when the caller's change is ownership, which `applyOwnership` carries). A cache another window
+-- stored strictly newer than this block's own becomes the board first, with its stamp and its ownership, and `edit`
+-- lands on it: the write never lowers `refreshedAt` and never lays this block's older PR snapshot over newer data. The
+-- change says nothing about Tandem, so ownership stored at this stamp or later joins and is never written back as false.
+local function keepCache(b: Block, cx: BlockCx, edit: (() -> ())?)
+	if b.cache and not b.fixture then adoptShared(b, cx) end
+	if edit then edit() end
 	if b.cache then
 		joinShared(b)
 		applyOwnership(b, cx)
@@ -1602,17 +1610,17 @@ local function runMerge(b: Block, cx: BlockCx, pr: Model.HubPR, done: ((err: str
 				cx:toast("error", "Couldn't merge #" .. pr.number .. ": " .. reasonOf(err.message), pr.repo)
 			end
 		elseif method.kind == "squash" or method.kind == "merge" or method.kind == "rebase" then
-			s.acted[pr.key] = true
-			State.dropPr(s, pr.key)
-			keepCache(b, cx)
+			keepCache(b, cx, function()
+				s.acted[pr.key] = true
+				State.dropPr(s, pr.key)
+			end)
 			if done then done(nil) else
 				toastDone(cx, pr, method)
 				refetchSoon(b, cx)
 			end
 		else
-			State.setPending(s, pr.key, { method = method.kind, at = isoNow() })
 			State.setBusy(s, pr.key, nil)
-			keepCache(b, cx)
+			keepCache(b, cx, function() State.setPending(s, pr.key, { method = method.kind, at = isoNow() }) end)
 			if done then done(nil) else
 				toastDone(cx, pr, method)
 				refetchSoon(b, cx)
@@ -1664,8 +1672,7 @@ ACTIONS["card-cancel"] = function(b, cx, key)
 		if err then
 			cx:toast("error", "Couldn't cancel the merge of #" .. pr.number .. ": " .. reasonOf(err.message), pr.repo)
 		else
-			State.setPending(s, key, nil)
-			keepCache(b, cx)
+			keepCache(b, cx, function() State.setPending(s, key, nil) end)
 			if method.kind == "comment" then
 				cx:toast("success", "Commented " .. (method.cancel or "") .. " on #" .. pr.number, pr.title)
 			elseif method.kind == "label" then
@@ -1702,8 +1709,7 @@ ACTIONS["card-auto"] = function(b, cx, key)
 			cx:toast("error", "Couldn't set #" .. pr.number .. " to merge when ready: " .. reasonOf(err.message), pr.repo)
 		else
 			local kind = if method.kind == "comment" or method.kind == "label" then method.kind else "queue"
-			State.setPending(s, key, { method = kind, at = isoNow() })
-			keepCache(b, cx)
+			keepCache(b, cx, function() State.setPending(s, key, { method = kind, at = isoNow() }) end)
 			cx:toast("success", "#" .. pr.number .. " will merge when ready", pr.title)
 			refetchSoon(b, cx)
 		end
@@ -1729,8 +1735,7 @@ ACTIONS["card-rerequest"] = function(b, cx, key)
 		if err then
 			cx:toast("error", "Couldn't re-request review on #" .. pr.number .. ": " .. reasonOf(err.message), pr.repo)
 		else
-			State.reRequested(s, key, logins)
-			keepCache(b, cx)
+			keepCache(b, cx, function() State.reRequested(s, key, logins) end)
 			cx:toast("success", "Asked " .. Model.reviewerList(logins) .. " to review #" .. pr.number .. " again", pr.title)
 			refetchSoon(b, cx)
 		end
@@ -1835,7 +1840,6 @@ local function runBatch(b: Block, cx: BlockCx, keys: { string }, merge: boolean)
 	local handed = false -- some went to a repo's tool (comment, label, queue) rather than merging at once
 	local step: (index: number) -> ()
 	local function finish(failed: Model.HubPR?, reason: string?)
-		keepCache(b, cx)
 		local rest: { Model.HubPR } = {}
 		for i = #finished + 1, #queue do table.insert(rest, queue[i]) end
 		local done = if merge then (if handed then "Asked to merge " else "Merged ") else "Closed "
@@ -1870,8 +1874,10 @@ local function runBatch(b: Block, cx: BlockCx, keys: { string }, merge: boolean)
 			if b.closed then return end
 			State.setBusy(s, pr.key, nil)
 			if err then return after(reasonOf(err.message)) end
-			s.acted[pr.key] = true
-			State.dropPr(s, pr.key)
+			keepCache(b, cx, function()
+				s.acted[pr.key] = true
+				State.dropPr(s, pr.key)
+			end)
 			after(nil)
 		end)
 	end
@@ -1915,6 +1921,8 @@ ACTIONS["card-update"] = function(b, cx, key)
 	local card = State.card(s, key)
 	if not card or s.busy[key] then return end
 	local pr = card.pr
+	-- One owner per branch: a queued Update branch for a PR Tandem took meanwhile sends nothing.
+	if pr.tandem then return cx:toast("error", "Couldn't update #" .. pr.number .. ": " .. TANDEM_OWNS, pr.repo) end
 	if not pr.behind or pr.conflicts then return cx:toast("info", "#" .. pr.number .. " isn't behind " .. pr.baseBranch, pr.key) end
 	if b.fixture then return cx:toast("info", "The sample board doesn't update branches", pr.key) end
 	State.setBusy(s, key, "Updating…")
@@ -1924,9 +1932,10 @@ ACTIONS["card-update"] = function(b, cx, key)
 			State.setBusy(s, key, nil)
 			cx:toast("error", "Couldn't update #" .. pr.number .. ": " .. reasonOf(err.message), pr.repo)
 		else
-			s.acted[key] = true
-			State.branchUpdated(s, key)
-			keepCache(b, cx)
+			keepCache(b, cx, function()
+				s.acted[key] = true
+				State.branchUpdated(s, key)
+			end)
 			cx:toast("success", "Updated #" .. pr.number .. " with " .. pr.baseBranch)
 			refetchSoon(b, cx)
 		end
@@ -2038,8 +2047,7 @@ ACTIONS["card-remove"] = function(b, cx, key)
 		local why = writeAdded(added)
 		if why then return cx:toast("error", "Couldn't remove #" .. pr.number .. ": " .. why, pr.repo) end
 	end
-	State.unadd(s, key)
-	keepCache(b, cx)
+	keepCache(b, cx, function() State.unadd(s, key) end)
 	cx:toast("info", "Removed #" .. pr.number .. " from Review requests", pr.repo)
 	refetch(b, cx)
 end

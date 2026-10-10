@@ -1473,6 +1473,165 @@ local function sharedStore()
 	end)
 end
 
+-- Three windows over one store at mixed ages. A and C hold the newer cache (T2) and B the older (T1); C's GitHub refresh is
+-- out. A reads Tandem and flags KEY without moving `refreshedAt`. B then writes an action or a checks result. B's write
+-- must land on the newer cache: the stamp stays T2, the newer snapshot stays, KEY stays flagged, and C's answer keeps it.
+local function mixedAge()
+	local KEY, REMOVED, HANDED = "acme/api#116", "acme/web#303", "acme/web#101"
+	local T2 = Cases.asOf + 120
+	local NEWER = "Retitled by the newer refresh"
+	local function newer(owned: { string }): any
+		local cache = storedCache(owned, T2)
+		for _, saved in cache.prs do
+			if saved.key == API114 then saved.title = NEWER end
+		end
+		return cache
+	end
+	local function entry(cache: any, key: string): any
+		for _, saved in cache.prs do
+			if saved.key == key then return saved end
+		end
+		return nil
+	end
+	local stamp = storedCache({}, T2).refreshedAt
+
+	local function schedule(name: string, prepare: ((w: any, b: any, cxB: any) -> any)?, act: (w: any, b: any, cxB: any, held: any) -> ())
+		withWorld(function(w, Fetch, Block)
+			w.shared = true
+			w.kv["hub.cache"] = storedCache({ WEB, API114 }, Cases.asOf)
+			local a = live(w, Block, true)
+			local cxA = w.cx
+			local b = live(w, Block, true)
+			local cxB = w.cx
+			local c = live(w, Block, true)
+			local cxC = w.cx
+			assert(#reads(w) == 3)
+			for i = 1, 3 do reads(w)[i].done(out("WATCH")) end
+			local held = if prepare then prepare(w, b, cxB) else nil
+			assert(a.cache.refreshedAt == b.cache.refreshedAt and b.watched[KEY] == nil)
+
+			-- A and C take the newer cache, which flags nothing new. C's GitHub refresh is out.
+			w.kv["hub.cache"] = newer({ WEB, API114 })
+			Block.event(a, { ev = "action", act = "hub-focused", value = "" } :: any, cxA)
+			Block.event(c, { ev = "action", act = "hub-focused", value = "" } :: any, cxC)
+			assert(a.cache.refreshedAt == stamp and c.cache.refreshedAt == stamp and b.cache.refreshedAt ~= stamp, name .. ": mixed ages")
+			local answerC: any = nil
+			c.github = quietGithub(function(_, done) answerC = done end)
+			Block.event(c, { ev = "action", act = "hub-refresh", value = "" } :: any, cxC)
+			assert(answerC ~= nil and c.flights.refresh and #reads(w) == 4)
+			reads(w)[4].done(out("WATCH"))
+
+			-- A reads Tandem, which now names KEY: stored at T2 over the newer snapshot.
+			a.github = quietGithub(function() end)
+			w.decoded["READ_K"] = watchWith({ KEY })
+			Block.event(a, { ev = "action", act = "hub-refresh", value = "" } :: any, cxA)
+			assert(#reads(w) == 5)
+			reads(w)[5].done(out("READ_K"))
+			assert(a.watched[KEY] == true and w.kv["hub.cache"].refreshedAt == stamp, name .. ": A stored KEY")
+			assert(entry(w.kv["hub.cache"], KEY).tandem == true and entry(w.kv["hub.cache"], API114).title == NEWER)
+			assert(b.watched[KEY] == nil and not State.prOf(b.s, KEY).tandem and c.watched[KEY] == nil, name .. ": B and C have not seen it")
+
+			act(w, b, cxB, held)
+			local stored = w.kv["hub.cache"]
+			assert(stored.refreshedAt == stamp, name .. ": the stamp never goes back")
+			assert(entry(stored, API114).title == NEWER, name .. ": the newer snapshot stays")
+			assert(entry(stored, KEY).tandem == true and entry(stored, WEB).tandem == true, name .. ": every flag stays")
+			assert(b.cache.refreshedAt == stamp and b.watched[KEY] == true and State.prOf(b.s, KEY).tandem == true, name .. ": B joined")
+
+			-- C's answer keeps the flag: Fix with agent never returns on the card.
+			answerC({ viewer = "jubbydev", prs = copy(Cases.prs), rateLimit = nil, calls = {}, truncated = false }, nil)
+			frozen(c)
+			assert(c.watched[KEY] == true and State.prOf(c.s, KEY).tandem == true, name .. ": C joined")
+			assert(entry(c.cache, KEY).tandem == true and entry(w.kv["hub.cache"], KEY).tandem == true, name .. ": C stored it")
+			local owned = card(c.s, KEY)
+			assert(owned.column == "in_review" and owned.chips[1].text == "Waiting on Tandem" and owned.main and owned.main.act == "card-handoff" and not offers(owned, "card-agent"))
+			Block.event(c, { ev = "action", act = "card-agent", value = KEY } :: any, cxC)
+			assert(c.agentFlight == nil and c.s.agents[KEY] == nil and gh(w) == nil, name .. ": no local fixer")
+		end)
+	end
+
+	-- B hands another PR off.
+	schedule("hand-off", nil, function(w, b, cxB)
+		local before = #handoffs(w)
+		w.Block.event(b, { ev = "action", act = "card-handoff", value = HANDED } :: any, cxB)
+		assert(#handoffs(w) == before + 1)
+		handoffs(w)[before + 1].done(out("KEPT"))
+		assert(b.watched[HANDED] == true and entry(w.kv["hub.cache"], HANDED).tandem == true, "and its own flag")
+	end)
+
+	-- B removes an added PR: that change lands on the newer snapshot, and the PR is gone from what is stored.
+	schedule("removal", nil, function(w, b, cxB)
+		b.github = quietGithub(function() end)
+		assert(entry(b.cache, REMOVED) and entry(w.kv["hub.cache"], REMOVED))
+		w.Block.event(b, { ev = "action", act = "card-remove", value = REMOVED } :: any, cxB)
+		local kept = entry(w.kv["hub.cache"], REMOVED)
+		assert(kept == nil or kept.addedByMe == false, "the removal was stored")
+		local local_ = State.prOf(b.s, REMOVED)
+		assert(local_ == nil or local_.addedByMe == false)
+	end)
+
+	-- B's checks result lands on the newer snapshot; its stamp and the newer title stay.
+	schedule("checks", function(w, b, cxB)
+		local settle: any = { done = nil }
+		b.github = setmetatable({ checks = function(_, done) settle.done = done end }, { __index = function(): any return function() end end })
+		b.flights.refresh, b.flights.probe = true, true
+		w.timers = {}
+		w.Block.event(b, { ev = "action", act = "hub-focused", value = "" } :: any, cxB)
+		local mine = w.timers
+		w.timers = {}
+		return { settle = settle, timers = mine }
+	end, function(w, b, cxB, held)
+		for _, fn in held.timers do fn() end
+		assert(held.settle.done ~= nil and b.flights.checks)
+		local running = State.prOf(b.s, API114)
+		assert(running and running.checks.state == "pending")
+		held.settle.done({ byId = { [running.id] = { headOid = running.headOid, checks = { state = "passing", passing = 3, failing = 0, pending = 0 } } } }, nil)
+		assert(State.prOf(b.s, API114).checks.state == "passing", "the update applied")
+		assert(entry(w.kv["hub.cache"], API114).checks.state == "passing", "and was stored on the newer snapshot")
+	end)
+end
+
+-- An Update branch queued before Tandem took the PR sends nothing once it owns it.
+local function staleUpdate()
+	local KEY = "acme/api#118"
+	local function behind(w: any, Block: any): any
+		local b = live(w, Block)
+		w.runs = {}
+		b.github = { refresh = function() end, run = function(command: any, done: any) table.insert(w.runs, { command = command, done = done }) end }
+		return b
+	end
+	local function lag(b: any)
+		local target: any = State.prOf(b.s, KEY)
+		target.behind, target.conflicts, target.draft = true, false, false
+		State.project(b.s)
+	end
+
+	-- Not watched: Update branch runs the command, so the guard below is what stops it.
+	withWorld(function(w, Fetch, Block)
+		local b = behind(w, Block)
+		reads(w)[1].done(out("WATCH"))
+		lag(b)
+		assert(not State.prOf(b.s, KEY).tandem)
+		Block.event(b, { ev = "action", act = "card-update", value = KEY } :: any, w.cx)
+		assert(#w.runs == 1 and table.find(w.runs[1].command.argv, "update-branch") ~= nil and b.s.busy[KEY] == "Updating…")
+	end)
+
+	-- Tandem takes the PR after the action was queued: nothing runs and nothing is marked busy.
+	withWorld(function(w, Fetch, Block)
+		local b = behind(w, Block)
+		lag(b)
+		w.decoded["READ_K"] = watchWith({ KEY })
+		reads(w)[1].done(out("READ_K"))
+		local owned = card(b.s, KEY)
+		assert(owned.pr.tandem and owned.column == "in_review" and not offers(owned, "card-update"))
+		w.toasts = {}
+		Block.event(b, { ev = "action", act = "card-update", value = KEY } :: any, w.cx)
+		assert(#w.runs == 0 and gh(w) == nil and b.s.busy[KEY] == nil, "nothing is sent")
+		assert(#w.toasts == 1 and w.toasts[1].kind == "error" and string.find(w.toasts[1].title, "Tandem watches this pull request", 1, true))
+		assert(State.prOf(b.s, KEY).behind == true and not b.s.acted[KEY], "and nothing changes")
+	end)
+end
+
 -- A board whose TARGET holds a ready fix on the Review fix page, kept by a retained engine. The push and the lease
 -- return are recorded calls (the real `Fetch.pushAgentFix` needs the engine's own lease), settled by hand.
 local function withReady(run: (w: any, b: any) -> ())
@@ -1891,6 +2050,8 @@ return function()
 	reverseSharedCache()
 	delayedRefresh()
 	sharedStore()
+	mixedAge()
+	staleUpdate()
 	readyPush()
 	retainedLease()
 	preWorktreeLease()
