@@ -194,11 +194,11 @@ Anywhere in Tern: `⌥⌘R` opens the PR hub and `⌥⇧⌘R` opens it with AI g
 
 ### PR hub keys
 
-**New PR hub sample block** opens the PR hub on recorded sample data (`fixture=cases`; `fixture=rereview` shows Merge when ready and Re-request review).
+**New PR hub sample block** opens the PR hub on recorded sample data (`fixture=cases`; `fixture=rereview` shows Merge when ready and Re-request review; `fixture=review-fix` shows a retained fix with three conflicts in two files).
 
 | Move | | The selected card | | The board | |
 |---|---|---|---|---|---|
-| `h` `j` `k` `l` / arrows | move between cards | `⏎` / double-click | open (a Needs fixes card opens the fixes page) | `/` | search |
+| `h` `j` `k` `l` / arrows | move between cards | `⏎` / double-click | open (Needs fixes opens the fixes page; Fix ready opens Review fix) | `/` | search |
 | `.` | next pull request that needs you, across both tabs | | | | |
 | `T` | switch tab | `A` | fix with agent, Stop, Try again, Clone repo, or summarize | `F` | filter by repository |
 | | | `O` | choose an existing clone folder, or open a failed fix's retained worktree | | |
@@ -285,7 +285,24 @@ the board, `⏎` shows it and `⇧⏎` opens it. `X` removes one you added.
 After a failed fix, **Open worktree** (`O`) appears only while the agent still holds its lease.
 If returning the lease failed, **Try again** (`A`) retries that return before starting another fix.
 The hub keeps the lease handle until it is returned, including when the hub closes. A Fix ready
-worktree stays in place for review.
+worktree stays in place for review. **Review fix** (`⏎` or double-click on Fix ready) shows only the
+conflict resolutions from that commit. Each line is marked main, Your branch, or Agent; shared context
+has no ownership badge. Rules that took both sides are reviewed in the same way.
+
+| Review fix | Action |
+|---|---|
+| `j` `k` / `↑` `↓` | next or previous conflict |
+| `⏎` | mark the selected conflict reviewed or unreviewed |
+| `B` | switch between the resolution and original conflict |
+| `P` | push to the PR branch once every conflict is reviewed |
+| `D` | ask to discard the fix; `⌘⏎` or Ctrl+Enter confirms |
+| `Esc` | cancel Discard, or return to the board with the card selected |
+
+Push sends the exact reviewed commit with a plain git push, including for a fork's branch. It refuses
+if the branch head changed. A clean merge with no conflicts is already reviewed. A push failure keeps
+the fix, ticks and lease for retry. After a successful push the lease is returned; if returning it fails,
+`P` retries the return without pushing again. Discard resets only the leased worktree and returns its
+lease. It never writes to the remote. A failed return keeps the fix and asks again on `D`.
 
 In a menu, `j` `k` move, `Space` chooses (a repository toggles), `⏎` chooses or closes, `Esc` closes, and in the agent menu `←` `→` change the effort.
 

@@ -13,6 +13,8 @@ local Github = require("../github")
 local Keys = require("../keys")
 local Model = require("./model")
 local Paths = require("../view/hub/paths")
+local ReviewFix = require("./review-fix")
+local ReviewFixPage = require("../view/hub/review-fix")
 local State = require("./state")
 local Sync = require("./sync")
 
@@ -59,13 +61,14 @@ export type Block = {
 
 type Handler = (b: Block, cx: BlockCx, value: string) -> ()
 
-local ARGS = "generate=true|false and fixture=<name> (cases, rereview, agent-cards)"
+local ARGS = "generate=true|false and fixture=<name> (cases, rereview, agent-cards, review-fix)"
 
 -- Fixtures by name, loaded only when asked for. `cases` is the rules' recorded pull requests.
 local FIXTURES: { [string]: () -> any } = {
 	cases = function() return require("../../fixtures/hub/cases") end,
 	rereview = function() return require("../../fixtures/hub/rereview") end,
 	["agent-cards"] = function() return require("../../fixtures/hub/agent-cards") end,
+	["review-fix"] = function() return require("../../fixtures/hub/review-fix") end,
 }
 
 -- The recently opened pull requests a fixture board shows, so the fold has rows without a kv store.
@@ -150,6 +153,7 @@ local function openPr(b: Block, cx: BlockCx, slug: string, number: number, gener
 end
 
 local openFixes: (b: Block, cx: BlockCx, key: string) -> ()
+local openReviewFix: (b: Block, cx: BlockCx, key: string) -> ()
 
 -- ⏎ and a double-click open the selected row; ⇧⏎ (or a hub opened for AI guides) starts the AI guide too.
 local function openRow(b: Block, cx: BlockCx, value: string, withGuide: boolean)
@@ -160,6 +164,7 @@ local function openRow(b: Block, cx: BlockCx, value: string, withGuide: boolean)
 	if recent then return openPr(b, cx, recent.repo, recent.number, generate) end
 	local card = State.selectedCard(s)
 	if card == nil then return end
+	if card.agent and card.agent.kind == "ready" then return openReviewFix(b, cx, card.pr.key) end
 	-- A Needs fixes card opens at what needs fixing; the AI guide still opens the whole pull request.
 	if card.column == "needs_fixes" and not generate then return openFixes(b, cx, card.pr.key) end
 	openPr(b, cx, card.pr.repo, card.pr.number, generate)
@@ -1668,6 +1673,156 @@ ACTIONS["card-remove"] = function(b, cx, key)
 	refetch(b, cx)
 end
 
+-- Review fix: only P can push, only confirmed D can discard, and neither forgets a held lease.
+openReviewFix = function(b: Block, cx: BlockCx, key: string)
+	if not State.openReviewFix(b.s, key) then return end
+	local agent = b.s.agents[key]
+	if not agent or agent.kind ~= "ready" then return end
+	if agent.review then return end
+	local route, fix = b.s.route :: State.Route, agent.fix
+	local function read(value: Fetch.AgentFixRead?, err: string?)
+		if b.s.agents[key] ~= agent then return end
+		if value then agent.review = ReviewFix.build(fix, value.files, b.s.details[key], value.originals) end
+		if b.s.route == route then
+			route.loading = false
+			route.error = if value then nil else "Couldn't read the fix: " .. reasonOf(err or "no answer")
+		end
+		if not b.closed then draw(b, cx) end
+	end
+	if b.fixture then
+		local data: any = FIXTURES["review-fix"]()
+		local files = if data.fix.commit == fix.commit then data.files else nil
+		-- Other lifecycle samples have captured resolutions but no commit files. Assemble a
+		-- recorded preview without running git; the dedicated sample carries actual file text.
+		if not files then
+			files = {}
+			for _, hunk in fix.hunks do
+				local lines = table.clone(hunk.context.before)
+				for _, line in (if hunk.resolved then hunk.resolved.lines else {}) do table.insert(lines, line.text) end
+				for _, line in hunk.context.after do table.insert(lines, line) end
+				files[hunk.path] = (files[hunk.path] or "") .. table.concat(lines, "\n") .. "\n"
+			end
+		end
+		read({ files = files, diff = "" }, nil)
+		return
+	end
+	local ok, err = pcall(Fetch.readAgentFix, fix, read)
+	if not ok then read(nil, tostring(err)) end
+end
+
+ACTIONS["review-fix-close"] = function(b, cx)
+	if not b.s.route or b.s.route.kind ~= "review-fix" then return end
+	local page = State.reviewPage(b.s)
+	if page and (page.busy or page.ask) then return end
+	State.closeFixes(b.s)
+	revealSelected(b, cx)
+end
+ACTIONS["review-fix-step"] = function(b, _, index) State.reviewSelect(b.s, tonumber(index) or 1) end
+ACTIONS["review-fix-move"] = function(b, _, delta)
+	local page = State.reviewPage(b.s)
+	if page then State.reviewSelect(b.s, page.cur + (tonumber(delta) or 0)) end
+end
+ACTIONS["review-fix-reviewed"] = function(b, _, index) State.reviewToggle(b.s, tonumber(index)) end
+ACTIONS["review-fix-original"] = function(b) State.reviewOriginal(b.s) end
+ACTIONS["review-fix-discard"] = function(b, cx)
+	local page = State.reviewPage(b.s)
+	if page and page.completion == "push" then return cx:toast("error", "Couldn't discard the fix: return the worktree lease first") end
+	State.reviewAsk(b.s, true)
+end
+ACTIONS["review-fix-discard-cancel"] = function(b) State.reviewAsk(b.s, false) end
+
+local function reviewEffect(b: Block, cx: BlockCx, action: "push" | "discard")
+	local page, request = State.reviewPage(b.s), State.reviewRequest(b.s)
+	if not page or page.busy then return end
+	local verb = if action == "push" then "push" else "discard"
+	if not request then return cx:toast("error", "Couldn't " .. verb .. " the fix: wait for the fix to load") end
+	if action == "push" and page.ask then return end
+	local plan, problem = ReviewFix.plan(action, request, page.ask)
+	if not plan then return cx:toast("error", "Couldn't " .. verb .. " the fix: " .. (problem or "no action is available")) end
+	local agent = b.s.agents[request.key]
+	if not agent or agent.kind ~= "ready" or agent.fix ~= request.fix then return end
+	local flight = if b.agentFlight and b.agentFlight.key == request.key then b.agentFlight else nil
+	if not b.fixture then
+		local lease = if flight and flight.engine then flight.engine.held() else nil
+		if not flight or flight.key ~= request.key or not flight.settled or flight.starting or flight.releasing or not lease or lease.path ~= request.fix.worktree then
+			return cx:toast("error", "Couldn't " .. verb .. " the fix: the worktree lease is unavailable")
+		end
+	end
+	local route = b.s.route :: State.Route
+	route.ask, route.error = false, nil
+	State.setBusy(b.s, request.key, if action == "push" and plan.command then "Pushing fix…" else "Returning worktree lease…")
+	draw(b, cx)
+	local pushed = action == "push" and agent.completion == "push"
+	local function fail(reason: string)
+		State.setBusy(b.s, request.key, nil)
+		if b.s.route == route then route.error = "Couldn't " .. verb .. " the fix: " .. reasonOf(reason) end
+		if not b.closed then
+			cx:toast("error", "Couldn't " .. verb .. " the fix: " .. reasonOf(reason))
+			draw(b, cx)
+		end
+	end
+	local function release()
+		-- Completion is retained on the ready fix. P then retries only this return,
+		-- while a failed Discard asks again and retries the same engine's guarded reset.
+		agent.completion = action
+		State.setBusy(b.s, request.key, "Returning worktree lease…")
+		if not b.closed then draw(b, cx) end
+		local called = false
+		if flight then flight.releasing = true end
+		local function returned(ok: boolean?, err: string?)
+			if called then return end
+			called = true
+			if flight then flight.releasing = false end
+			local engine = if flight then flight.engine else nil
+			if ok and not b.fixture and (not engine or engine.held() ~= nil or engine.busy()) then ok, err = nil, "The engine still holds the worktree lease" end
+			local outcome = ReviewFix.result(plan :: ReviewFix.Plan, pushed, ok == true)
+			if not outcome.clear then return fail(err or "The worktree lease could not be returned") end
+			if b.s.agents[request.key] ~= agent then return end
+			b.s.agents[request.key], b.s.busy[request.key] = nil, nil
+			if b.agentFlight == flight then b.agentFlight = nil end
+			if action == "push" then
+				local pr = State.prOf(b.s, request.key)
+				if pr then pr.headOid, pr.conflicts = request.fix.commit, false end
+				b.s.acted[request.key] = true
+				State.branchUpdated(b.s, request.key)
+			else State.project(b.s) end
+			if b.s.route == route then State.closeFixes(b.s) end
+			if not b.closed then
+				cx:toast("success", if action == "push" then "Pushed the fix to #" .. request.number else "Discarded the fix for #" .. request.number)
+				draw(b, cx)
+				revealSelected(b, cx)
+				if action == "push" then refetch(b, cx) end
+			end
+		end
+		if b.fixture then returned(true, nil); return end
+		local ok, err = pcall(Fetch.returnAgentFix, request.fix.worktree, returned)
+		if not ok then returned(nil, tostring(err)) end
+	end
+	if action == "discard" or not plan.command then release(); return end
+	local called = false
+	local function completed(ok: boolean?, err: string?)
+		if called then return end
+		called = true
+		if not ok then return fail(err or "Git refused the push") end
+		pushed = true
+		release()
+	end
+	if b.fixture then completed(true, nil); return end
+	local function canPush(): boolean
+		local current = b.s.agents[request.key]
+		local pr = State.prOf(b.s, request.key)
+		return not b.closed and b.agentFlight == flight and current ~= nil and current == agent and current.kind == "ready"
+			and current.fix == request.fix and b.s.selected == request.key and b.s.route == route
+			and route.kind == "review-fix" and State.reviewed(current.fix, current.reviewed)
+			and pr ~= nil and pr.repo == request.repo and pr.number == request.number
+			and (pr.headOid == request.fix.headOid or pr.headOid == request.fix.commit)
+	end
+	local ok, err = pcall(Fetch.pushAgentFix, plan, canPush, completed)
+	if not ok then completed(nil, tostring(err)) end
+end
+ACTIONS["review-fix-push"] = function(b, cx) reviewEffect(b, cx, "push") end
+ACTIONS["review-fix-discard-confirm"] = function(b, cx) reviewEffect(b, cx, "discard") end
+
 -- The fixes page ---------------------------------------------------------------------------------------------
 -- ⏎ on a Needs fixes card. The details are read once when it opens (one GraphQL call); the conflicted files and
 -- the annotated source come from local git when the repo has a checkout. Reply and Resolve are GraphQL writes.
@@ -2002,7 +2157,7 @@ local block: BlockDef<Block> = {
 		local s = b.s
 		local motion = { born = s.born, next = {}, booted = s.booted, animate = not s.keyed }
 		if s.route then
-			local page = FixesPage.view(s, motion)
+			local page = if s.route.kind == "review-fix" then ReviewFixPage.view(s, motion) else FixesPage.view(s, motion)
 			s.born, s.booted = motion.next, true
 			return { main = page, layer = nil }
 		end

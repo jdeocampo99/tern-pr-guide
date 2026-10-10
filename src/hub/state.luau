@@ -7,6 +7,7 @@ local AgentFix = require("./agent-fix")
 local Fixes = require("./fixes")
 local Links = require("../links")
 local Model = require("./model")
+local ReviewFix = require("./review-fix")
 
 type HubPR = Model.HubPR
 type Tab = Model.Tab
@@ -20,7 +21,7 @@ export type Opened = { repo: string, number: number, title: string, author: stri
 export type Summary = { verdict: string, comments: { { author: string, text: string } } } -- summary.Summary
 export type FixDetails = Fixes.FixDetails
 
-export type Mode = "board" | "search" | "link" | "menu" | "confirm" | "help" | "fixes" | "reply"
+export type Mode = "board" | "search" | "link" | "menu" | "confirm" | "help" | "fixes" | "reply" | "review-fix"
 export type MenuId = "repositories" | "sort" | "agent" | "merge" | "actions"
 export type Ring = "bad" | "good" | "bad-out" | "good-out" -- red ring, green wash, then the same fading
 -- What the flake evidence says about a card's failing checks, for the commit it was read on. `runs` are the workflow
@@ -31,7 +32,7 @@ export type CardAction = { act: string, value: string?, label: string, key: stri
 export type AgentFixState =
 	{ kind: "no_clone", slug: string }
 	| { kind: "running", run: AgentFix.Run }
-	| { kind: "ready", fix: AgentFix.Fix, reviewed: { [string]: boolean } }
+	| { kind: "ready", fix: AgentFix.Fix, reviewed: { [string]: boolean }, review: ReviewFix.Review?, completion: ("push" | "discard")? }
 	| { kind: "pushing", fix: AgentFix.Fix }
 	| { kind: "failed", reason: string, worktree: string? }
 
@@ -87,7 +88,7 @@ export type AgentChoice = { models: { AgentModel }, model: string, effort: strin
 
 -- The fixes page, open on the Needs fixes card `key`. Its steps come from `s.details[key]` and the card's PR.
 export type Route = {
-	kind: "fixes",
+	kind: "fixes" | "review-fix",
 	key: string,
 	cur: number, -- the step on show, 1-based
 	focus: "steps" | "panel", -- h and l move between the two
@@ -99,6 +100,7 @@ export type Route = {
 	replies: { [string]: { string } }, -- replies posted from the page, by thread id
 	reply: Fields.Field?, -- the reply being written (mode "reply")
 	busy: boolean, -- a reply or resolve is in flight
+	original: boolean?, ask: boolean?, -- review-fix's before view and inline Discard question
 }
 
 export type State = {
@@ -222,10 +224,7 @@ function M.closeAgent(s: State): string?
 end
 
 function M.reviewed(fix: AgentFix.Fix, reviewed: { [string]: boolean }): boolean
-	for _, hunk in fix.hunks do
-		if reviewed[hunk.id] ~= true then return false end
-	end
-	return true
+	return ReviewFix.allReviewed(fix, reviewed)
 end
 
 local STAGES: { [AgentFix.Stage]: string } = {
@@ -573,7 +572,7 @@ local function toCard(pr: HubPR, placement: Model.Placement, s: State): Card
 			main, more, chips = action("card-agent-retry", "Try again", "A"), {}, { chip("Fix failed", "bad-soft") }
 			if agent.worktree then table.insert(more, action("card-agent-worktree", "Open worktree", "O")) end
 		else
-			-- Review, Discard and Push are deliberately left to #16.
+			-- Enter and double-click use hub-open for Review fix; keep the lifecycle card's stable action slot.
 			main, more, chips = nil, {}, { chip(if agent.kind == "ready" then "Fix ready" else "Pushing fix…", "done") }
 		end
 	end
@@ -1657,10 +1656,82 @@ end
 -- The details the block read: the page's steps follow them.
 function M.setDetails(s: State, details: FixDetails)
 	s.details[details.key] = details
-	if s.route and s.route.key == details.key then
+	if s.route and s.route.kind == "fixes" and s.route.key == details.key then
 		s.route.loading, s.route.error = false, nil
 		s.route.cur = math.clamp(s.route.cur, 1, math.max(1, #M.fixSteps(s)))
 	end
+end
+
+-- Review fix reuses the fixes route's frame without changing fixes/reply's fields or keys.
+export type ReviewPage = {
+	pr: HubPR, fix: AgentFix.Fix, review: ReviewFix.Review?, reviewed: { [string]: boolean },
+	current: ReviewFix.Hunk?, lines: { ReviewFix.Line },
+	count: number, all: boolean, cur: number, original: boolean, ask: boolean,
+	busy: boolean, loading: boolean, error: string?, progress: string?, completion: ("push" | "discard")?,
+}
+
+function M.openReviewFix(s: State, key: string): boolean
+	local agent, pr = s.agents[key], M.prOf(s, key)
+	if not pr or not agent or agent.kind ~= "ready" then return false end
+	s.selected = key
+	s.route = {
+		kind = "review-fix", key = key, cur = 1, focus = "steps", item = 1, loading = agent.review == nil,
+		error = nil, bots = false, resolved = {}, replies = {}, busy = s.busy[key] ~= nil, original = false, ask = false,
+	}
+	s.mode, s.menu, s.confirm = "review-fix", nil, nil
+	return true
+end
+
+function M.reviewPage(s: State): ReviewPage?
+	local route = s.route
+	if not route or route.kind ~= "review-fix" then return nil end
+	local agent, pr = s.agents[route.key], M.prOf(s, route.key)
+	if not agent or agent.kind ~= "ready" or not pr then return nil end
+	local count = 0
+	for _, hunk in agent.fix.hunks do if agent.reviewed[hunk.id] == true then count += 1 end end
+	local current = if agent.review then agent.review.hunks[route.cur] else nil
+	return {
+		pr = pr, fix = agent.fix, review = agent.review, reviewed = agent.reviewed, count = count,
+		current = current, lines = if current then ReviewFix.lines(current, route.original == true) else {},
+		all = M.reviewed(agent.fix, agent.reviewed) and agent.review ~= nil and agent.review.verified,
+		cur = route.cur, original = route.original == true, ask = route.ask == true,
+		busy = s.busy[route.key] ~= nil, loading = route.loading, error = route.error or (if agent.review then agent.review.error else nil),
+		progress = s.busy[route.key],
+		completion = agent.completion,
+	}
+end
+
+function M.reviewSelect(s: State, index: number)
+	local page, route = M.reviewPage(s), s.route
+	if not page or not route or page.busy or page.ask then return end
+	route.cur = math.clamp(index, 1, math.max(1, #page.fix.hunks))
+end
+
+function M.reviewToggle(s: State, index: number?)
+	local page = M.reviewPage(s)
+	if not page or page.busy or page.ask or page.completion or not page.review or not page.review.verified then return end
+	local hunk = page.fix.hunks[index or page.cur]
+	if hunk then page.reviewed[hunk.id] = if page.reviewed[hunk.id] then nil else true end
+end
+
+function M.reviewOriginal(s: State)
+	local page = M.reviewPage(s)
+	if page and not page.busy and not page.ask and s.route then s.route.original = not s.route.original end
+end
+
+function M.reviewAsk(s: State, ask: boolean)
+	local page = M.reviewPage(s)
+	if page and not page.busy and s.route and page.completion ~= "push" then s.route.ask = ask end
+end
+
+function M.reviewRequest(s: State): ReviewFix.Request?
+	local page, route = M.reviewPage(s), s.route
+	if not page or not route or page.busy or page.loading then return nil end
+	return {
+		kind = "ready", key = route.key, selectedKey = s.selected, routeKey = route.key, repo = page.pr.repo, number = page.pr.number,
+		headOid = page.pr.headOid, fix = page.fix, reviewed = table.clone(page.reviewed),
+		verified = page.review ~= nil and page.review.verified, completion = page.completion,
+	}
 end
 
 return M

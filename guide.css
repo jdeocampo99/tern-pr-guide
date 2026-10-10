@@ -1340,3 +1340,21 @@
 .gp-fx .gp-hintbar > * { height: 44px; box-sizing: border-box; }
 .gp-fx .gp-hb-item { flex-shrink: 0; }
 .gp-fx .gp-hb-mode { flex-shrink: 0; line-height: 44px; max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Review fix: the fixes frame, conflict-only commit lines, and an inline Discard question. */
+.gp-rfix .gp-title, .gp-rfix-status, .gp-rfix-actions, .gp-rfix-fhead { flex-wrap: wrap; }
+.gp-rfix .gp-title-text { flex: 1 1 160px; }
+.gp-rfix .gp-fx-cols > .gp-code-col { min-width: 0; flex-basis: 360px; }
+.gp-rfix .gp-fx-cols > .gp-fx-steps { min-width: 0; flex-basis: 320px; }
+.gp-rfix .gp-btn, .gp-rfix .gp-rv-button { transition: none; }
+.gp-rfix .gp-btn:active, .gp-rfix .gp-rv-button:active { transform: none; }
+.gp-rfix-question { font-family: var(--sans); font-size: 13px; font-weight: 600; }
+.gp-rfix-agent { color: var(--gp-suggestion); font-weight: 600; }
+.gp-rfix-tag { font-family: var(--sans); font-size: 12px; color: var(--t3); }
+.gp-rfix-from { flex-shrink: 0; margin: 0 12px 0 16px; font-family: var(--sans); font-size: 11.5px; color: var(--t3); white-space: nowrap; }
+.gp-rfix-from.gp-rfix-agent { color: var(--gp-suggestion); }
+.gp-rfix .gp-rv-button.gp-rfix-locked { background: var(--chip-bg); border-color: var(--l2); }
+.gp-rfix-locked .gp-rv-button-label { color: var(--t3); }
+.gp-rfix-locked .sf-kbd .kbd { color: var(--t3); border-color: var(--l2); }
+.gp-rfix .gp-rfix-danger { background: var(--gp-danger-fill); border-color: transparent; color: #fff; }
+.gp-rfix-danger .sf-kbd .kbd { background: transparent; border: 1px solid rgba(255,255,255,0.35); box-shadow: none; color: #fff; }

@@ -15,6 +15,7 @@ local Links = require("./links")
 local Model = require("./hub/model")
 local Pr = require("./pr")
 local Review = require("./review")
+local ReviewFix = require("./hub/review-fix")
 local Sync = require("./hub/sync")
 local Text = require("./text")
 
@@ -931,8 +932,120 @@ function M.returnAgentFix(path: string, done: (boolean?, string?) -> ())
  local lease = engine.held()
  if not lease or lease.path ~= path then return done(nil, "The worktree does not belong to this agent fix") end
  engine.release(function(ok, err)
-  if ok then activeAgentFix = nil end
+  if ok and (engine.held() ~= nil or engine.busy()) then ok, err = nil, "The engine still holds the worktree lease" end
+  if ok and activeAgentFix == engine then activeAgentFix = nil end
   done(ok, err)
+ end)
+end
+
+export type AgentFixRead = { files: { [string]: string }, diff: string, originals: { [string]: ReviewFix.Original }? }
+
+local function ownsAgentFix(fix: AgentFix.Fix): boolean
+ local engine = activeAgentFix
+ local lease = if engine then engine.held() else nil
+ return lease ~= nil and lease.path == fix.worktree
+end
+
+-- Read only paths with recorded conflicts, at the exact commit the reader will push.
+function M.readAgentFix(fix: AgentFix.Fix, done: (AgentFixRead?, string?) -> ())
+ if not ownsAgentFix(fix) then return done(nil, "The worktree does not belong to this agent fix") end
+ local commands, problem = ReviewFix.readCommands(fix)
+ if not commands then return done(nil, problem) end
+ local result: AgentFixRead = { files = {}, diff = "" }
+ local index = 0
+ local nextCommand: () -> ()
+ nextCommand = function()
+  index += 1
+  local command = (commands :: { ReviewFix.Command })[index]
+  if not command then return done(result, nil) end
+  local called = false
+  local function read(out: Github.Out)
+   if called then return end
+   called = true
+   if out.status ~= 0 or out.timed_out then return done(nil, if out.timed_out then "Reading the fix timed out" else Text.errorLine(if out.stderr ~= "" then out.stderr else "Git could not read the fix")) end
+   if not ownsAgentFix(fix) then return done(nil, "The worktree lease changed") end
+   if command.argv[4] == "rev-parse" then
+    local ok, originals = pcall(function()
+     local journal = tern.json.decode(tern.fs.read(trimmed(out.stdout) .. "/prguide-conflicts.json", 16 * 1024 * 1024))
+     assert(type(journal.identity) == "string" and string.sub(journal.identity, 1, #fix.headOid + 1) == fix.headOid .. ":", "The conflict journal belongs to a different pull request head")
+     local snapshots: { [string]: ReviewFix.Original } = {}
+     local function lines(value: any): { string }
+      assert(type(value) == "table", "The original conflict sides are missing")
+      local exact: { string } = {}
+      for _, line in value do
+       assert(type(line) == "string", "The original conflict side is invalid")
+       table.insert(exact, (string.gsub(line, "[\r\n]+$", "")))
+      end
+      return exact
+     end
+     for _, hunk in journal.hunks do
+      assert(type(hunk.id) == "string" and not snapshots[hunk.id], "The conflict journal has missing or duplicate ids")
+      snapshots[hunk.id] = { path = hunk.path, start = hunk.start, base = lines(hunk.base), ours = lines(hunk.ours), theirs = lines(hunk.theirs) }
+     end
+     return snapshots
+    end)
+    if not ok then return done(nil, Text.errorLine(originals)) end
+    result.originals = originals
+   elseif command.argv[5] == "diff" then result.diff = out.stdout
+   else
+    local ref = command.argv[#command.argv]
+    result.files[string.sub(ref, #fix.commit + 2)] = out.stdout
+   end
+   nextCommand()
+  end
+  local ok, err = pcall(M.runner, command.argv, { cwd = command.cwd, timeout_ms = GIT_MS }, read)
+  if not ok then read({ status = -1, stdout = "", stderr = tostring(err), timed_out = false }) end
+ end
+ nextCommand()
+end
+
+-- P is the only caller. Validate the pure plan again, read the PR's actual head repo
+-- (including forks), and preserve Git's ordinary non-fast-forward protection.
+function M.pushAgentFix(plan: ReviewFix.Plan, canPush: () -> boolean, done: (boolean?, string?) -> ())
+ local validated, problem = ReviewFix.plan("push", plan.request)
+ if plan.kind ~= "push" or not validated or not validated.command then return done(nil, problem or "No push is planned") end
+ local request, fix = validated.request, validated.request.fix
+ if not ownsAgentFix(fix) then return done(nil, "The worktree does not belong to this agent fix") end
+ local finished = false
+ local function finish(ok: boolean?, err: string?)
+  if finished then return end
+  finished = true
+  done(ok, err)
+ end
+ local function run(argv: { string }, callback: (Github.Out) -> ())
+  if not canPush() then return finish(nil, "The selected fix changed") end
+  local called = false
+  local function reply(out: Github.Out)
+   if called or finished then return end
+   called = true
+   if not ownsAgentFix(fix) then return finish(nil, "The worktree lease changed") end
+   if out.status ~= 0 or out.timed_out then return finish(nil, if out.timed_out then "Pushing the fix timed out" else Text.errorLine(if out.stderr ~= "" then out.stderr else "Git could not push the fix")) end
+   callback(out)
+  end
+  local ok, err = pcall(M.runner, argv, { cwd = fix.worktree, timeout_ms = 60_000 }, reply)
+  if not ok then reply({ status = -1, stdout = "", stderr = tostring(err), timed_out = false }) end
+ end
+ run({ "gh", "pr", "view", tostring(request.number), "--repo", request.repo, "--json", "headRefName,headRefOid,headRepository,headRepositoryOwner" }, function(out)
+  local ok, meta = pcall(tern.json.decode, out.stdout)
+  if not ok or type(meta) ~= "table" or meta.headRefName ~= fix.branch or type(meta.headRepository) ~= "table" then
+   return finish(nil, "The pull request branch changed or is missing")
+  end
+  local remoteRepo = meta.headRepository.nameWithOwner
+  if not remoteRepo and type(meta.headRepositoryOwner) == "table" and type(meta.headRepositoryOwner.login) == "string" and type(meta.headRepository.name) == "string" then
+   remoteRepo = meta.headRepositoryOwner.login .. "/" .. meta.headRepository.name
+  end
+  if type(remoteRepo) ~= "string" then return finish(nil, "The pull request head repository is missing") end
+  local remotePlan, err = ReviewFix.plan("push", request, nil, remoteRepo)
+  if not remotePlan or not remotePlan.command then return finish(nil, err) end
+  local command = remotePlan.command
+  -- Reconcile an earlier push whose response was lost. Never send it twice on a cleanup retry.
+  if meta.headRefOid ~= fix.headOid and meta.headRefOid ~= fix.commit then return finish(nil, "The pull request head changed; refresh the board") end
+  run({ "git", "-C", fix.worktree, "ls-remote", "--heads", command.argv[5], "refs/heads/" .. fix.branch }, function(remote)
+   local head = string.match(remote.stdout, "^(%x+)%s+refs/heads/")
+   if head == fix.commit then return finish(true, nil) end
+   if head ~= fix.headOid then return finish(nil, "The remote branch changed; refresh the board") end
+   run(command.argv, function() finish(true, nil) end)
+  end)
  end)
 end
 

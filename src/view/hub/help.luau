@@ -10,7 +10,7 @@ type Group = { title: string, keys: { { string } } } -- a key row is { keys, lab
 local GROUPS: { Group } = {
 	{ title = "Move", keys = {
 		{ "h j k l", "Move between cards", "← ↑ ↓ →" },
-		{ "⏎", "Open the card, or a Needs fixes card at what needs fixing" },
+		{ "⏎", "Open the card, fixes page, or a Fix ready card for review" },
 		{ "⇧⏎", "Open with the AI guide started" },
 		{ ".", "Next pull request that needs you" },
 		{ "T", "Switch tab" },
@@ -55,6 +55,14 @@ local GROUPS: { Group } = {
 		{ "⌘⏎", "Confirm a question" },
 		{ "Esc", "Clear, cancel or close" },
 		{ "?", "All shortcuts" },
+	} },
+	{ title = "Review fix", keys = {
+		{ "j k", "Next or previous conflict", "↑ ↓" },
+		{ "⏎", "Mark the conflict reviewed or unreviewed" },
+		{ "B", "Switch between the resolution and original conflict" },
+		{ "P", "Push after every conflict is reviewed, or retry lease return" },
+		{ "D", "Discard fix (⌘⏎ or Ctrl+Enter confirms)" },
+		{ "Esc", "Cancel Discard, or return to the board" },
 	} },
 }
 
