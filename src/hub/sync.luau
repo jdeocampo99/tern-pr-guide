@@ -76,6 +76,15 @@ local function isArray(value: any): boolean
 	return n == #value
 end
 
+-- A plain copy of `value`, built key by key. kv tables carry a protected metatable that `table.clone` refuses,
+-- so nothing read from kv is handed on as it is.
+local function plain(value: any): any
+	if type(value) ~= "table" then return value end
+	local out: { [any]: any } = {}
+	for k, v in value do out[k] = plain(v) end
+	return out
+end
+
 -- The kv value as a Cache, or nil for anything malformed or not schema 1. Never throws.
 function M.load(raw: any): Cache?
 	if type(raw) ~= "table" or raw.schema ~= 1 then return nil end
@@ -88,7 +97,7 @@ function M.load(raw: any): Cache?
 	for _, pr in raw.prs do
 		if not validPr(pr) then return nil end
 	end
-	return raw :: any
+	return plain(raw)
 end
 
 -- The value for kv: `cache` with the oldest `lastActivityAt` dropped first until `size(value) <= capBytes`.

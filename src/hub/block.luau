@@ -1093,6 +1093,8 @@ local block: BlockDef<Block> = {
 			sample.models = table.clone(SAMPLE_AGENT.models)
 			s.agent = sample
 		elseif live then
+			-- How each repo merges is known from the first frame, before any refresh.
+			loadMerges(b)
 			loadAgent(b, cx)
 			rearm(b, cx)
 		end
