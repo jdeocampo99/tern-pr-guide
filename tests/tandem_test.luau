@@ -2968,6 +2968,179 @@ local function sharedOwnership()
 		end
 		assert(#w.toasts == 0 and #w.started == 0, "no toast or effect")
 	end)
+
+	-- A merge-when-ready on a PR nobody watches: a cache-writing action that says nothing about Tandem and adds no hand-off.
+	local MERGE_KEY = "acme/api#109"
+	local function mergeWhenReady(w: any, Block: any, b: any): any
+		w.runs = {}
+		b.github.run = function(command: any, done: any) table.insert(w.runs, { command = command, done = done }) end
+		b.s.merges["acme/api"] = { method = { kind = "comment", command = "/merge" }, source = "declared", ask = false }
+		b.s.autoMerge["acme/api"] = true
+		State.project(b.s)
+		Block.event(b, { ev = "action", act = "card-auto", value = MERGE_KEY } :: any, w.cx)
+		assert(#w.runs == 1, "the command is out")
+		return w.runs[1]
+	end
+
+	-- This window already holds TARGET and its read of Tandem (which omits TARGET) is out. Another window renews the hand-off
+	-- and stores it (same stamp or newer), and this window then joins it through an unrelated action whose own save replaces the
+	-- stored id. Joining moved nothing (the flag was held), so only the record of the join says the old answer predates the
+	-- write: it clears nothing and stores nothing, and a replacement read, which began after the write, may clear TARGET.
+	for _, bump in { 0, 60 } do
+		withWorld(function(w, Fetch, Block)
+			local what = if bump == 0 then "same stamp" else "newer stamp"
+			local b = agentBoard(w, Fetch, Block)
+			b.github = quietGithub(function(_, done) done(nil, { operation = "hub", message = "no answer" }) end)
+			holdCache(w, b)
+			claim(w, Block, b)
+			assert(b.watched[TARGET] == true and State.prOf(b.s, TARGET).tandem == true, what .. ": this window holds TARGET")
+			Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+			local answer = reads(w)[#reads(w)]
+			local theirs = storedCache({ WEB, API114, TARGET }, Cases.asOf + bump)
+			theirs.writeId = "other-window#1"
+			w.kv["hub.cache"] = theirs
+			local asked, joined, sets = #reads(w), b.handoffs, w.cacheSets or 0
+
+			local run = mergeWhenReady(w, Block, b)
+			run.done(nil, nil)
+			local mine = copy(w.kv["hub.cache"])
+			assert((w.cacheSets or 0) == sets + 1 and mine.writeId ~= "other-window#1", what .. ": a local save replaced the stored id")
+			assert(State.prOf(b.s, MERGE_KEY).pending ~= nil, what .. ": and it is the action's own")
+			assert(b.handoffs == joined and b.watched[TARGET] == true, what .. ": joining moved nothing")
+
+			local before = w.cacheSets or 0
+			answer.done(out("WATCH"))
+			assert(b.watched[TARGET] == true and State.prOf(b.s, TARGET).tandem == true, what .. ": TARGET stays owned")
+			local owned = card(b.s, TARGET)
+			assert(owned.column == "in_review" and owned.main.label == "Hand off to Tandem" and not offers(owned, "card-agent"), what .. ": no Fix with agent")
+			assert((w.cacheSets or 0) == before and same(w.kv["hub.cache"], mine), what .. ": the old answer attempted no write")
+			assert(b.handoffs == joined + 1, what .. ": it counted as a hand-off")
+			assert(#reads(w) == asked + 1 and b.flights.tandem, what .. ": a replacement read is out")
+			assert(#w.started == 0 and #handoffs(w) == 0 and gh(w) == nil, what .. ": nothing was sent")
+
+			reads(w)[asked + 1].done(out("WATCH"))
+			assert(not State.prOf(b.s, TARGET).tandem and b.watched[TARGET] == nil, what .. ": the replacement read decides")
+			assert(#reads(w) == asked + 1 and not b.flights.tandem, what .. ": and ends normally")
+			assert((w.cacheSets or 0) == before + 1 and w.kv["hub.cache"].writeId ~= mine.writeId, what .. ": it stores once")
+			for _, cached in w.kv["hub.cache"].prs do
+				if cached.key == TARGET then assert(cached.tandem ~= true, what .. ": TARGET is stored cleared") end
+			end
+		end)
+	end
+
+	-- Adopting T2 restores ownership and its save fails; T3 (its own id, the SAME stamp, changed data on another PR) lands
+	-- during the failure. The board is T2's, so the store's identity is unreconciled until T3 is adopted whole: the next
+	-- cache-writing action, or the next answer of a read of Tandem, adopts it before the one write that follows, and
+	-- neither lays T2 over it.
+	local function failedAdoption(w: any, Fetch: any, Block: any): (any, any, number)
+		local b = agentBoard(w, Fetch, Block)
+		holdCache(w, b)
+		Block.event(b, { ev = "action", act = "card-handoff", value = TARGET } :: any, w.cx)
+		assert(#handoffs(w) == 1, "the request is out")
+		local t2 = storedCache({ WEB, API114 }, Cases.asOf + 60)
+		t2.writeId = "other-window#2"
+		w.kv["hub.cache"] = t2
+		local t3: any = nil
+		local failed = false
+		w.failWhen = function(key: string): boolean
+			if key ~= "hub.cache" or failed then return false end
+			failed = true
+			return true
+		end
+		w.whileFailing = function()
+			w.whileFailing = nil
+			t3 = storedCache({ WEB, API114, TARGET }, Cases.asOf + 60)
+			t3.writeId = "other-window#3"
+			for _, cached in t3.prs do
+				if cached.key == API114 then cached.title = "Retitled by T3" end
+			end
+			w.kv["hub.cache"] = t3
+		end
+		local before = w.cacheSets or 0
+		handoffs(w)[1].done(out("DONE"))
+		w.failWhen = nil
+		assert(failed and t3 ~= nil, "T3 landed while the adoption's save failed")
+		assert(b.cache.refreshedAt == t2.refreshedAt and b.cache.refreshedAt == t3.refreshedAt and b.unsaved, "this board is T2's at T3's stamp, its ownership unsaved")
+		assert(State.prOf(b.s, API114).title ~= "Retitled by T3", "and it lacks T3's data")
+		assert((w.cacheSets or 0) == before + 1 and same(w.kv["hub.cache"], t3), "the failed save was the only attempt and T3 stands")
+		return b, t3, before + 1
+	end
+	local function wholeT3(w: any, b: any, t3: any, sets: number, what: string, flagged: boolean)
+		assert((w.cacheSets or 0) == sets + 1, what .. ": exactly one write followed")
+		local stored = w.kv["hub.cache"]
+		assert(stored.writeId ~= t3.writeId and stored.refreshedAt == t3.refreshedAt, what .. ": it is a new write at T3's stamp")
+		for _, cached in stored.prs do
+			if cached.key == API114 then assert(cached.title == "Retitled by T3", what .. ": with T3's data") end
+			if cached.key == TARGET then assert((cached.tandem == true) == flagged, what .. ": and TARGET as expected") end
+		end
+		assert(State.prOf(b.s, API114).title == "Retitled by T3" and not b.unsaved, what .. ": the board is T3's")
+	end
+
+	withWorld(function(w, Fetch, Block)
+		local b, t3, sets = failedAdoption(w, Fetch, Block)
+		local run = mergeWhenReady(w, Block, b)
+		assert((w.cacheSets or 0) == sets and same(w.kv["hub.cache"], t3), "nothing is written before the command answers")
+		run.done(nil, nil)
+		wholeT3(w, b, t3, sets, "cache-writing action", true)
+		assert(State.prOf(b.s, MERGE_KEY).pending ~= nil and w.kv["hub.cache"].prs ~= nil, "the action's change is on T3")
+		assert(#w.toasts == 1 and #w.started == 0 and #handoffs(w) == 1, "nothing else went on")
+	end)
+
+	for _, answers in { "CLAIM", "WATCH" } do
+		withWorld(function(w, Fetch, Block)
+			local b, t3, sets = failedAdoption(w, Fetch, Block)
+			b.github = quietGithub(function() end)
+			Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+			local answer = reads(w)[#reads(w)]
+			assert((w.cacheSets or 0) == sets and same(w.kv["hub.cache"], t3), "nothing is written before the answer")
+			answer.done(out(answers))
+			wholeT3(w, b, t3, sets, "watch answer " .. answers, answers == "CLAIM")
+			assert(#w.started == 0 and #handoffs(w) == 1, "nothing else went on")
+		end)
+	end
+
+	-- A closed block's entry paths are dead ends. The busy draw of a hand-off raises (the window is gone): no root is looked
+	-- up and nothing is sent, shown or armed.
+	withWorld(function(w, Fetch, Block)
+		local b = agentBoard(w, Fetch, Block)
+		assert(b.root == REPO_ROOT, "the root is known")
+		b.root = nil
+		w.finds, w.toasts = {}, {}
+		gone(w)
+		local calls, armed = #w.calls, #w.timers
+		Block.event(b, { ev = "action", act = "card-handoff", value = TARGET } :: any, w.cx)
+		assert(b.closed, "the busy draw closed the block")
+		assert(#w.finds == 0 and b.rootWaiters == nil and b.root == nil, "no root lookup")
+		assert(#w.calls == calls and #handoffs(w) == 0 and #w.toasts == 0 and #w.timers == armed, "nothing was sent, shown or armed")
+	end)
+
+	-- A refresh whose read of Tandem answers at once, and the reconciliation's draw raises: the refresh reads nothing and
+	-- asks GitHub for nothing, and nothing is stored, armed or sent.
+	withWorld(function(w, Fetch, Block)
+		local b = settingUp(w, Fetch, Block)
+		local touched: { [string]: boolean } = {}
+		b.github = setmetatable({}, { __index = function(_, name: string): any
+			touched[name] = true
+			return function() end
+		end })
+		local base = Fetch.runner
+		local theirs: any = nil
+		Fetch.runner = function(argv: { string }, opts: any, done: (any) -> ())
+			base(argv, opts, done)
+			if argv[2] == "watch" then
+				theirs = storeOwned(w, { WEB, API114, TARGET }, Cases.asOf)
+				done(out("WATCH"))
+			end
+		end
+		gone(w)
+		local sets, armed, asked = w.cacheSets or 0, #w.timers, #reads(w)
+		Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+		assert(theirs ~= nil and #reads(w) == asked + 1, "the read answered at once")
+		assert(b.closed and b.watched[TARGET] == true, "its reconciliation drew and the draw closed the block")
+		assert(next(touched) == nil, "GitHub was not asked")
+		assert((w.cacheSets or 0) == sets and same(w.kv["hub.cache"], theirs), "nothing was stored")
+		assert(#w.timers == armed and #w.started == 0 and #handoffs(w) == 0 and #w.toasts == 0 and #reads(w) == asked + 1, "nothing was armed, read or sent")
+	end)
 end
 
 -- A fix still being set up for a PR whose ownership arrives in a whole board (another window's newer cache adopted on

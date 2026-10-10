@@ -53,7 +53,9 @@ export type Block = {
 	flights: { refresh: boolean, checks: boolean, probe: boolean, flake: boolean, tandem: boolean }, -- one call of each kind at a time
 	watched: { [string]: boolean }, -- the PRs Tandem watches (lowercase "owner/repo#123"): the cache's flags until a read of Tandem succeeds, then that read
 	handoffs: number, -- hand-offs Tandem has taken this session: a read that began before one cannot name that PR
-	lastWrite: string?, -- the write id of the cache this block stored last: a read of Tandem takes it for no one else's write
+	seen: { [string]: boolean }, -- write ids of caches this block stored or joined: one id is another window's word once, never again
+	heard: { { string } }, -- the PRs each other window's ownership-bearing write joined since the read of Tandem now out began, by key
+	held: string?, -- the write id of the stored cache whose snapshot `unsaved` ownership was last restored onto (see `adoptShared`)
 	retired: { [string]: boolean }, -- write ids of stored caches a successful read of Tandem superseded whose own save failed (see `retire`)
 	unsaved: boolean, -- ownership restored onto an adopted cache that no write has stored yet (see `adoptShared`); `persist` clears it
 	root: string?, -- the repository root `cx.cwd` is in, found once (Tandem's calls name the project by it)
@@ -307,7 +309,7 @@ local function persist(b: Block): string?
 	end)
 	if ok then
 		b.unsaved = false
-		b.lastWrite = id
+		b.seen[id] = true
 		writeStatus(cache)
 	end
 	return if ok then nil else tostring(err)
@@ -468,11 +470,23 @@ end
 -- Ownership runs one way. A PR the other window's cache flags joins this block's set (it may be a hand-off this block's
 -- own reads predate, so a read that began before cannot name it and is read again). The other window's silence never
 -- clears one: only a successful read of Tandem here does, whatever the cache's age.
+-- An ownership-bearing write whose id this block has not met is also remembered by the PRs it flags (`b.heard`), even when
+-- the block held every flag already: a hand-off Tandem took again moves nothing here, and a local save that follows
+-- replaces the stored id, so only this record tells a read of Tandem that began earlier that it predates the write.
 local function joinOwnership(b: Block, shared: Sync.Cache)
 	local took = false
+	local flags: { string } = {}
 	for _, pr in shared.prs do
 		local key = string.lower(pr.repo) .. "#" .. pr.number
-		if pr.tandem and not b.watched[key] then b.watched[key], took = true, true end
+		if pr.tandem then
+			table.insert(flags, key)
+			if not b.watched[key] then b.watched[key], took = true, true end
+		end
+	end
+	local id = storedId(shared)
+	if id ~= "" and not b.seen[id] then
+		b.seen[id] = true
+		if #flags > 0 then table.insert(b.heard, flags) end
 	end
 	if took then b.handoffs += 1 end
 end
@@ -485,7 +499,11 @@ local function sharedCache(b: Block, strict: boolean): Sync.Cache?
 	if not shared or b.retired[storedId(shared)] then return nil end
 	local theirs, mine = Model.epoch(shared.refreshedAt), cachedAt(b)
 	if not theirs then return nil end
-	return if mine == nil or theirs > mine or (not strict and theirs == mine) then shared else nil
+	if mine == nil or theirs > mine or (not strict and theirs == mine) then return shared end
+	-- Ownership restored onto an adopted cache that no write has stored leaves the store's identity unreconciled: a distinct
+	-- cache at the same stamp may hold data this board lacks, so it is adopted whole (the store's own id decides, not its stamp).
+	if strict and b.unsaved and theirs == mine and storedId(shared) ~= b.held then return shared end
+	return nil
 end
 
 -- The identity of the cache the store holds now, taken before a successful read of Tandem clears a flag. `readable` is false
@@ -507,15 +525,13 @@ local function joinShared(b: Block): Sync.Cache?
 	return shared
 end
 
--- Whether `shared` is a write another window made after a read of Tandem began (`began` is the id the store held then,
--- nil when it held no valid cache) that flags a PR the read's answer omits. That answer predates the write, so it cannot
--- clear the flag even when this block already held it: a hand-off Tandem took again leaves the local set unchanged, so
--- `joinOwnership` alone cannot see it. This block's own last write is no one else's word.
-local function renewed(b: Block, shared: Sync.Cache, began: string?, watched: { [string]: boolean }): boolean
-	local id = storedId(shared)
-	if id == began or id == b.lastWrite then return false end
-	for _, pr in shared.prs do
-		if pr.tandem and not watched[string.lower(pr.repo) .. "#" .. pr.number] then return true end
+-- Whether a write another window made after a read of Tandem began (`b.heard`) flags a PR that read's answer omits. That
+-- answer predates the write, so it cannot clear the flag even when this block already held it.
+local function renewed(b: Block, watched: { [string]: boolean }): boolean
+	for _, flags in b.heard do
+		for _, key in flags do
+			if not watched[key] then return true end
+		end
 	end
 	return false
 end
@@ -888,6 +904,7 @@ local function adoptShared(b: Block, cx: BlockCx, hold: boolean?): boolean
 	shared.prs = prs
 	announce(b, cx, b.cache, prs, now)
 	b.cache = shared
+	b.held = storedId(shared)
 	State.replace(b.s, prs, now, shared.refreshedAt)
 	reconcileFlight(b, cx)
 	-- The redraw may have closed the block: nothing is stored or counted after that.
@@ -1138,6 +1155,8 @@ end
 -- once and kept; callers that ask while it is being found share the one lookup. `done` gets nil when it cannot be
 -- found (nothing is kept, so a later call tries again) or when there is no `cx.cwd`.
 local function projectRoot(b: Block, cx: BlockCx, done: (string?) -> ())
+	-- A closed block looks nothing up: its callers drop a nil root without a word.
+	if b.closed then return done(nil) end
 	if b.root then return done(b.root) end
 	local dir = cx.cwd
 	if not dir then return done(nil) end
@@ -1166,6 +1185,8 @@ local function loadTandem(b: Block, cx: BlockCx)
 	local epoch = b.handoffs
 	-- The cache the store held when this read began: a write that lands after it postdates the answer (see `renewed`).
 	local _, began = storedNow()
+	b.heard = {}
+	if began and began ~= "" then b.seen[began] = true end
 	local replied = false
 	local function apply(watched: { [string]: boolean }?, err: string?)
 		if replied then return end
@@ -1179,10 +1200,11 @@ local function loadTandem(b: Block, cx: BlockCx)
 		adoptShared(b, cx, true)
 		if b.closed then return end
 		local adopted = b.cache ~= before
-		local joined = joinShared(b)
+		joinShared(b)
 		-- A write another window stored after this read began, flagging a PR the answer omits, is a hand-off even when this
-		-- block held the flag already (so joining it moved nothing): it counts like one.
-		if watched and joined and b.handoffs == epoch and renewed(b, joined, began, watched) then b.handoffs += 1 end
+		-- block held the flag already (so joining it moved nothing) and even when a local save has since replaced the stored
+		-- id: it counts like one.
+		if watched and b.handoffs == epoch and renewed(b, watched) then b.handoffs += 1 end
 		-- A hand-off Tandem took while this read was out is newer than the read, which could not name that PR: drop it and read
 		-- again. The ownership it joined guards the card at once, and the older answer stores nothing.
 		if b.handoffs ~= epoch then
@@ -1240,6 +1262,8 @@ startRefresh = function(b: Block, cx: BlockCx)
 	b.flights.refresh = true
 	b.s.loading = true
 	loadTandem(b, cx)
+	-- A read of Tandem that answered at once may have drawn, and the draw closed the block: nothing is read or asked after that.
+	if b.closed then return end
 	local refs: { Model.PRRef } = {}
 	for _, ref in readLocal().added do table.insert(refs, ref) end
 	b.github.refresh({ added = refs, previous = b.s.prs }, function(fresh, err)
@@ -1682,6 +1706,8 @@ ACTIONS["card-handoff"] = function(b, cx, asked)
 	local reason = Model.handoffReason(pr, s.now)
 	State.setBusy(s, key, HANDOFF_BUSY)
 	draw(b, cx)
+	-- The draw may have closed the block: no root is looked up and nothing is sent.
+	if b.closed then return end
 	local replied = false
 	local function answered(outcome: Fetch.TandemOutcome?, err: string?)
 		if replied then return end
@@ -2710,7 +2736,7 @@ local block: BlockDef<Block> = {
 		local b: Block = {
 			s = s, cache = cache, fixture = fixture, generate = opts ~= nil and opts.generate, agent = nil, agentFlight = nil, botKeys = {},
 			github = Github.client(Fetch.runner, tern.json.decode), timers = {},
-			flights = { refresh = false, checks = false, probe = false, flake = false, tandem = false }, watched = watched, handoffs = 0, lastWrite = nil, retired = {}, unsaved = false, root = nil, rootWaiters = nil,
+			flights = { refresh = false, checks = false, probe = false, flake = false, tandem = false }, watched = watched, handoffs = 0, seen = {}, heard = {}, held = nil, retired = {}, unsaved = false, root = nil, rootWaiters = nil,
 			sched = {
 				probedAt = now, probeChanged = false, focusedAt = if live then now else nil, checksAt = nil,
 				refreshTried = nil, lastModified = if cache then cache.lastModified else nil,
