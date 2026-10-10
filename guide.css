@@ -1304,7 +1304,7 @@
 .gp-fx-stack > * { flex-shrink: 0; }
 .gp-fx-stack > .gp-fx-stack > .gp-card { margin: 0; }
 .gp-fx-where { font-family: var(--tv-font); font-size: 12px; color: var(--t3); }
-.gp-fx-chk { display: flex; gap: 12px; align-items: center; padding: 0 4px; }
+.gp-fx-chk { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; padding: 0 4px; }
 .gp-fx-cname { font-family: var(--tv-font); font-size: 15px; font-weight: 650; }
 .gp-fx-cfail { font-family: var(--sans); font-size: 13px; font-weight: 600; color: var(--gp-danger-text); }
 .gp-fx-cmeta { font-family: var(--sans); font-size: 13px; color: var(--t3); }
@@ -1327,13 +1327,11 @@
 
 /* fixes page in a narrow pane: the steps keep up to 320px and the code takes the rest; when both don't fit the
    steps wrap above the code. The hint bar drops its optional keys first, then ellipsizes. */
-.gp-fx-cols { flex-wrap: wrap; }
+.gp-fx-cols { flex-wrap: wrap; align-content: flex-start; }
 .gp-fx-cols > .gp-fx-steps { width: auto; flex: 0 1 320px; min-width: 220px; }
 .gp-fx-cols > .gp-code-col { flex: 1 1 0; min-width: 360px; }
 .gp-hdr-act { white-space: nowrap; flex-shrink: 0; }
-.gp-fx .gp-hintbar { overflow: hidden; }
-.gp-fx .gp-hb-item { flex-shrink: 1; min-width: 0; }
-.gp-fx .gp-hb-item.gp-hb-must { flex-shrink: 0; }
-.gp-fx .gp-hb-item.gp-hb-opt { flex-shrink: 1000; }
-.gp-fx .gp-hb-label, .gp-fx .gp-hb-mode { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.gp-fx .gp-hb-mode { flex-shrink: 2; }
+.gp-fx .gp-hintbar { flex-wrap: wrap; overflow: hidden; height: 44px; box-sizing: border-box; align-content: flex-start; gap: 0 18px; padding-top: 0; padding-bottom: 0; }
+.gp-fx .gp-hintbar > * { height: 44px; box-sizing: border-box; }
+.gp-fx .gp-hb-item { flex-shrink: 0; }
+.gp-fx .gp-hb-mode { flex-shrink: 0; line-height: 44px; max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

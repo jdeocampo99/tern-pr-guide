@@ -5,8 +5,7 @@
 -- already decoded tables and never throw on a missing field. Each call returns its own rate-limit
 -- envelope; the caller sums them. Failures are `Error` values, never thrown.
 --
--- Not built yet (each lands with the issue that first needs it): `history` and the `commands` builders
--- other than the merge, cancel-merge, update-branch, reply and resolve ones.
+-- Flake evidence is REST (the Actions runs API), so it is the one place here that decodes a body without `data`.
 local Fixes = require("./hub/fixes")
 local Model = require("./hub/model")
 
@@ -34,12 +33,19 @@ export type Command = { argv: { string }, stdin: string? }
 -- What a repo declares and what its last merges show. `checkedAt` is "" here: the block stamps it, because this module reads no clock.
 export type Detected = { declared: MergeMethod?, learned: MergeMethod?, viewerDefault: "squash" | "merge" | "rebase", checkedAt: string }
 
+-- One Actions run, as the runs API lists it: the workflow's name, the commit, and how it ended.
+export type RunRow = { id: number, workflow: string, sha: string, conclusion: string }
+-- A repo's recent runs of its base branch, by workflow name: failures among up to `Model.FLAKE_RUNS` newest.
+export type RepoHistory = { base: string, byWorkflow: { [string]: { failed: number, total: number } } }
+
 export type Client = {
 	refresh: (req: RefreshRequest, done: (value: Refresh?, err: Error?) -> ()) -> (),
 	probe: (since: string?, done: (value: Probe?, err: Error?) -> ()) -> (),
 	checks: (ids: { string }, done: (value: ChecksUpdate?, err: Error?) -> ()) -> (),
 	details: (pr: HubPR, done: (value: FixDetails?, err: Error?) -> ()) -> (),
 	detect: (repo: string, done: (value: Detected?, err: Error?) -> ()) -> (),
+	history: (repo: string, base: string, done: (value: RepoHistory?, err: Error?) -> ()) -> (),
+	runs: (repo: string, sha: string, done: (value: { RunRow }?, err: Error?) -> ()) -> (),
 	run: (command: Command, done: (stdout: string?, err: Error?) -> ()) -> (),
 }
 
@@ -523,6 +529,88 @@ function M.parseDetails(raw: any, pr: HubPR): FixDetails?
 	}
 end
 
+-- Flake evidence ---------------------------------------------------------------------------------------------
+
+-- `GET repos/{r}/actions/runs`: the finished runs, newest first, as the API sends them. A run with no workflow name or id is dropped.
+function M.parseRuns(raw: any): { RunRow }
+	local out: { RunRow } = {}
+	for _, row in list(tbl(raw) and raw.workflow_runs) do
+		local name, sha = str(row.name), str(row.head_sha)
+		if name and sha and type(row.id) == "number" then
+			table.insert(out, { id = row.id, workflow = name, sha = sha, conclusion = str(row.conclusion) or "" })
+		end
+	end
+	return out
+end
+
+-- Per workflow, the failures among its last `Model.FLAKE_RUNS` runs that passed or failed (cancelled and skipped runs
+-- say nothing). `base` is only carried along for the reason's wording.
+function M.parseHistory(raw: any, base: string): RepoHistory
+	local byWorkflow: { [string]: { failed: number, total: number } } = {}
+	for _, run in M.parseRuns(raw) do
+		local failed = run.conclusion == "failure" or run.conclusion == "timed_out"
+		if failed or run.conclusion == "success" then
+			local row = byWorkflow[run.workflow] or { failed = 0, total = 0 }
+			if row.total < Model.FLAKE_RUNS then
+				row.total += 1
+				if failed then row.failed += 1 end
+			end
+			byWorkflow[run.workflow] = row
+		end
+	end
+	return { base = base, byWorkflow = byWorkflow }
+end
+
+-- The evidence for one failing check: `history` is the repo's (nil when it couldn't be read), `runs` are the runs of
+-- the PR's head commit (nil when unread). Failure text is the summary and every annotation, the runner's own
+-- exit-code lines included; the paths are only the ones that say something about code.
+function M.evidenceFor(check: Fixes.FailingCheck, changedPaths: { string }, history: RepoHistory?, runs: { RunRow }?): Model.FlakeEvidence
+	local text: { string } = { check.summary or "" }
+	for _, annotation in check.annotations do
+		table.insert(text, (annotation.title or "") .. " " .. annotation.message)
+	end
+	local paths: { string } = {}
+	for _, annotation in Fixes.usable(check.annotations) do
+		if table.find(paths, annotation.path) == nil then table.insert(paths, annotation.path) end
+	end
+	local passed = false
+	for _, run in runs or {} do
+		if run.workflow == check.workflow and run.conclusion == "success" and run.id ~= check.runId then passed = true end
+	end
+	local own = if history and check.workflow then history.byWorkflow[check.workflow] else nil
+	return {
+		history = own, passedBefore = passed, text = table.concat(text, "\n"),
+		annotationPaths = paths, changedPaths = changedPaths, base = if history then history.base else nil,
+	}
+end
+
+-- The history of a repo's base branch changes slowly, so it is read once an hour per repo (and branch), also when
+-- the read failed (a failure is not retried inside the hour, and the evidence goes without history). Callers asking
+-- while a read is in flight wait for it. `now` is seconds since the epoch, passed in: this module reads no clock.
+M.HISTORY_SECONDS = 3600
+
+export type HistoryCache = { read: (repo: string, base: string, now: number, done: (value: RepoHistory?) -> ()) -> () }
+
+function M.historyCache(client: Client): HistoryCache
+	local entries: { [string]: { at: number, value: RepoHistory? } } = {}
+	local waiting: { [string]: { (value: RepoHistory?) -> () } } = {}
+	local function read(repo: string, base: string, now: number, done: (value: RepoHistory?) -> ())
+		local key = string.lower(repo) .. "@" .. base
+		local entry = entries[key]
+		if entry and now - entry.at < M.HISTORY_SECONDS then return done(entry.value) end
+		local queue = waiting[key]
+		if queue then return table.insert(queue, done) end
+		waiting[key] = { done }
+		client.history(repo, base, function(value)
+			entries[key] = { at = now, value = value }
+			local list = waiting[key] or {}
+			waiting[key] = nil
+			for _, callback in list do callback(value) end
+		end)
+	end
+	return { read = read }
+end
+
 -- The client
 
 local function firstLine(text: string): string?
@@ -629,6 +717,10 @@ M.commands = {
 	end,
 	updateBranch = function(pr: HubPR): Command
 		return { argv = { "gh", "pr", "update-branch", tostring(pr.number), "--repo", pr.repo }, stdin = nil }
+	end,
+	-- Runs the failed jobs of one workflow run again; zero tokens, and never sent but by a press.
+	rerun = function(repo: string, runId: number): Command
+		return { argv = { "gh", "run", "rerun", tostring(runId), "--failed", "--repo", repo }, stdin = nil }
 	end,
 	-- Replies in a review thread, and resolves one: GraphQL writes, the only way to do either.
 	reply = function(pr: HubPR, threadId: string, body: string): Command
@@ -985,6 +1077,43 @@ function M.client(run: Runner, decode: Decode): Client
 		end)
 	end
 
+	-- A REST body: decoded JSON when it is a table, else the `Error` that says why not.
+	local function rest(path: string, operation: string, what: string, done: (doc: any?, err: Error?) -> ())
+		exec({ "gh", "api", path }, { timeout_ms = REST_MS }, function(out)
+			if out.timed_out then return done(nil, failure(operation, what, "timed out", nil)) end
+			local doc: any = nil
+			if out.stdout ~= "" then
+				local ok, value = pcall(decode, out.stdout)
+				if ok and type(value) == "table" then doc = value end
+			end
+			if limited(out.stderr) or limited(out.stdout) then return done(nil, failure(operation, what, rateLimitedMessage(nil), nil)) end
+			if doc and (out.status == 0 or doc.workflow_runs) then return done(doc, nil) end
+			done(nil, failure(operation, what, firstLine(out.stderr) or firstLine(out.stdout) or ("gh exited with status " .. out.status), nil))
+		end)
+	end
+
+	local function history(repo: string, base: string, done: (value: RepoHistory?, err: Error?) -> ())
+		local operation, what = "gh api: actions runs", "read recent runs of " .. repo
+		if string.match(repo, "^[%w_.%-]+/[%w_.%-]+$") == nil or string.match(base, "^[%w_./%-]+$") == nil then
+			return done(nil, failure(operation, what, "not an owner/repo name", nil))
+		end
+		rest("repos/" .. repo .. "/actions/runs?branch=" .. base .. "&status=completed&per_page=100", operation, what, function(doc, err)
+			if err then return done(nil, err) end
+			done(M.parseHistory(doc, base), nil)
+		end)
+	end
+
+	local function runs(repo: string, sha: string, done: (value: { RunRow }?, err: Error?) -> ())
+		local operation, what = "gh api: actions runs", "read the runs of " .. string.sub(sha, 1, 7)
+		if string.match(repo, "^[%w_.%-]+/[%w_.%-]+$") == nil or string.match(sha, "^%x+$") == nil then
+			return done(nil, failure(operation, what, "not an owner/repo name or a commit", nil))
+		end
+		rest("repos/" .. repo .. "/actions/runs?head_sha=" .. sha .. "&status=completed&per_page=50", operation, what, function(doc, err)
+			if err then return done(nil, err) end
+			done(M.parseRuns(doc), nil)
+		end)
+	end
+
 	local function runCommand(command: Command, done: (stdout: string?, err: Error?) -> ())
 		local argv = command.argv
 		local operation = table.concat(argv, " ", 1, math.min(#argv, 3))
@@ -998,7 +1127,7 @@ function M.client(run: Runner, decode: Decode): Client
 		end)
 	end
 
-	return { refresh = refresh, probe = probe, checks = checks, details = details, detect = detect, run = runCommand }
+	return { refresh = refresh, probe = probe, checks = checks, details = details, detect = detect, history = history, runs = runs, run = runCommand }
 end
 
 return M

@@ -210,6 +210,7 @@ Anywhere in Tern: `⌥⌘R` opens the PR hub and `⌥⇧⌘R` opens it with AI g
 | | | | | `Esc` | clear the selection, cancel or close |
 | | | `U` | update branch (Ready cards that are behind main) | `?` | all shortcuts |
 | | | `,` | merge method (also the `▾` on Merge) | `⌘R` | refresh (the sample board steps through its recorded refreshes) |
+| | | `⇧R` | re-run failed checks (behind the `▾` on Fix checks; first when the card says "Likely flaky") | | |
 | | | `X` | remove from Review requests (pull requests you added) | | |
 
 **Fixes page.** `⏎` on a Needs fixes card opens the pull request at what needs fixing, in the guided
@@ -230,9 +231,20 @@ shows the card's own wording ("Fix with agent", "Hand off to Tandem").
 | `h` `l` / arrows | between the steps and the code | `E` | resolve the thread |
 | `⏎` | go to the code, or choose the highlighted action | `⇧L` | view the check's log on GitHub |
 | `A` | the card's action ("Fix with agent") | `G` | open on GitHub (the conflict editor for a conflict) |
-| `B` | show or hide the bot comments | `Esc` | back to the board, card still selected |
+| `B` | show or hide the bot comments | `⇧R` | re-run failed checks |
+| | | `Esc` | back to the board, card still selected |
 
 Reply and Resolve write to GitHub straight away; the sample block applies them to the page only.
+
+**Re-run failed checks** (`⇧R`, behind the `▾` on a Needs fixes card with a failing check, and on the
+fixes page) runs `gh run rerun <id> --failed` for each failing workflow run, once per press and never on
+its own. It costs no AI tokens. When the evidence says a failure is likely flaky, Re-run moves first
+on the card and the card says why, for example "Likely flaky: failed 3 of the last 20 runs on main".
+Evidence is any of: the same workflow failed 3 or more of its last 20 runs on the base branch; it passed
+earlier on this commit; the failure text names the infrastructure (timeout, network reset, rate limit,
+lost runner, exit 137); or every annotation points at a file the pull request didn't change. An error in
+a file the pull request changed means the failure is real: nothing else counts, and Fix with agent stays
+first. A base branch's run history is read once an hour per repository (one call to GitHub's Actions API).
 
 **Merge** uses the repository's merge method and shows GitHub's reason when it refuses. Each repository
 has one method: squash and merge, create a merge commit, rebase and merge, merge when ready (GitHub's

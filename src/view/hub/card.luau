@@ -126,6 +126,7 @@ function M.view(card: State.Card, now: number): Node
 	local summary = card.summary
 	if summary then table.insert(body, span("gp-hc-note", summary.verdict)) end
 	if card.note then table.insert(body, span("gp-hc-note", card.note)) end
+	if card.flake then table.insert(body, span("gp-hc-note", card.flake)) end
 	table.insert(body, el("div", { class = "gp-hc-meta", key = "meta" }, meta))
 	table.insert(kids, el("div", { class = "gp-hc-body", key = "body" }, body))
 

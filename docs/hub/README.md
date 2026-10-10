@@ -369,13 +369,16 @@ export type FlakeEvidence = {
 	text: string,                                  -- the failure text
 	annotationPaths: { string },
 	changedPaths: { string },
+	base: string?,                                 -- the base branch the history counted, for the reason's wording; "main" when nil
 }
 export type FlakeVerdict = { flaky: boolean, basis: ("history" | "rerun" | "text" | "outside_diff")?, reason: string? }
 function M.flake(evidence: FlakeEvidence): FlakeVerdict
 	-- An annotation on a changed path is never flaky. `reason` reads "failed 3 of the last 20 runs on main".
 	-- History: 3 or more failures in the last 20 runs on the base branch means likely flaky; 1 or fewer means not.
 	-- Two is not enough on its own: only another basis (passedBefore, text, outside_diff) makes it flaky.
-	-- The thresholds are named constants in this file, pinned by the flake issue's tests.
+	-- The thresholds are named constants in this file, pinned by the flake issue's tests:
+	-- M.FLAKE_FAILED_MIN = 3, M.FLAKE_FAILED_MAX = 1, M.FLAKE_RUNS = 20. Order of the bases: history, rerun, text, outside_diff.
+function M.flakeAll(verdicts: { FlakeVerdict }): FlakeVerdict   -- one verdict for a card: flaky only when every failing check is
 
 -- Merging
 export type MergeMethod =
@@ -461,7 +464,9 @@ export type Runner = (argv: { string }, opts: { cwd: string?, stdin: string?, ti
 export type RefreshRequest = { added: { PRRef }, previous: { HubPR } }   -- previous supplies cached threads when `lastActivityAt` is unchanged
 export type Probe = { changed: boolean, lastModified: string?, pollSeconds: number? }   -- REST /notifications
 export type ChecksUpdate = { byId: { [string]: { headOid: string, checks: Checks } }, rateLimit: RateLimit }
-export type History = { failed: number, total: number }
+export type RunRow = { id: number, workflow: string, sha: string, conclusion: string }   -- one Actions run, REST `workflow_runs[]`
+export type RepoHistory = { base: string, byWorkflow: { [string]: { failed: number, total: number } } }   -- per workflow: failures among its newest 20 finished runs
+export type HistoryCache = { read: (repo: string, base: string, now: number, done: (value: RepoHistory?) -> ()) -> () }   -- one read per repo and branch per hour (M.HISTORY_SECONDS), failures included
 export type Detected = { declared: MergeMethod?, learned: MergeMethod?, viewerDefault: "squash" | "merge" | "rebase", checkedAt: string }   -- `checkedAt` is "" from github (it reads no clock); the block stamps it before saving
 export type Command = { argv: { string }, stdin: string? }
 
@@ -470,7 +475,8 @@ export type Client = {
 	probe: (since: string?, done: (value: Probe?, err: Error?) -> ()) -> (),
 	checks: (ids: { string }, done: (value: ChecksUpdate?, err: Error?) -> ()) -> (),
 	details: (pr: HubPR, done: (value: FixDetails?, err: Error?) -> ()) -> (),
-	history: (repo: string, checkName: string, done: (value: History?, err: Error?) -> ()) -> (),
+	history: (repo: string, base: string, done: (value: RepoHistory?, err: Error?) -> ()) -> (),   -- gh api repos/<r>/actions/runs?branch=<base>&status=completed&per_page=100; keyed by workflow, not check, because the runs API has no job names
+	runs: (repo: string, sha: string, done: (value: { RunRow }?, err: Error?) -> ()) -> (),   -- gh api repos/<r>/actions/runs?head_sha=<sha>&status=completed&per_page=50 (the "passed earlier on this commit" basis)
 	detect: (repo: string, done: (value: Detected?, err: Error?) -> ()) -> (),
 	run: (command: Command, done: (stdout: string?, err: Error?) -> ()) -> (),   -- executes a command from `commands`
 }
@@ -488,6 +494,10 @@ function M.parseThreads(raw: any): { threads: { [string]: { OpenThread } }, rate
 function M.parseChecks(raw: any): ChecksUpdate?
 function M.parseProbe(stdout: string): Probe?             -- `gh api -i`: 200 or 304, Last-Modified, X-Poll-Interval
 function M.parseDetails(raw: any, pr: HubPR): FixDetails?
+function M.parseRuns(raw: any): { RunRow }                                  -- REST actions/runs
+function M.parseHistory(raw: any, base: string): RepoHistory                -- cancelled and skipped runs are not counted
+function M.evidenceFor(check: FailingCheck, changedPaths: { string }, history: RepoHistory?, runs: { RunRow }?): FlakeEvidence
+function M.historyCache(client: Client): HistoryCache
 
 -- Command builders: exact argv, no network. Merging squash/merge/rebase is `gh pr merge`; queue is `--auto`;
 -- comment is `gh pr comment`; label is `gh pr edit --add-label`.
@@ -496,7 +506,7 @@ M.commands = {
 	cancelMerge = function(pr: HubPR, method: MergeMethod): Command end,   -- queue: `gh pr merge … --disable-auto`; comment: `--body <cancel>`; label: `--remove-label`; raises for a GitHub merge and for a comment with no cancel
 	updateBranch = function(pr: HubPR): Command end,
 	close = function(pr: HubPR): Command end,   -- gh pr close <n> --repo <repo>, no comment
-	rerun = function(repo: string, runId: number): Command end,            -- gh run rerun <id> --failed
+	rerun = function(repo: string, runId: number): Command end,            -- gh run rerun <id> --failed --repo <repo>
 	requestReview = function(pr: HubPR, login: string): Command end,
 	close = function(pr: HubPR): Command end,
 	comment = function(pr: HubPR, body: string): Command end,
@@ -1038,6 +1048,7 @@ All rows are approved by the user; ideas the user didn't pick were dropped. Each
 - **Same code, different result:** the check passed on an earlier run of this same commit, or on the previous commit when the new commit didn't touch the failing area.
 - **Failure text:** timeouts, network resets, rate limits, a lost runner, out-of-memory (exit 137) mean infrastructure, not code.
 - **Annotations outside the diff:** the errors point only at files the PR didn't change.
+- **Decisions (#13).** History is keyed by workflow name (the runs API has no job names), counting the workflow's newest 20 finished runs on the base branch; cancelled and skipped runs count for nothing. "Passed earlier" is a successful run of the same workflow on the same commit (a push run beside the failing pull-request run); the "previous commit without a change to the failing area" variant is not read, because it needs a diff per commit. Failure text is the check's summary and every annotation (the runner's exit-code lines included). The verdict is per card: flaky only when every failing check with a workflow run is. The block reads evidence for up to 10 Needs fixes cards with a failing check after each refresh (the details call, the hourly history, one runs call), in memory only. Re-run failed checks is ⇧R (`R` is Recently opened on the board and Reply on the fixes page) and sends `gh run rerun <id> --failed --repo <r>` once per distinct run; it moves first on the card only when the card's sole reason is the checks.
 - The card says why: "Likely flaky: failed 3 of the last 20 runs on main". When an annotation points at a changed file, the failure is treated as real and **Fix with agent** stays first.
 
 **One way in (friction item 10, issue #6).** Today the palette has "New PR review block" (⌥⌘R) and "New AI generated PR review block" (⌥⇧⌘R), each opening a picker (`window.luau:11-12`, via `tern.command`). The hub replaces the picker:
