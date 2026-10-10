@@ -29,6 +29,12 @@ function M.card(card: State.Card): string
 	return M.ROOT .. ".body.board." .. M.columnKey(card.column) .. "." .. M.cardKey(card.pr.key)
 end
 
+-- The selection bar: at the top of Ready to merge, or of the Inactive rows.
+function M.selection(group: string): string
+	if group == "inactive" then return M.ROOT .. ".body.fold.rows.selection" end
+	return M.ROOT .. ".body.board." .. M.columnKey("ready") .. ".selection"
+end
+
 -- The key of a Recently opened row's node (`key` is State.recentKey).
 function M.recentKey(key: string): string
 	return "rc_" .. Text.keyOf(key)

@@ -623,6 +623,10 @@ M.commands = {
 		if method.kind == "label" then return { argv = prArgv("edit", pr, "--remove-label", method.label), stdin = nil } end
 		error("commands.cancelMerge: " .. method.kind .. " has nothing to cancel", 0)
 	end,
+	-- Closes with no comment; GitHub can reopen it.
+	close = function(pr: HubPR): Command
+		return { argv = prArgv("close", pr), stdin = nil }
+	end,
 	updateBranch = function(pr: HubPR): Command
 		return { argv = { "gh", "pr", "update-branch", tostring(pr.number), "--repo", pr.repo }, stdin = nil }
 	end,

@@ -1,5 +1,6 @@
 --!strict
 -- The keys that apply right now, pinned to the bottom: move, open, the selected card's action, and ? for the rest.
+local Model = require("../../hub/model")
 local State = require("../../hub/state")
 local Ui = require("../ui")
 
@@ -23,7 +24,13 @@ function M.view(s: State.State): Node
 	else
 		local card = State.selectedCard(s)
 		local main = card and card.main
-		if main and main.key and main.key ~= "⏎" then table.insert(keys, { main.key, main.label }) end
+		local selection = State.selection(s)
+		if selection then
+			title, keys = "Selecting", { { "h j k l", "Move" }, { "Space", "Select" }, { selection.key, selection.verb .. " " .. selection.count }, { "esc", "Clear" } }
+		else
+			if main and main.key and main.key ~= "⏎" then table.insert(keys, { main.key, main.label }) end
+			if card and Model.selectGroup(card.pr, s.now) then table.insert(keys, { "Space", "Select" }) end
+		end
 	end
 	local kids: { Node } = { span("gp-hb-mode", title), Ui.spacer() }
 	for _, key in keys do

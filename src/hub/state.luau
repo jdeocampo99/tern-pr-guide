@@ -55,6 +55,10 @@ export type Card = {
 	selected: boolean,
 	marked: boolean,
 }
+-- The selection bar over the group being selected, and its confirm once M or X was pressed.
+export type BatchRow = { ref: string, title: string } -- "web #412" and its title
+export type BatchConfirm = { question: string, rows: { BatchRow }, more: number, lines: { string }, go: string, act: string }
+export type Selection = { group: Model.Group, count: number, verb: string, key: string, act: string, confirm: BatchConfirm? }
 export type MethodEdit = { repo: string, kind: "comment" | "label", field: Fields.Field }
 export type RepoOption = { repo: string, count: number, on: boolean }
 
@@ -423,15 +427,51 @@ local function refreshNext(s: State)
 	s.board.nextUp = Model.nextUp(s.prs, s.now, if s.walking then s.selected else nil)
 end
 
+-- A mark lasts while its card is still selectable, in this tab, matches the filter and, for Inactive, shows.
+-- Marks are of one group: a refresh that leaves two groups (a Ready card went behind main) keeps the first's.
+local function pruneMarks(s: State, byKey: { [string]: HubPR }, placements: { [string]: Model.Placement }, filter: Model.Filter, foldOpen: boolean)
+	if next(s.marked) == nil then return end
+	local group: Model.Group? = nil
+	for _, column in s.board.columns do
+		for _, card in column.cards do
+			if s.marked[card.pr.key] and group == nil then group = Model.selectGroup(card.pr, s.now) end
+		end
+	end
+	if group == nil then
+		for _, card in s.board.inactive do
+			if s.marked[card.pr.key] and group == nil then group = Model.selectGroup(card.pr, s.now) end
+		end
+	end
+	local kept: { [string]: boolean } = {}
+	for key in s.marked do
+		local pr = byKey[key]
+		if pr and placements[key].tab == s.tab and Model.visible(pr, filter) then
+			local own = Model.selectGroup(pr, s.now)
+			if own ~= nil and own == group and (own == "ready" or foldOpen) then kept[key] = true end
+		end
+	end
+	s.marked = kept
+	if next(kept) == nil and s.confirm and (s.confirm.kind == "batch-merge" or s.confirm.kind == "batch-close") then
+		s.confirm = nil
+		if s.mode == "confirm" then s.mode = "board" end
+	end
+	for _, column in s.board.columns do
+		for _, card in column.cards do card.marked = kept[card.pr.key] == true end
+	end
+	for _, card in s.board.inactive do card.marked = kept[card.pr.key] == true end
+end
+
 -- Recomputes `s.board` from `s.prs` and the inputs. Keeps the selection only while its card is on the board.
 function M.project(s: State)
 	local filter: Model.Filter = { repositories = s.repositories, search = s.search.text }
 	local placements: { [string]: Model.Placement } = {}
 	local counts = { mine = 0, review = 0 }
 	local inTab: { HubPR } = {}
+	local byKey: { [string]: HubPR } = {}
 	for _, pr in s.prs do
 		local placement = Model.placement(pr, s.now)
 		placements[pr.key] = placement
+		byKey[pr.key] = pr
 		if Model.visible(pr, filter) then
 			if placement.column == "needs_fixes" then counts.mine += 1 end
 			if placement.column == "to_review" then counts.review += 1 end
@@ -510,6 +550,7 @@ function M.project(s: State)
 	if s.selected and not present[s.selected] then s.selected = nil end
 	if not s.selected then s.walking = false end
 	refreshNext(s)
+	pruneMarks(s, byKey, placements, filter, foldOpen)
 end
 
 function M.mode(s: State): Mode
@@ -559,7 +600,7 @@ end
 
 function M.select(s: State, key: string?)
 	-- Choosing another card drops an inline question about the first, and leaves the add field.
-	if s.confirm and (key == nil or s.confirm.keys[1] ~= key) then M.cancelConfirm(s) end
+	if s.confirm and s.confirm.kind ~= "batch-merge" and s.confirm.kind ~= "batch-close" and (key == nil or s.confirm.keys[1] ~= key) then M.cancelConfirm(s) end
 	if s.mode == "link" and key ~= nil then s.mode = "board" end
 	s.selected = key
 	s.walking = false
@@ -960,6 +1001,133 @@ function M.cancelConfirm(s: State)
 	s.confirm = nil
 	if s.mode == "confirm" then s.mode = "board" end
 	if had then M.project(s) end
+end
+
+-- Selecting several ---------------------------------------------------------------------------------------
+
+-- The marked cards in column order: Ready's cards, or the Inactive rows.
+function M.markedCards(s: State): { Card }
+	local out: { Card } = {}
+	for _, column in s.board.columns do
+		for _, card in column.cards do
+			if s.marked[card.pr.key] then table.insert(out, card) end
+		end
+	end
+	for _, card in s.board.inactive do
+		if s.marked[card.pr.key] then table.insert(out, card) end
+	end
+	return out
+end
+
+-- Space: marks or unmarks the card. Marking in one group clears the other's. Returns false, and why, for a card
+-- that can't be selected.
+function M.toggleMark(s: State, key: string): (boolean, string?)
+	local card = M.card(s, key)
+	if not card then return false, nil end
+	local group, why = Model.selectGroup(card.pr, s.now)
+	if not group then return false, why end
+	if s.marked[key] then
+		s.marked[key] = nil
+	else
+		for other in s.marked do
+			local mark = M.card(s, other)
+			if not mark or Model.selectGroup(mark.pr, s.now) ~= group then s.marked[other] = nil end
+		end
+		s.marked[key] = true
+	end
+	M.project(s)
+	return true, nil
+end
+
+-- Pull requests Close stale would select: no activity for 7 days, not a draft.
+function M.staleCount(s: State): number
+	local count = 0
+	for _, card in s.board.inactive do
+		if Model.stale(card.pr, s.now) then count += 1 end
+	end
+	return count
+end
+
+-- ⇧X: replaces the selection with every stale non-draft Inactive row, and opens the fold. Returns how many.
+function M.markStale(s: State): number
+	if s.tab ~= "mine" then return 0 end
+	local marked: { [string]: boolean } = {}
+	local count = 0
+	for _, card in s.board.inactive do
+		if Model.stale(card.pr, s.now) then
+			marked[card.pr.key] = true
+			count += 1
+		end
+	end
+	if count == 0 then return 0 end
+	s.marked = marked
+	s.folded.inactive = false
+	M.project(s)
+	return count
+end
+
+-- Esc: drops the selection (and a confirm about it). Returns whether there was one.
+function M.clearMarks(s: State): boolean
+	if next(s.marked) == nil then return false end
+	s.marked = {}
+	if s.confirm and (s.confirm.kind == "batch-merge" or s.confirm.kind == "batch-close") then
+		s.confirm = nil
+		if s.mode == "confirm" then s.mode = "board" end
+	end
+	M.project(s)
+	return true
+end
+
+-- M or X on a selection: opens the confirm over the bar. Returns false when nothing of that group is marked.
+function M.askBatch(s: State, group: Model.Group): boolean
+	local cards = M.markedCards(s)
+	if #cards == 0 or Model.selectGroup(cards[1].pr, s.now) ~= group then return false end
+	local keys: { string } = {}
+	for _, card in cards do table.insert(keys, card.pr.key) end
+	s.confirm = { kind = if group == "ready" then "batch-merge" else "batch-close", keys = keys }
+	s.mode, s.menu = "confirm", nil
+	M.project(s)
+	return true
+end
+
+-- The method the repo's merge uses; squash until it is known.
+local function methodOf(s: State, pr: HubPR): Model.MergeMethod
+	local resolved = s.merges[pr.repo]
+	return if resolved then resolved.method else { kind = "squash" }
+end
+
+-- What the selection bar shows, or nil with nothing selected.
+function M.selection(s: State): Selection?
+	local cards = M.markedCards(s)
+	if #cards == 0 then return nil end
+	local group = Model.selectGroup(cards[1].pr, s.now)
+	if not group then return nil end
+	local merge = group == "ready"
+	local n = #cards
+	local verb = if merge then "Merge" else "Close"
+	local selection: Selection = {
+		group = group, count = n, verb = verb, key = if merge then "M" else "X",
+		act = if merge then "hub-batch-merge" else "hub-batch-close", confirm = nil,
+	}
+	local confirm = s.confirm
+	if confirm and (confirm.kind == "batch-merge" or confirm.kind == "batch-close") then
+		local prs: { HubPR } = {}
+		local methods: { Model.MergeMethod } = {}
+		for _, card in cards do
+			table.insert(prs, card.pr)
+			table.insert(methods, methodOf(s, card.pr))
+		end
+		local list = Model.confirmList(prs)
+		local rows: { BatchRow } = {}
+		for _, pr in list.shown do table.insert(rows, { ref = shortRepo(pr.repo) .. " #" .. pr.number, title = pr.title }) end
+		selection.confirm = {
+			question = verb .. " " .. n .. (if n == 1 then " pull request?" else " pull requests?"),
+			rows = rows, more = list.more,
+			lines = if merge then Model.methodLines(methods) else { "Closed pull requests can be reopened." },
+			go = verb .. " " .. n, act = "hub-confirm",
+		}
+	end
+	return selection
 end
 
 -- Marks `key` as running `text`, or clears it with nil.
