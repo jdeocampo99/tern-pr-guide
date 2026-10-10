@@ -1106,6 +1106,11 @@
 .gp-hc-wait .gp-hc-title, .gp-hc-quiet .gp-hc-title { font-size: 13.5px; font-weight: 500; color: var(--t2); }
 .gp-hc-done .gp-hc-title { font-size: 14px; font-weight: 500; }
 .gp-hc-note { font-family: var(--sans); font-size: 13px; line-height: 1.45; color: var(--t2); }
+/* Agent-capable cards reserve both note rows before a run. No height or entrance motion. */
+.gp-hc-agent-note { display: flex; flex-direction: column; gap: 2px; height: 40px; min-width: 0; overflow: hidden; }
+.gp-hc-agent-message { height: 19px; line-height: 19px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gp-hc-agent-path { height: 19px; line-height: 19px; font-size: 12px; color: var(--t3); white-space: nowrap; overflow-x: auto; overflow-y: hidden; }
+.gp-hc-agent .gp-hc-title { font-size: 15px; font-weight: 600; line-height: 1.35; }
 .gp-hc-meta { display: flex; gap: 10px; align-items: center; min-width: 0; min-height: 22px; }
 .gp-hc-lead { flex: 1 1 auto; min-width: 0; display: flex; gap: 8px; align-items: baseline; overflow: hidden; white-space: nowrap; font-size: 12px; color: var(--t3); }
 .gp-hc-lead > * { flex-shrink: 0; }

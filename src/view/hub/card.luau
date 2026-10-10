@@ -74,6 +74,7 @@ local function confirmButtons(card: State.Card): Node
 end
 
 local function toneOf(card: State.Card): string
+	if card.agent and card.agent.kind == "ready" then return "done" end
 	local c = card.column
 	if c == "needs_fixes" then return "bad" end
 	if c == "to_review" then return "info" end
@@ -124,13 +125,23 @@ function M.view(card: State.Card, now: number): Node
 		table.insert(body, span("gp-hc-title", pr.title))
 	end
 	local summary = card.summary
-	if summary then table.insert(body, span("gp-hc-note", summary.verdict)) end
-	if card.note then table.insert(body, span("gp-hc-note", card.note)) end
-	if card.flake then table.insert(body, span("gp-hc-note", card.flake)) end
+	if card.agentSlot then
+		local message = card.agentMessage or (if summary then summary.verdict else card.note or card.flake or "")
+		local second = card.agentPath or (if card.agent then "" elseif summary then card.note or card.flake or "" elseif card.note then card.flake or "" else "")
+		table.insert(body, el("div", { class = "gp-hc-agent-note", key = "agent" }, {
+			span("gp-hc-note gp-hc-agent-message", message),
+			span(if card.agent then "gp-hc-agent-path" else "gp-hc-note gp-hc-agent-message", second),
+		}))
+	else
+		if summary then table.insert(body, span("gp-hc-note", summary.verdict)) end
+		if card.note then table.insert(body, span("gp-hc-note", card.note)) end
+		if card.flake then table.insert(body, span("gp-hc-note", card.flake)) end
+	end
 	table.insert(body, el("div", { class = "gp-hc-meta", key = "meta" }, meta))
 	table.insert(kids, el("div", { class = "gp-hc-body", key = "body" }, body))
 
 	local class = "gp-hc gp-hc-" .. toneOf(card)
+	if card.agentSlot then class ..= " gp-hc-agent" end
 	if card.marked then class ..= " gp-hc-marked" end
 	if card.selected then class ..= " gp-hc-on" end
 	if main and not card.busy then class ..= " gp-hc-act" end

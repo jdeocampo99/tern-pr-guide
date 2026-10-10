@@ -315,7 +315,7 @@ A short pill on a card's chip line that names the job or who the card waits on, 
 - **Job for the reader:** solid fill with white text. Removed Red (`gp-danger-fill`) for a reason a PR needs fixes, one chip per reason ("Merge failed", "Checks failing", "Feedback", "Merge conflict"). Review Blue (`gp-blue-fill`) for "Review".
 - **Waiting:** chip fill (`--chip-bg`) with `--t2` text ("Waiting on review", "You commented"). While checks run it holds the amber spinner.
 - **Done:** `gp-success-wash` with Added Green text ("Approved").
-- **Agent or Tandem:** `gp-suggestion-wash` with Agent Purple text ("Waiting on Tandem").
+- **Agent or Tandem:** `gp-suggestion-wash` with Agent Purple text ("Agent running", "Waiting on Tandem"). Agent progress is a still, one-line note below the title. Agent-capable cards reserve two 19px note rows with a 2px gap before starting: progress or the short commit on the first, the complete worktree path on the second (horizontally scrollable). Fix ready uses the Done chip. Lifecycle changes never animate the rows, keycaps or card height.
 
 ### Tabs with counts
 The board's two tabs look like Tern's `tabs` node (13px sans, muted until active, a 2px underline in Tern's accent like the view switch), but are `gp-hub-tab` elements, because a native `tabs` node cannot carry a count and Tern's `sf-tab` rules don't style elements outside it. The count after the label is a Review Blue pill (`gp-blue-fill`, white text, 11px) and counts only the cards in the tab's your-turn column. A tab with none shows no pill.

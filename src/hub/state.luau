@@ -3,6 +3,7 @@
 -- built from it. Views read `State.board` and never filter, sort or classify: every rule is `model`'s.
 -- Pure: no clock, no network, no Tern. `now` is passed in.
 local Fields = require("../text-field")
+local AgentFix = require("./agent-fix")
 local Fixes = require("./fixes")
 local Links = require("../links")
 local Model = require("./model")
@@ -12,14 +13,12 @@ type Tab = Model.Tab
 type Column = Model.Column
 type Sort = Model.Sort
 
--- The modules this one will require once they exist (sync, fixes, agent-fix, summary) are
+-- The modules this one will require once they exist (sync, summary) are
 -- not written yet. Their types the state needs are declared here with the same shapes as the spec's
 -- contract, and the issue that adds each module replaces its placeholder with the module's own type.
 export type Opened = { repo: string, number: number, title: string, author: string, at: string } -- sync.Opened
 export type Summary = { verdict: string, comments: { { author: string, text: string } } } -- summary.Summary
 export type FixDetails = Fixes.FixDetails
-type Run = { key: string, stage: string, since: number } -- agent-fix.Run
-type Fix = { worktree: string, branch: string, base: string, headOid: string, commit: string, summary: string, usedAgent: boolean } -- agent-fix.Fix
 
 export type Mode = "board" | "search" | "link" | "menu" | "confirm" | "help" | "fixes" | "reply"
 export type MenuId = "repositories" | "sort" | "agent" | "merge" | "actions"
@@ -31,9 +30,9 @@ export type CardAction = { act: string, value: string?, label: string, key: stri
 
 export type AgentFixState =
 	{ kind: "no_clone", slug: string }
-	| { kind: "running", run: Run }
-	| { kind: "ready", fix: Fix, reviewed: { [string]: boolean } }
-	| { kind: "pushing", fix: Fix }
+	| { kind: "running", run: AgentFix.Run }
+	| { kind: "ready", fix: AgentFix.Fix, reviewed: { [string]: boolean } }
+	| { kind: "pushing", fix: AgentFix.Fix }
 	| { kind: "failed", reason: string, worktree: string? }
 
 -- A pill on a card's chip line. `kind` picks its look; `running` carries the amber spinner.
@@ -50,6 +49,8 @@ export type Card = {
 	main: CardAction?, -- the split button's action
 	more: { CardAction }, -- behind the attached ▾
 	agent: AgentFixState?,
+	agentSlot: boolean, -- a reserved two-line note region, including before a fix starts
+	agentMessage: string?, agentPath: string?, agentCommit: string?,
 	summary: Summary?,
 	merge: Model.MergeResolution?,
 	note: string?, -- a merge in flight ("Commented /merge · waiting for the merge"); shown under the title
@@ -141,6 +142,87 @@ export type State = {
 export type MenuRow = { label: string, sub: string?, count: number?, on: boolean, kind: "choice" | "check" | "clear" }
 
 local M = {}
+
+-- Lifecycle data only. The block owns the engine, cancellation and lease effects.
+function M.agentRunning(s: State): string?
+	for key, agent in s.agents do
+		if agent.kind == "running" then return key end
+	end
+	return nil
+end
+
+function M.beginAgent(s: State, key: string, now: number): boolean
+	local previous = s.agents[key]
+	if M.agentRunning(s) or (previous and (previous.kind == "ready" or previous.kind == "pushing")) then return false end
+	if not M.prOf(s, key) then return false end
+	s.agents[key] = { kind = "running", run = AgentFix.start(key, now) }
+	M.project(s)
+	return true
+end
+
+function M.agentOutcome(s: State, key: string, outcome: AgentFix.Outcome): boolean
+	local current = s.agents[key]
+	-- Terminal and duplicate callbacks cannot resurrect a stopped or settled run.
+	if not current or current.kind ~= "running" then return false end
+	if outcome.kind == "running" then
+		if outcome.run.key ~= key then return false end
+		s.agents[key] = { kind = "running", run = outcome.run }
+	elseif outcome.kind == "ready" then
+		s.agents[key] = { kind = "ready", fix = outcome.fix, reviewed = {} }
+	elseif outcome.kind == "failed" then
+		s.agents[key] = { kind = "failed", reason = outcome.reason, worktree = outcome.worktree or current.run.worktree }
+	else
+		s.agents[key] = nil
+	end
+	M.project(s)
+	return true
+end
+
+function M.agentEvent(s: State, key: string, event: AgentFix.Event): boolean
+	local current = s.agents[key]
+	if not current or current.kind ~= "running" then return false end
+	return M.agentOutcome(s, key, AgentFix.step(current.run, event))
+end
+
+function M.noAgentClone(s: State, key: string, slug: string)
+	s.agents[key] = { kind = "no_clone", slug = slug }
+	M.project(s)
+end
+
+function M.agentFailed(s: State, key: string, reason: string, worktree: string?)
+	s.agents[key] = { kind = "failed", reason = reason, worktree = worktree }
+	M.project(s)
+end
+
+-- Closing stops only running fixes. Ready worktrees and their leases belong to #16.
+function M.closeAgent(s: State): string?
+	local key = M.agentRunning(s)
+	if key then M.agentOutcome(s, key, { kind = "stopped" }) end
+	return key
+end
+
+function M.reviewed(fix: AgentFix.Fix, reviewed: { [string]: boolean }): boolean
+	for _, hunk in fix.hunks do
+		if reviewed[hunk.id] ~= true then return false end
+	end
+	return true
+end
+
+local STAGES: { [AgentFix.Stage]: string } = {
+	worktree = "Preparing worktree…", merge = "Merging base branch…", rules = "Regenerating files…",
+	agent = "Resolving conflicts…", commit = "Committing fix…",
+}
+
+function M.agentMessage(agent: AgentFixState): (string, string?, string?)
+	if agent.kind == "running" then return STAGES[agent.run.stage], agent.run.worktree, nil end
+	if agent.kind == "no_clone" then return "No local copy of " .. agent.slug, nil, nil end
+	if agent.kind == "failed" then
+		local reason = string.match(agent.reason, "^Couldn't [^:]*: (.*)$") or agent.reason
+		return "Couldn't fix pull request: " .. Fixes.firstLine(reason), agent.worktree, nil
+	end
+	local fix = agent.fix
+	return string.sub(fix.commit, 1, 7) .. " · " .. Fixes.firstLine(fix.summary), fix.worktree, string.sub(fix.commit, 1, 7)
+end
 
 local askingOf: (s: State, pr: HubPR) -> string?
 
@@ -456,10 +538,31 @@ local function toCard(pr: HubPR, placement: Model.Placement, s: State): Card
 	local flake = if known and known.headOid == pr.headOid then known else nil
 	local main, more = actionsFor(pr, placement.column, placement.reasons, s.merges[pr.repo], flake, s.autoMerge[pr.repo])
 	local chips, detail, detailKind = chipsFor(pr, placement, s.now)
+	local agent = s.agents[pr.key]
+	local message: string? = nil
+	local path: string? = nil
+	local commit: string? = nil
+	if agent then
+		message, path, commit = M.agentMessage(agent)
+		detail, detailKind = nil, nil
+		if agent.kind == "running" then
+			main, more, chips = action("card-agent-stop", "Stop", "A"), {}, { chip("Agent running", "agent") }
+		elseif agent.kind == "no_clone" then
+			main, more, chips = action("card-agent-clone", "Clone repo", "A"), { action("card-agent-folder", "Choose folder…", "O") }, { chip("No local clone", "wait") }
+		elseif agent.kind == "failed" then
+			main, more, chips = action("card-agent-retry", "Try again", "A"), {}, { chip("Fix failed", "bad-soft") }
+			if agent.worktree then table.insert(more, action("card-agent-worktree", "Open worktree", "O")) end
+		else
+			-- Review, Discard and Push are deliberately left to #16.
+			main, more, chips = nil, {}, { chip(if agent.kind == "ready" then "Fix ready" else "Pushing fix…", "done") }
+		end
+	end
 	return {
 		flake = if flake and flake.flaky and flake.reason then "Likely flaky: " .. flake.reason else nil,
 		pr = pr, chips = chips, detail = detail, detailKind = detailKind, column = placement.column, reasons = placement.reasons, main = main, more = more,
-		agent = s.agents[pr.key], summary = s.summaries[pr.key], merge = s.merges[pr.repo], note = M.pendingNote(s, pr),
+		agent = agent, agentSlot = agent ~= nil or placement.column == "needs_fixes",
+		agentMessage = message, agentPath = path, agentCommit = commit,
+		summary = s.summaries[pr.key], merge = s.merges[pr.repo], note = M.pendingNote(s, pr),
 		asking = askingOf(s, pr), busy = s.busy[pr.key],
 		ring = s.ringed[pr.key], selected = s.selected == pr.key, marked = s.marked[pr.key] == true,
 	}
