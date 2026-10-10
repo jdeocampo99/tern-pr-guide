@@ -53,7 +53,7 @@ local function header(s: State.State, pr: Model.HubPR, steps: { Step }): Node
 	local main = State.fixMain(s)
 	if main then
 		-- The card's own wording ("Fix with agent", "Hand off to Tandem", "Summarize"); the button itself arrives with the agent.
-		table.insert(actions, el("button", { class = "gp-btn gp-btn-keyed gp-fx-agent-btn", key = "agent", actions = { click = main.act .. "=" .. pr.key } }, {
+		table.insert(actions, el("button", { class = "gp-btn gp-btn-keyed" .. (if main.act == "card-rerun" then "" else " gp-fx-agent-btn"), key = "agent", actions = { click = main.act .. "=" .. pr.key } }, {
 			span("gp-fx-btn-label", main.label), Ui.keys(main.key or "A"),
 		}))
 	end
@@ -498,18 +498,19 @@ local function hints(s: State.State, steps: { Step }): Node
 	else
 		local short = if step == nil then "Nothing left to fix" elseif step.check then step.check.name elseif step.path then Text.baseName(step.path) else step.who
 		kids = { span("gp-hb-mode", if step then "Step " .. route.cur .. " of " .. #steps .. " · " .. short else short), Ui.spacer() }
+		-- Most important first: the bar drops whole items from the right when they don't fit.
+		local main = State.fixMain(s)
 		table.insert(kids, item("h j k l", "move", true))
+		table.insert(kids, item("esc", "back", true))
+		if main and main.key then table.insert(kids, item(main.key, string.lower(main.label), true)) end
 		table.insert(kids, item("⏎", if route.focus == "steps" then "go to code" else "choose"))
 		if step and step.thread then
 			table.insert(kids, item("R", "reply"))
 			table.insert(kids, item("E", "resolve"))
 		end
-		local main = State.fixMain(s)
-		-- With Re-run first the bar is full: View log keeps its button on the page.
 		if step and step.check and not (main and main.key == "⇧R") then table.insert(kids, item("⇧L", "view log")) end
 		-- The card's own action already says ⇧R when Re-run moved first.
 		if step and step.check and not (main and main.key == "⇧R") then table.insert(kids, item("⇧R", "re-run")) end
-		if main and main.key then table.insert(kids, item(main.key, string.lower(main.label), true)) end
 		local card = State.card(s, route.key)
 		if main and main.act == "card-rerun" and card then
 			for _, more in card.more do
@@ -518,7 +519,6 @@ local function hints(s: State.State, steps: { Step }): Node
 		end
 		if step then table.insert(kids, item("G", if step.group == "conflict" then "resolve on GitHub" else "open on GitHub")) end
 		if #Fixes.bots(State.fixDetails(s) :: Fixes.FixDetails) > 0 then table.insert(kids, item("B", "bot comments")) end
-		table.insert(kids, item("esc", "back", true))
 	end
 	return el("div", { class = "gp-hintbar", key = "hints" }, kids)
 end
