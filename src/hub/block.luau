@@ -895,12 +895,12 @@ end
 -- Returns whether the caller may go on to edit and store the board. It may not when the block closed, or when the save of
 -- the restored ownership failed: another window may have stored a newer cache meanwhile, and this block's snapshot is
 -- then older than the store. The ownership stays in memory (`unsaved`), and the next guard adopts the newer cache.
--- It may not either while `unsaved` and the store cannot be read: the stored snapshot is not reconciled and might hold a
--- distinct cache this board lacks, so nothing is written until a read succeeds and adopts it. Without `unsaved` an
--- unreadable store changes nothing here.
+-- It may not either when the store cannot be read, whether or not `unsaved`: "no cache" is then a guess, and the store may
+-- hold a distinct or newer cache this board lacks, so nothing that writes a snapshot goes on until a read succeeds and adopts
+-- it. A caller that cannot write one (`rearm`) may ignore the result.
 local function adoptShared(b: Block, cx: BlockCx, hold: boolean?): boolean
 	local shared, readable = sharedCache(b, true)
-	if not shared then return readable or not b.unsaved end
+	if not shared then return readable end
 	local now = os.time()
 	joinOwnership(b, shared)
 	local prs = flagged(b.watched, shared.prs)
@@ -1280,6 +1280,19 @@ startRefresh = function(b: Block, cx: BlockCx)
 		if b.closed then return end
 		local now = os.time()
 		b.sched.refreshTried = now
+		-- The answer lands on the newest cache there is, looked at again now: another window's may have landed while the request
+		-- was out, and `Sync.merge` carries what only that cache holds (a pending merge). When the store cannot be read, or the
+		-- adoption could not be stored, the answer is dropped: it merges, stores and chains nothing, and the schedule (which
+		-- `refreshTried` has moved) tries again later. The answer's own save is the one write (`hold`).
+		local safe = not fresh or adoptShared(b, cx, true)
+		if b.closed then return end
+		if not safe then
+			b.s.loading = false
+			b.s.error = { operation = KV_CACHE, message = "the cache couldn't be read, so the refresh was not stored" }
+			rearm(b, cx)
+			draw(b, cx)
+			return
+		end
 		if not fresh then
 			b.s.loading = false
 			b.s.error = { operation = if err then err.operation else "hub", message = reasonOf(if err then err.message else "no answer"), rateLimit = if err then err.rateLimit else nil }
@@ -1318,8 +1331,16 @@ end
 
 onRefresh = function(b, cx)
 	if b.flights.refresh then return end
-	adoptShared(b, cx)
+	local safe = adoptShared(b, cx)
 	if b.closed then return end
+	-- An unreadable store starts no refresh: its answer could not be reconciled. The attempt counts as tried, so the schedule
+	-- waits before the next one.
+	if not safe then
+		b.sched.refreshTried = os.time()
+		rearm(b, cx)
+		draw(b, cx)
+		return
+	end
 	-- Another window refreshed a moment ago: its cache is the answer.
 	local last = cachedAt(b)
 	if last and os.time() - last < Sync.DEBOUNCE then

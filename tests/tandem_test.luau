@@ -3032,7 +3032,8 @@ local function sharedOwnership()
 	-- during the failure. The board is T2's, so the store's identity is unreconciled until T3 is adopted whole: the next
 	-- cache-writing action, or the next answer of a read of Tandem, adopts it before the one write that follows, and
 	-- neither lays T2 over it.
-	local function failedAdoption(w: any, Fetch: any, Block: any): (any, any, number)
+	local PENDING = { method = "comment", at = "2026-10-09T11:00:00Z" }
+	local function failedAdoption(w: any, Fetch: any, Block: any, pending: boolean?): (any, any, number)
 		local b = agentBoard(w, Fetch, Block)
 		holdCache(w, b)
 		Block.event(b, { ev = "action", act = "card-handoff", value = TARGET } :: any, w.cx)
@@ -3053,6 +3054,7 @@ local function sharedOwnership()
 			t3.writeId = "other-window#3"
 			for _, cached in t3.prs do
 				if cached.key == API114 then cached.title = "Retitled by T3" end
+				if pending and cached.key == MERGE_KEY then cached.pending = copy(PENDING) end
 			end
 			w.kv["hub.cache"] = t3
 		end
@@ -3149,6 +3151,141 @@ local function sharedOwnership()
 		run.done(nil, nil)
 		wholeT3(w, b, t3, sets, "action after an unreadable watch answer", true)
 		assert(State.prOf(b.s, MERGE_KEY).pending ~= nil and #w.started == 0 and #handoffs(w) == 1, "the action's change is on T3")
+	end)
+
+	-- The store is unreadable for every path that could write a snapshot, whether or not this board's ownership is unstored. The
+	-- watch answer here arrives on a board with nothing unsaved: it saw a distinct newer cache (T3) when it looked at the store
+	-- first, and then the store failed when it adopted it. The answer would clear this window's flag, and the clear would lay
+	-- the older snapshot over T3. It changes nothing instead, and the next answer that can read the store adopts T3 whole.
+	withWorld(function(w, Fetch, Block)
+		local b = agentBoard(w, Fetch, Block)
+		b.github = quietGithub(function(_, done) done(nil, { operation = "hub", message = "no answer" }) end)
+		holdCache(w, b)
+		claim(w, Block, b)
+		assert(b.watched[TARGET] == true and not b.unsaved, "this window owns TARGET and nothing is unsaved")
+		Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+		local answer = reads(w)[#reads(w)]
+		local t3 = storedCache({ WEB, API114 }, Cases.asOf + 120)
+		t3.writeId = "other-window#3"
+		for _, cached in t3.prs do
+			if cached.key == API114 then cached.title = "Retitled by T3" end
+		end
+		w.kv["hub.cache"] = t3
+		local sets, asked, toasts, stamp = w.cacheSets or 0, #reads(w), #w.toasts, b.cache.refreshedAt
+		local gets = 0
+		w.onGet = function()
+			gets += 1
+			if gets == 2 then w.failGets = 1 end
+		end
+		answer.done(out("WATCH"))
+		w.onGet = nil
+		assert(gets == 2 and w.failGets == 0, "the answer read the store twice and the second read failed")
+		assert((w.cacheSets or 0) == sets and same(w.kv["hub.cache"], t3), "no write was attempted and T3 stands whole")
+		assert(not b.unsaved and b.cache.refreshedAt == stamp and State.prOf(b.s, API114).title ~= "Retitled by T3", "the board is still its own")
+		assert(State.prOf(b.s, TARGET).tandem == true and b.watched[TARGET] == true, "TARGET is not cleared")
+		assert(next(b.retired) == nil and not b.flights.tandem and #reads(w) == asked, "nothing retired and no replacement read")
+		assert(#w.toasts == toasts and #w.started == 0 and #handoffs(w) == 0 and gh(w) == nil, "no effect")
+
+		Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+		reads(w)[#reads(w)].done(out("WATCH"))
+		wholeT3(w, b, t3, sets, "watch answer after the unreadable one", false)
+		assert(#w.started == 0 and #handoffs(w) == 0, "nothing else went on")
+	end)
+
+	-- Adopting T2 failed to store its ownership, and T3 (same stamp, changed data, and a pending merge on another PR) is
+	-- stored. No refresh may start or finish a snapshot write while the store cannot be read: a GitHub answer carries no
+	-- pending record, so a merge against T2 would drop T3's. A refresh that reads the store again keeps it.
+	local function freshAnswer(): any
+		return { viewer = "jubbydev", prs = copy(Cases.prs), rateLimit = nil, calls = {}, truncated = false }
+	end
+	local function pendingOf(cache: any): any
+		for _, cached in cache.prs do
+			if cached.key == MERGE_KEY then return cached.pending end
+		end
+		return nil
+	end
+	local function intactT3(w: any, b: any, t3: any, sets: number, what: string)
+		assert((w.cacheSets or 0) == sets, what .. ": no write was attempted")
+		assert(same(w.kv["hub.cache"], t3) and w.kv["hub.cache"].writeId == "other-window#3", what .. ": T3 stands whole")
+		assert(same(pendingOf(w.kv["hub.cache"]), PENDING), what .. ": with its pending merge")
+		assert(b.unsaved and b.cache.refreshedAt == t3.refreshedAt, what .. ": the board is still T2's, its ownership unstored")
+		assert(State.prOf(b.s, API114).title ~= "Retitled by T3" and State.prOf(b.s, MERGE_KEY).pending == nil, what .. ": and it lacks T3's data")
+		assert(State.prOf(b.s, TARGET).tandem == true and b.watched[TARGET] == true and next(b.retired) == nil, what .. ": TARGET stays owned")
+		assert(#w.started == 0 and #handoffs(w) == 1, what .. ": no effect reached a branch")
+	end
+	local function keptT3(w: any, b: any, t3: any, sets: number, what: string)
+		assert((w.cacheSets or 0) == sets + 1, what .. ": the refresh wrote once")
+		local stored = w.kv["hub.cache"]
+		assert(stored.writeId ~= t3.writeId, what .. ": it is a new write")
+		assert(same(pendingOf(stored), PENDING) and State.prOf(b.s, MERGE_KEY).pending ~= nil, what .. ": T3's pending merge went through Sync.merge")
+		assert(not b.unsaved, what .. ": the board's ownership is stored")
+	end
+
+	-- The scheduled refresh: its adoption cannot read the store, so no request is made and no write is tried. The attempt
+	-- counts as tried, so it does not run again at once. A later explicit refresh reads the store and keeps T3.
+	withWorld(function(w, Fetch, Block)
+		local b, t3, sets = failedAdoption(w, Fetch, Block, true)
+		local asked, answer: any = 0, nil
+		b.github = quietGithub(function(_, done) asked += 1; answer = done end)
+		b.flights.probe = true
+		w.timers = {}
+		w.failGet = true
+		Block.event(b, { ev = "action", act = "hub-focused", value = "" } :: any, w.cx)
+		runTimers(w)
+		assert(asked == 0 and not b.flights.refresh and b.sched.refreshTried == w.now, "no request was made, and the attempt counts")
+		intactT3(w, b, t3, sets, "scheduled refresh")
+
+		w.failGet = false
+		Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+		assert(asked == 1 and b.flights.refresh, "the explicit refresh asks GitHub")
+		answer(freshAnswer(), nil)
+		keptT3(w, b, t3, sets, "explicit refresh after the unreadable one")
+		assert(not b.flights.refresh and not b.s.loading, "and the refresh ended")
+	end)
+
+	-- An explicit refresh whose request is out while the store cannot be read: its answer drops. It clears no ownership, writes
+	-- nothing, merges nothing and chains no second refresh, even though one was asked for; it shows why, and the next answer
+	-- that can read the store adopts T3 whole and writes once.
+	withWorld(function(w, Fetch, Block)
+		local b, t3, sets = failedAdoption(w, Fetch, Block, true)
+		local asked, answer: any = 0, nil
+		b.github = quietGithub(function(_, done) asked += 1; answer = done end)
+		Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+		Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+		assert(asked == 1 and b.flights.refresh and b.refetch, "one request is out and another is asked for")
+		w.failGet = true
+		answer(freshAnswer(), nil)
+		assert(asked == 1 and not b.flights.refresh and not b.s.loading and b.refetch, "the answer chained no refresh")
+		assert(b.s.error ~= nil and b.s.error.operation == "hub.cache", "it says why")
+		intactT3(w, b, t3, sets, "explicit refresh")
+
+		w.failGet = false
+		Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+		assert(asked == 2, "the next refresh asks GitHub")
+		answer(freshAnswer(), nil)
+		keptT3(w, b, t3, sets, "refresh after the unreadable answer")
+		assert(asked == 3 and b.s.error == nil, "only now is the asked-for refresh run")
+	end)
+
+	-- A refresh that was out when T3 landed: its answer looks at the store again, adopts T3 whole (its stamp, its data and its
+	-- pending merge) and then merges, so the one write that follows keeps the pending merge.
+	withWorld(function(w, Fetch, Block)
+		local b = agentBoard(w, Fetch, Block)
+		holdCache(w, b)
+		local asked, answer: any = 0, nil
+		b.github = quietGithub(function(_, done) asked += 1; answer = done end)
+		Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+		assert(asked == 1 and b.flights.refresh and not pendingOf(w.kv["hub.cache"]), "the request is out")
+		local t3 = storedCache({ WEB, API114 }, Cases.asOf + 120)
+		t3.writeId = "other-window#3"
+		for _, cached in t3.prs do
+			if cached.key == MERGE_KEY then cached.pending = copy(PENDING) end
+		end
+		w.kv["hub.cache"] = t3
+		local sets = w.cacheSets or 0
+		answer(freshAnswer(), nil)
+		keptT3(w, b, t3, sets, "refresh that was out when T3 landed")
+		assert(asked == 1 and not b.flights.refresh and not b.s.loading and #handoffs(w) == 0 and #w.started == 0, "nothing else went on")
 	end)
 
 	-- A closed block's entry paths are dead ends. The busy draw of a hand-off raises (the window is gone): no root is looked
