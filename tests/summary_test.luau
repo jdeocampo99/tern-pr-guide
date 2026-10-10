@@ -35,7 +35,7 @@ local function equal(actual: { string }, expected: { string })
 	for i, value in expected do assert(actual[i] == value, "argv at " .. i) end
 end
 
-type Entry = { argv: { string }, stdout: string?, status: number?, cwd: string? }
+type Entry = { argv: { string }, stdout: string?, status: number?, cwd: string?, stderr: string? }
 local function git(args: { string }, stdout: string?, status: number?): Entry
 	local argv = { "git", "--literal-pathspecs", "-C", WORKTREE }
 	table.move(args, 1, #args, 5, argv)
@@ -45,7 +45,9 @@ end
 -- These are the engine's actual injected effects. Unexpected commands fail, including any push,
 -- conflicts-tool call, merge or journal read on the bot path.
 local SANDBOX = "/usr/bin/sandbox-exec"
-local function botEngine(mode: "ready" | "stop" | "unsandboxed")
+local STATE = WORKTREE .. "/.prguide-omp-state"
+-- The reserved state folder is set up before the worker and removed straight after it, whatever its outcome.
+local function botEngine(mode: "ready" | "stop" | "unsandboxed" | "tracked" | "exists" | "failed" | "unclean")
 	local stopDuringAgent = mode == "stop"
 	local s = fresh()
 	local key = Fixture.details.bot.key
@@ -58,7 +60,19 @@ local function botEngine(mode: "ready" | "stop" | "unsandboxed")
 		git({ "rev-parse", "refs/prguide/agent/head" }, HEAD .. "\n"),
 		git({ "-c", "core.hooksPath=/dev/null", "switch", "--detach", HEAD }),
 	}
-	if mode ~= "unsandboxed" then table.insert(entries, { argv = { SANDBOX }, cwd = WORKTREE, stdout = Fixture.transcripts.bot.stdout }) end
+	if mode ~= "unsandboxed" then
+		table.insert(entries, git({ "ls-files", "--", ".prguide-omp-state" }, if mode == "tracked" then ".prguide-omp-state/omp/logs/omp.log\n" else ""))
+		if mode ~= "tracked" then
+			table.insert(entries, { argv = { "/bin/mkdir", STATE }, cwd = WORKTREE, stdout = "", status = if mode == "exists" then 1 else 0, stderr = "File exists" })
+			if mode ~= "exists" then
+				table.insert(entries, { argv = { "/bin/mkdir", STATE .. "/omp" }, cwd = WORKTREE, stdout = "" })
+				table.insert(entries, { argv = { SANDBOX }, cwd = WORKTREE, stdout = Fixture.transcripts.bot.stdout,
+					status = if mode == "failed" then 1 else 0, stderr = if mode == "failed" then "boom" else "" })
+				-- Removed before git sees the tree, and only by its exact path.
+				table.insert(entries, { argv = { "/bin/rm", "-rf", STATE }, cwd = WORKTREE, stdout = "", status = if mode == "unclean" then 1 else 0, stderr = "busy" })
+			end
+		end
+	end
 	if mode == "ready" then
 		for _, entry in {
 			git({ "rev-parse", "HEAD" }, HEAD .. "\n"), git({ "diff", "--name-only", "--diff-filter=U" }),
@@ -84,10 +98,12 @@ local function botEngine(mode: "ready" | "stop" | "unsandboxed")
 			assert(entry, "unexpected call " .. table.concat(argv, " "))
 			assert(opts.cwd == entry.cwd and opts.stdin == nil)
 			if argv[1] == SANDBOX then
-				-- The worker runs only inside the write sandbox, with the unchanged omp argv behind it.
+				-- The worker runs only inside the write sandbox, with the unchanged omp argv behind a state-only env.
 				local profile = AgentFix.sandboxProfile(WORKTREE, "/home/prguide") :: string
 				assert(argv[2] == "-p" and argv[3] == profile and opts.timeout_ms == 20 * 60_000)
-				local inner = table.move(argv, 4, #argv, 1, {})
+				assert(argv[4] == "/usr/bin/env" and argv[5] == "XDG_STATE_HOME=" .. STATE, "only XDG_STATE_HOME moves")
+				for _, word in argv do assert(not string.find(word, "XDG_DATA_HOME", 1, true)) end
+				local inner = table.move(argv, 6, #argv, 1, {})
 				equal(inner, Fixture.transcripts.bot.argv)
 				equal(inner, { "/omp", "-p", "--no-session", "--no-extensions", "--no-skills", "--no-rules", "--no-lsp", "--no-title",
 					"--tools", "read,edit,write,grep,glob", "--model", "provider/model", "--thinking", "high", AgentFix.botPrompt(Fixture.details.bot) })
@@ -98,7 +114,7 @@ local function botEngine(mode: "ready" | "stop" | "unsandboxed")
 			for _, word in argv do assert(word ~= "push" and word ~= "--force" and word ~= "--force-with-lease") end
 			table.insert(calls, { argv = argv, cwd = opts.cwd })
 			local function resume()
-				done({ status = entry.status or 0, stdout = entry.stdout or "", stderr = "", timed_out = false })
+				done({ status = entry.status or 0, stdout = entry.stdout or "", stderr = entry.stderr or "", timed_out = false })
 				-- Duplicate responses cannot start a second commit or return.
 				done({ status = 0, stdout = entry.stdout or "", stderr = "", timed_out = false })
 			end
@@ -116,17 +132,19 @@ local function botEngine(mode: "ready" | "stop" | "unsandboxed")
 	end, function(result, err)
 		finished += 1
 		fix = result
-		if mode == "unsandboxed" then assert(result == nil and err and string.find(err, "write sandbox", 1, true))
+		local why = ({ unsandboxed = "write sandbox", tracked = "tracks .prguide-omp-state", exists = "/bin/mkdir: File exists",
+			failed = "omp: boom", unclean = "state folder: busy" })[mode]
+		if why then assert(result == nil and err and string.find(err, why, 1, true), tostring(err))
 		else assert((err == "stopped") == stopDuringAgent) end
 	end)
 	assert(#calls == 0, "constructing an engine is lazy")
 	engine.begin()
-	if mode == "unsandboxed" then
-		assert(finished == 1 and fix == nil and engine.held() == nil, "no sandbox: nothing runs and the lease returns")
+	if mode ~= "ready" and mode ~= "stop" then
+		assert(finished == 1 and fix == nil and engine.held() == nil, "a failed bot run returns its lease")
 	elseif stopDuringAgent then
-		assert(#calls == 7 and pending ~= nil)
+		assert(#calls == 10 and pending ~= nil)
 		engine.stop()
-		assert(#calls == 7 and finished == 0 and engine.held() ~= nil, "Stop waits for the child before cleanup")
+		assert(#calls == 10 and finished == 0 and engine.held() ~= nil, "Stop waits for the child before cleanup")
 		local resume = pending :: () -> ()
 		resume()
 		assert(finished == 1 and fix == nil and engine.held() == nil)
@@ -397,4 +415,8 @@ return function()
 	botEngine("ready")
 	botEngine("stop")
 	botEngine("unsandboxed")
+	botEngine("tracked")
+	botEngine("exists")
+	botEngine("failed")
+	botEngine("unclean")
 end

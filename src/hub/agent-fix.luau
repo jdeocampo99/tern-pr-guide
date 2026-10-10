@@ -58,6 +58,8 @@ export type Engine = {
 }
 
 local M = {}
+-- The bot worker's reserved OMP state folder, directly under its worktree. It is created and removed around each run.
+local BOT_STATE = ".prguide-omp-state"
 local LOCKFILES: { [string]: boolean } = {
  ["package-lock.json"] = true, ["npm-shrinkwrap.json"] = true, ["yarn.lock"] = true, ["pnpm-lock.yaml"] = true,
  ["bun.lock"] = true, ["bun.lockb"] = true, ["deno.lock"] = true, ["Cargo.lock"] = true, ["Gemfile.lock"] = true,
@@ -417,7 +419,7 @@ function M.engine(spec: Spec, deps: Dependencies, now: number, changed: (Outcome
    local handled, problem = pcall(ok, out)
    if not handled then fail(tostring(problem)) end
   end
-  local ran, problem = pcall(deps.runner, argv, { cwd = cwd, timeout_ms = if argv[1] == spec.omp or (spec.sandbox ~= nil and argv[1] == spec.sandbox.exec) then 20 * 60_000 else 60_000 }, settle)
+  local ran, problem = pcall(deps.runner, argv, { cwd = cwd, timeout_ms = if argv[1] == spec.omp then 20 * 60_000 else 60_000 }, settle)
   if not ran then settle({ status = -1, stdout = "", stderr = tostring(problem), timed_out = false }) end
  end
  local function git(args: { string }, ok: (Out) -> (), acceptConflict: boolean?)
@@ -549,6 +551,63 @@ function M.engine(spec: Spec, deps: Dependencies, now: number, changed: (Outcome
    show()
   end)
  end
+ -- Runs the sandboxed OMP step. OMP must create its run state and ~/.omp is denied, so XDG_STATE_HOME points at a
+ -- reserved folder inside the worktree. This run creates it, never over an existing node, and removes exactly that
+ -- path before the result is read: on success, failure, throw, timeout and Stop. Nothing OMP wrote there reaches
+ -- `git add`. `rm -rf` unlinks a link without following it.
+ local function sandboxed(argv: { string }, root: string, ok: (Out) -> ())
+  if finished then return end
+  if stopped then return stopNow() end
+  local worktree = state.worktree :: string
+  local created = false
+  pending = true
+  local function exec(args: { string }, timeout: number, after: (Out) -> ())
+   local replied = false
+   local function reply(out: Out)
+    if replied then return end
+    replied = true
+    after(out)
+   end
+   local ran, problem = pcall(deps.runner, args, { cwd = worktree, timeout_ms = timeout }, reply)
+   if not ran then reply({ status = -1, stdout = "", stderr = tostring(problem), timed_out = false }) end
+  end
+  local function failed(out: Out): boolean return out.timed_out or out.status ~= 0 end
+  local function conclude(reason: string?, out: Out?)
+   local function settle(err: string?)
+    pending = false
+    if err then return fail(err) end
+    if stopped then return stopNow() end
+    if reason then return fail(reason) end
+    local handled, problem = pcall(ok, out :: Out)
+    if not handled then fail(tostring(problem)) end
+   end
+   if not created then return settle(nil) end
+   exec({ "/bin/rm", "-rf", root }, 60_000, function(cleaned)
+    settle(if failed(cleaned) then "Couldn't remove the bot worker's state folder: " .. string.sub(cleaned.stderr, 1, 240) else nil)
+   end)
+  end
+  local function setup(args: { string }, after: (Out) -> ())
+   if stopped then return conclude(nil) end
+   exec(args, 60_000, function(out)
+    if failed(out) then return conclude(args[1] .. ": " .. string.sub(out.stderr, 1, 240)) end
+    after(out)
+   end)
+  end
+  setup({ "git", "--literal-pathspecs", "-C", worktree, "ls-files", "--", BOT_STATE }, function(tracked)
+   if string.find(tracked.stdout, "%S") then return conclude("The worktree tracks " .. BOT_STATE .. ", the bot worker's state folder") end
+   -- No `-p`: an existing file, folder or link at this path makes mkdir fail and nothing is removed.
+   setup({ "/bin/mkdir", root }, function()
+    created = true
+    setup({ "/bin/mkdir", root .. "/omp" }, function()
+     if stopped then return conclude(nil) end
+     exec(argv, 20 * 60_000, function(out)
+      if failed(out) then return conclude("omp: " .. string.sub(out.stderr, 1, 240)) end
+      conclude(nil, out)
+     end)
+    end)
+   end)
+  end)
+ end
  local function botAgent()
   local input = spec.input :: Input
   if input.details.key ~= spec.key or input.details.headOid ~= spec.headOid or not M.hasBotFeedback(input.details, input.authors) then
@@ -559,11 +618,14 @@ function M.engine(spec: Spec, deps: Dependencies, now: number, changed: (Outcome
   local profile = if box and string.sub(spec.omp, 1, 1) ~= "-" then M.sandboxProfile(state.worktree :: string, box.home) else nil
   if not box or not profile then return fail("The bot fix needs a write sandbox for its worktree") end
   emit({ kind = "stage", stage = "agent" })
-  local argv = { box.exec, "-p", profile, spec.omp, "-p", "--no-session", "--no-extensions", "--no-skills", "--no-rules", "--no-lsp", "--no-title",
+  -- Only the state home moves; XDG_DATA_HOME stays put because OMP keeps its credentials there.
+  local root = (state.worktree :: string) .. "/" .. BOT_STATE
+  local argv = { box.exec, "-p", profile, "/usr/bin/env", "XDG_STATE_HOME=" .. root,
+   spec.omp, "-p", "--no-session", "--no-extensions", "--no-skills", "--no-rules", "--no-lsp", "--no-title",
    "--tools", "read,edit,write,grep,glob", "--model", spec.model }
   if spec.effort then table.insert(argv, "--thinking"); table.insert(argv, spec.effort) end
   table.insert(argv, M.botPrompt(input.details, input.authors))
-  command(argv, state.worktree :: string, false, function(out)
+  sandboxed(argv, root, function(out)
    agentSummary = string.sub(string.match(out.stdout, "%S[^\r\n]*") or "Address bot feedback", 1, 240)
    git({ "rev-parse", "HEAD" }, function(head)
     if string.gsub(head.stdout, "%s+$", "") ~= spec.headOid then return fail("The agent changed the worktree head") end
