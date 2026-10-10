@@ -479,8 +479,9 @@ end
 local function hints(s: State.State, steps: { Step }): Node
 	local route = s.route :: State.Route
 	local step = steps[route.cur]
-	local function item(key: string, label: string): Node
-		return el("span", { class = "gp-hb-item" }, { Ui.keys(key), span("gp-hb-label", label) })
+	-- Move, the step's main action and back always show; the rest give way first in a narrow pane.
+	local function item(key: string, label: string, must: boolean?): Node
+		return el("span", { class = "gp-hb-item " .. (if must then "gp-hb-must" else "gp-hb-opt") }, { Ui.keys(key), span("gp-hb-label", label) })
 	end
 	local kids: { Node } = {}
 	if route.reply and step and step.thread then
@@ -488,7 +489,7 @@ local function hints(s: State.State, steps: { Step }): Node
 	else
 		local short = if step == nil then "Nothing left to fix" elseif step.check then step.check.name elseif step.path then Text.baseName(step.path) else step.who
 		kids = { span("gp-hb-mode", if step then "Step " .. route.cur .. " of " .. #steps .. " · " .. short else short), Ui.spacer() }
-		table.insert(kids, item("h j k l", "move"))
+		table.insert(kids, item("h j k l", "move", true))
 		table.insert(kids, item("⏎", if route.focus == "steps" then "go to code" else "choose"))
 		if step and step.thread then
 			table.insert(kids, item("R", "reply"))
@@ -496,10 +497,10 @@ local function hints(s: State.State, steps: { Step }): Node
 		end
 		if step and step.check then table.insert(kids, item("⇧L", "view log")) end
 		local main = State.fixMain(s)
-		if main and main.key then table.insert(kids, item(main.key, string.lower(main.label))) end
+		if main and main.key then table.insert(kids, item(main.key, string.lower(main.label), true)) end
 		if step then table.insert(kids, item("G", if step.group == "conflict" then "resolve on GitHub" else "open on GitHub")) end
 		if #Fixes.bots(State.fixDetails(s) :: Fixes.FixDetails) > 0 then table.insert(kids, item("B", "bot comments")) end
-		table.insert(kids, item("esc", "back"))
+		table.insert(kids, item("esc", "back", true))
 	end
 	return el("div", { class = "gp-hintbar", key = "hints" }, kids)
 end
