@@ -897,16 +897,22 @@ local function announce(b: Block, cx: BlockCx, old: Sync.Cache?, fresh: { Model.
 end
 
 -- Applies the local edits no write has stored to the board's PRs again, each only while its PR is still there on the head
--- it was made on: an adopted cache that moved the head knows better. Returns whether one applied.
-local function replayEdits(b: Block): boolean
+-- it was made on. `prune` is for a complete adopted board: a PR on it at another head means the head advanced for good, so
+-- that edit is dropped, and a refresh answer from before the advance cannot make it eligible again. A refresh answer only
+-- skips the edit, since its snapshot may be the older one. Returns whether one applied.
+local function replayEdits(b: Block, prune: boolean?): boolean
 	local replayed = false
-	for _, kept in b.replays do
-		local pr = State.prOf(b.s, kept.key)
-		if pr and pr.headOid == kept.head then
-			kept.edit()
+	local kept = {}
+	for _, replay in b.replays do
+		local pr = State.prOf(b.s, replay.key)
+		local moved = pr ~= nil and pr.headOid ~= replay.head
+		if pr and not moved then
+			replay.edit()
 			replayed = true
 		end
+		if not (prune and moved) then table.insert(kept, replay) end
 	end
+	b.replays = kept
 	return replayed
 end
 
@@ -937,7 +943,7 @@ local function adoptShared(b: Block, cx: BlockCx, hold: boolean?): boolean
 	b.cache = shared
 	b.held = storedId(shared)
 	State.replace(b.s, prs, now, shared.refreshedAt)
-	local replayed = replayEdits(b)
+	local replayed = replayEdits(b, true)
 	reconcileFlight(b, cx)
 	-- The redraw may have closed the block: nothing is stored or counted after that.
 	if b.closed then return false end

@@ -3642,6 +3642,41 @@ local function replayedEdits()
 		end
 		assert(b.cache.counts.needFixes == count, "and so do the Needs fixes")
 	end)
+
+	-- An edit retained after a failed save is dropped for good once an adoption sees the PR at another head, so a refresh
+	-- that was out from before and answers on the old head neither replays it nor stores it.
+	for _, act in { "auto", "close" } do
+		withWorld(function(w, Fetch, Block)
+			local what = act .. " retained on H1, adopted H2, then the older refresh"
+			local b = board(w, Fetch, Block)
+			local answer: any = nil
+			b.github.refresh = function(_, done) answer = done end
+			Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+			assert(answer ~= nil and b.flights.refresh, what .. ": the refresh is out")
+			local run = if act == "auto" then auto(w, Block, b) else closeBatch(w, Block, b)
+			local failed = false
+			w.failWhen = function(key: string): boolean
+				if key ~= "hub.cache" or failed then return false end
+				failed = true
+				return true
+			end
+			run.done(nil, nil)
+			w.failWhen = nil
+			assert(failed and #b.replays == 1, what .. ": the save failed and the edit is retained")
+
+			theirs(w, function(cached: any) cached.headOid = "moved-head" end)
+			Block.event(b, { ev = "action", act = "hub-focused", value = "" } :: any, w.cx)
+			assert(State.prOf(b.s, KEY).headOid == "moved-head" and #b.replays == 0, what .. ": the adoption drops the H1 edit")
+			assert(State.prOf(b.s, KEY).pending == nil and holds(b, KEY), what .. ": and does not apply it to H2")
+
+			answer(freshAnswer(), nil)
+			assert(#b.replays == 0, what .. ": the older answer retains nothing")
+			assert(State.prOf(b.s, KEY) == nil or State.prOf(b.s, KEY).pending == nil, what .. ": and replays nothing onto the board")
+			local there = stored(w.kv["hub.cache"])
+			assert(there == nil or there.pending == nil, what .. ": nor into the store")
+			assert(holds(b, KEY) == (stored(b.cache) ~= nil), what .. ": the board and the cache agree")
+		end)
+	end
 end
 
 return function()
