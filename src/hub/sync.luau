@@ -27,6 +27,7 @@ export type Local = { added: Added, tandem: { [string]: boolean } }
 export type MergeRecord = {
 	schema: number, user: MergeMethod?, declared: MergeMethod?, learned: MergeMethod?,
 	learnedAnswered: boolean, checkedAt: string?,
+	viewerDefault: string?, -- "squash", "merge" or "rebase": viewerDefaultMergeMethod when detection ran
 }
 export type Opened = { repo: string, number: number, title: string, author: string, at: string } -- hub.recent, newest first, at most RECENT_CAP
 
@@ -75,6 +76,15 @@ local function isArray(value: any): boolean
 	return n == #value
 end
 
+-- A plain copy of `value`, built key by key. kv tables carry a protected metatable that `table.clone` refuses,
+-- so nothing read from kv is handed on as it is.
+local function plain(value: any): any
+	if type(value) ~= "table" then return value end
+	local out: { [any]: any } = {}
+	for k, v in value do out[k] = plain(v) end
+	return out
+end
+
 -- The kv value as a Cache, or nil for anything malformed or not schema 1. Never throws.
 function M.load(raw: any): Cache?
 	if type(raw) ~= "table" or raw.schema ~= 1 then return nil end
@@ -87,7 +97,7 @@ function M.load(raw: any): Cache?
 	for _, pr in raw.prs do
 		if not validPr(pr) then return nil end
 	end
-	return raw :: any
+	return plain(raw)
 end
 
 -- The value for kv: `cache` with the oldest `lastActivityAt` dropped first until `size(value) <= capBytes`.
@@ -146,7 +156,8 @@ function M.merge(fresh: Refresh, previous: Cache?, localFacts: Local, now: numbe
 		pr.tandem = localFacts.tandem[pr.key] == true
 		pr.addedByMe = localFacts.added[pr.key] ~= nil
 		local old = before[pr.key]
-		if pr.pending == nil and old and old.pending and old.headOid == pr.headOid then pr.pending = old.pending end
+		local removed = pr.mergeFailure ~= nil and pr.mergeFailure.kind == "queue" -- the queue dropped it: nothing is in flight
+		if pr.pending == nil and old and old.pending and old.headOid == pr.headOid and not removed then pr.pending = old.pending end
 		table.insert(prs, pr)
 	end
 	local toReview, needFixes = countsOf(prs, now)
@@ -179,6 +190,7 @@ function M.loadMerge(raw: any): MergeRecord?
 	return {
 		schema = 1, user = validMethod(raw.user), declared = validMethod(raw.declared), learned = validMethod(raw.learned),
 		learnedAnswered = raw.learnedAnswered == true, checkedAt = if isString(raw.checkedAt) then raw.checkedAt else nil,
+		viewerDefault = if raw.viewerDefault == "squash" or raw.viewerDefault == "merge" or raw.viewerDefault == "rebase" then raw.viewerDefault else nil,
 	}
 end
 

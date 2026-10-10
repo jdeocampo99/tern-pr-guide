@@ -204,15 +204,29 @@ Anywhere in Tern: `⌥⌘R` opens the PR hub and `⌥⇧⌘R` opens it with AI g
 | `I` | show or hide Inactive | `⇧⏎` | open with the AI guide started |
 | `R` | show or hide Recently opened (Review requests) | `⇧A` | summarize feedback | `S` | sort |
 | | | `C` | copy link | `⇧M` | agent model |
-| | | `M` | merge (asks first: `⌘⏎` confirms, `Esc` cancels) | `N` | add a pull request by link |
+| | | `M` | merge (a GitHub merge asks first: `⌘⏎` confirms, `Esc` cancels), or cancel a merge in flight | `N` | add a pull request by link |
 | | | | | `⌘⏎` | confirm a question |
 | | | | | `Esc` | clear, cancel or close |
 | | | `U` | update branch (Ready cards that are behind main) | `?` | all shortcuts |
-| | | `,` | merge method | `⌘R` | refresh (the sample board steps through its recorded refreshes) |
+| | | `,` | merge method (also the `▾` on Merge) | `⌘R` | refresh (the sample board steps through its recorded refreshes) |
 | | | `X` | remove from Review requests (pull requests you added) | | |
 
-**Merge** uses the repository's merge method (squash and merge until the hub detects another) and
-shows GitHub's reason when it refuses. **Copy link** copies the title and link as plain text.
+**Merge** uses the repository's merge method and shows GitHub's reason when it refuses. Each repository
+has one method: squash and merge, create a merge commit, rebase and merge, merge when ready (GitHub's
+merge queue), comment a command (`/merge`, `/aviator merge`), or add a label. The method comes from
+your choice (`,` or the `▾` on Merge), else what the repository declares (`.aviator/config.yml`, a
+merge queue), else a habit seen in its last 8 merged pull requests (a bot merged after a person
+commented `/merge`), else your GitHub default. The hub asks once before using a learned command, and `Esc` declines it for good. A comment,
+label or queue method merges at once with no question; the card then reads "Commented /merge ·
+waiting for the merge" or "Queued in Aviator", and `M` cancels it (the method's cancel comment, removing
+the label, or turning off auto-merge). A comment method with no cancel can't be cancelled. In the
+chooser, "Comment a command" and "Add a label" ask for text; for a comment, add `| /cancel` to name its
+cancel comment. The hub never uses GitHub's merge on a repository that merges by comment, label or queue.
+
+A merge that fails (removed from the merge queue, an Aviator or bot reply, or a check that failed after
+the merge was asked for) moves the pull request to Needs fixes as **Merge failed**, first in line, with
+the reason on the card. A new commit on the branch, or asking for the merge again, clears it.
+**Copy link** copies the title and link as plain text.
 
 **Add a pull request by link:** `N` (from either tab) opens the field at the top of To review.
 Paste a `github.com/owner/repo/pull/123` link or type `owner/repo#123`. `⏎` adds it to Review

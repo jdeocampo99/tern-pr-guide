@@ -59,7 +59,7 @@ local function splitButton(card: State.Card, main: State.CardAction): Node
 	if card.selected and #card.more > 0 then
 		table.insert(parts, el("span", { class = "gp-sb-more", key = "more", actions = { click = "hub-actions=" .. key } }, { Ui.icon("chev") }))
 	end
-	return el("span", { class = "gp-sb" .. (if card.selected then " gp-sb-on" else "") .. (if #parts > 1 then " gp-sb-split" else ""), key = "sb" }, parts)
+	return el("span", { class = "gp-sb" .. (if card.selected then " gp-sb-on" else "") .. (if main.act == "card-cancel" then " gp-sb-neutral" else "") .. (if #parts > 1 then " gp-sb-split" else ""), key = "sb" }, parts)
 end
 
 -- The inline question that takes the split button's place: the question on the left of the line, Confirm
@@ -121,6 +121,7 @@ function M.view(card: State.Card, now: number): Node
 	end
 	local summary = card.summary
 	if summary then table.insert(body, span("gp-hc-note", summary.verdict)) end
+	if card.note then table.insert(body, span("gp-hc-note", card.note)) end
 	table.insert(body, el("div", { class = "gp-hc-meta", key = "meta" }, meta))
 	table.insert(kids, el("div", { class = "gp-hc-body", key = "body" }, body))
 

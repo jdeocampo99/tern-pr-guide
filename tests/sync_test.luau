@@ -263,7 +263,42 @@ local function testSchedule()
 	for _, gap in gaps(busy) do assert(gap >= Sync.DEBOUNCE) end
 end
 
+-- Tern's kv hands back tables with a protected metatable, nested too: load must return plain copies that save can clone.
+local function locked(value: any): any
+	if type(value) ~= "table" then return value end
+	local out = {}
+	for k, v in value do out[k] = locked(v) end
+	return setmetatable(out, { __metatable = "locked" })
+end
+
+local function testProtectedKv()
+	local pr = table.clone(Cases.prs[1])
+	pr.pending = { method = "label", at = "2026-10-09T10:00:00Z" }
+	local raw = locked({
+		schema = 1, refreshedAt = Cases.asOfIso, viewer = "jubbydev", prs = { pr },
+		counts = { toReview = 0, needFixes = 0 },
+	})
+	assert(not pcall(table.clone, raw), "the fixture really is protected")
+	local cache = Sync.load(raw) :: Sync.Cache
+	assert(cache ~= nil and getmetatable(cache) == nil and getmetatable(cache.prs) == nil and getmetatable(cache.prs[1].reviews) == nil)
+	assert(cache.prs[1].pending ~= nil and cache.prs[1].pending.method == "label")
+	local saved = Sync.save(cache, 1e9, function() return 0 end)
+	assert(saved.prs[1].key == pr.key)
+
+	local record = Sync.loadMerge(locked({
+		schema = 1, user = { kind = "label", label = "hub-smoke-merge" }, declared = { kind = "comment", command = "/m", cancel = "/c" },
+		learnedAnswered = true, checkedAt = "x", viewerDefault = "rebase",
+	})) :: Sync.MergeRecord
+	assert(getmetatable(record) == nil and getmetatable(record.user) == nil)
+	local copy = table.clone(record)
+	assert(copy.user ~= nil and (copy.user :: any).label == "hub-smoke-merge" and record.viewerDefault == "rebase")
+	local list = Sync.openedList(locked({ { repo = "a/b", number = 1, title = "t", author = "x", at = "z" } }))
+	assert(#list == 1 and getmetatable(list[1]) == nil)
+	assert(#Sync.remember(list, { repo = "a/c", number = 2, title = "", author = "", at = "" }) == 2)
+end
+
 return function()
+	testProtectedKv()
 	testRefreshes()
 	testDiffDetails()
 	testLoadSave()

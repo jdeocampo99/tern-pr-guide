@@ -372,6 +372,17 @@ function M.nextUp(prs: { HubPR }, now: number, after: string?): NextUp?
 	return { item = list[index], index = index, total = #list }
 end
 
--- flake (#13) and resolveMergeMethod (#10) arrive with their issues; their types are declared above.
+-- How a repo merges: the viewer's choice, then what the repo declares, then a habit learned from its last
+-- merges (asked about once), then the viewer's GitHub default.
+function M.resolveMergeMethod(evidence: MergeEvidence): MergeResolution
+	if evidence.user then return { method = evidence.user, source = "user", ask = false } end
+	if evidence.declared then return { method = evidence.declared, source = "declared", ask = false } end
+	if evidence.learned and not evidence.learnedAnswered then
+		return { method = evidence.learned, source = "learned", ask = true }
+	end
+	return { method = { kind = evidence.viewerDefault } :: MergeMethod, source = "viewer", ask = false }
+end
+
+-- flake (#13) arrives with its issue; its types are declared above.
 
 return M

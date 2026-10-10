@@ -39,6 +39,8 @@ export type Block = {
 	closed: boolean, -- a render failed: the window is gone, so no timer starts anything
 	refetch: boolean, -- a refresh was asked for while one was running: run another when it ends
 	show: Model.PRRef?, -- a pull request just added by link: select it when the refresh brings it
+	records: { [string]: Sync.MergeRecord }, -- each repo's hub.merge.* record, read once
+	detecting: { [string]: boolean }, -- repos whose merge method was asked for this session (once each, success or not)
 	step: number, -- fixture only: how many `refreshes` entries ⌘R has applied
 }
 
@@ -160,6 +162,8 @@ local function keepAgentChoice(b: Block)
 	end
 end
 
+local chooseMergeRow: (b: Block, cx: BlockCx, index: number) -> ()
+
 -- Chooses the highlighted row: a card's other action runs, a model is remembered.
 local function pickRow(b: Block, cx: BlockCx, index: number, ACTIONS: { [string]: Handler })
 	local s = b.s
@@ -171,6 +175,7 @@ local function pickRow(b: Block, cx: BlockCx, index: number, ACTIONS: { [string]
 		if handler and card then handler(b, cx, card.pr.key) end
 		return
 	end
+	if s.menu == "merge" then return chooseMergeRow(b, cx, index) end
 	local menu = s.menu
 	State.menuPick(s, index)
 	if menu == "agent" then keepAgentChoice(b) end
@@ -391,6 +396,87 @@ local function showAdded(b: Block, cx: BlockCx)
 	cx:toast("error", "Couldn't add #" .. ref.number .. ": GitHub has no pull request " .. ref.repo .. "#" .. ref.number)
 end
 
+-- Merge methods: hub.merge.<owner>/<repo> -----------------------------------------------------------------
+
+local KV_MERGE = "hub.merge."
+
+local function isoNow(): string
+	return os.date("!%Y-%m-%dT%H:%M:%SZ", os.time()) :: string
+end
+
+-- The repo's saved record, read from kv once. A fixture board keeps its records in memory only.
+local function readRecord(b: Block, repo: string): Sync.MergeRecord?
+	local known = b.records[repo]
+	if known or b.fixture then return known end
+	local record = Sync.loadMerge(kvGet(KV_MERGE .. repo))
+	b.records[repo] = record
+	return record
+end
+
+-- Resolves the repo's method from its record (user, declared, learned, GitHub default) into the state.
+local function resolveRepo(b: Block, repo: string)
+	local record = readRecord(b, repo)
+	if not record then return end
+	local default: "squash" | "merge" | "rebase" = "squash"
+	if record.viewerDefault == "merge" or record.viewerDefault == "rebase" then default = record.viewerDefault end
+	State.setMerge(b.s, repo, Model.resolveMergeMethod(Sync.mergeEvidence(record, default)))
+end
+
+-- Saves the record (a fixture board keeps it in memory) and resolves the repo again. Returns why it failed.
+local function saveRecord(b: Block, repo: string, record: Sync.MergeRecord): string?
+	b.records[repo] = record
+	local why: string? = nil
+	if not b.fixture then
+		local ok, err = pcall(tern.kv.set, KV_MERGE .. repo, record)
+		if not ok then why = tostring(err) end
+	end
+	resolveRepo(b, repo)
+	return why
+end
+
+local function recordOf(b: Block, repo: string): Sync.MergeRecord
+	return readRecord(b, repo) or { schema = 1, learnedAnswered = false }
+end
+
+-- Resolves every repo with a saved record, so the cards know how their repo merges.
+local function loadMerges(b: Block)
+	local seen: { [string]: boolean } = {}
+	for _, pr in b.s.prs do
+		if pr.role == "mine" and not seen[pr.repo] then
+			seen[pr.repo] = true
+			resolveRepo(b, pr.repo)
+		end
+	end
+end
+
+-- Asks GitHub how a repo merges, once per repo: what it declares and the habit of its last 8 merges (1 point).
+local function detectRepo(b: Block, cx: BlockCx, repo: string)
+	if b.fixture or b.closed or b.detecting[repo] or readRecord(b, repo) then return end
+	b.detecting[repo] = true
+	b.github.detect(repo, function(found, err)
+		if b.closed then return end
+		if found then
+			local record = recordOf(b, repo)
+			record.declared, record.learned, record.viewerDefault, record.checkedAt = found.declared, found.learned, found.viewerDefault, isoNow()
+			local why = saveRecord(b, repo, record)
+			if why then cx:toast("error", "Couldn't save how " .. repo .. " merges: " .. why) end
+		else
+			cx:toast("error", "Couldn't check how " .. repo .. " merges: " .. reasonOf(if err then err.message else "no answer"))
+		end
+		draw(b, cx)
+	end)
+end
+
+-- After a refresh: every repo with a Ready card that has no record yet is checked.
+local function detectMerges(b: Block, cx: BlockCx)
+	if b.fixture then return end
+	for _, entry in b.s.board.columns do
+		if entry.column == "ready" then
+			for _, card in entry.cards do detectRepo(b, cx, card.pr.repo) end
+		end
+	end
+end
+
 startRefresh = function(b: Block, cx: BlockCx)
 	b.flights.refresh = true
 	b.s.loading = true
@@ -416,6 +502,8 @@ startRefresh = function(b: Block, cx: BlockCx)
 			local why = persist(b)
 			if why then b.s.error = { operation = KV_CACHE, message = "the cache couldn't be saved: " .. why } end
 			showAdded(b, cx)
+			loadMerges(b)
+			detectMerges(b, cx)
 		end
 		if b.refetch then
 			b.refetch = false
@@ -545,7 +633,10 @@ end
 ACTIONS["hub-actions"] = function(b, cx, key)
 	local s = b.s
 	State.select(s, key)
-	if s.menu == "actions" then return closeMenu(b) end
+	if s.menu == "actions" or s.menu == "merge" then return closeMenu(b) end
+	-- A Ready card's only alternative is the merge method, so its ▾ opens the chooser itself.
+	local card = State.card(s, key)
+	if card and #card.more == 1 and card.more[1].act == "card-method" then return State.openMenu(s, "merge") end
 	State.openMenu(s, "actions")
 end
 ACTIONS["hub-menu-move"] = function(b, cx, delta)
@@ -587,7 +678,11 @@ end
 ACTIONS["card-agent"] = notYet("Fix with agent")
 ACTIONS["card-handoff"] = notYet("Hand off to Tandem")
 ACTIONS["card-summarize"] = notYet("Summarize")
-ACTIONS["card-method"] = notYet("Merge method")
+ACTIONS["card-method"] = function(b, cx, key)
+	if not State.card(b.s, key) then return end
+	State.select(b.s, key)
+	State.openMenu(b.s, "merge")
+end
 
 -- A refresh now: after an add, a remove, a merge or a branch update. One running already runs again when it ends.
 local function refetch(b: Block, cx: BlockCx)
@@ -674,37 +769,169 @@ ACTIONS["card-copy"] = function(b, cx, key)
 	cx:toast("success", "Copied link")
 end
 
--- Merge (M) asks first; ⌘⏎ merges with the repo's method, Esc cancels.
-ACTIONS["card-merge"] = function(b, cx, key)
-	State.askMerge(b.s, key)
+-- Merging --------------------------------------------------------------------------------------------------
+
+local MERGE_BUSY = { comment = "Commenting…", label = "Adding label…", queue = "Queuing…" }
+
+-- The repo's resolved method, squash until its record is known.
+local function methodOf(b: Block, pr: Model.HubPR): Model.MergeMethod
+	local resolved = b.s.merges[pr.repo]
+	return if resolved then resolved.method else { kind = "squash" }
 end
-ACTIONS["hub-confirm-cancel"] = function(b)
-	State.cancelConfirm(b.s)
+
+local function toastDone(cx: BlockCx, pr: Model.HubPR, method: Model.MergeMethod)
+	if method.kind == "comment" then
+		cx:toast("success", "Commented " .. method.command .. " on #" .. pr.number, pr.title)
+	elseif method.kind == "label" then
+		cx:toast("success", "Added the " .. method.label .. " label to #" .. pr.number, pr.title)
+	elseif method.kind == "queue" then
+		cx:toast("success", "Added #" .. pr.number .. " to the merge queue", pr.title)
+	else
+		cx:toast("success", "Merged #" .. pr.number, pr.title)
+	end
 end
-ACTIONS["hub-confirm"] = function(b, cx)
+
+-- Merges with the repo's method. GitHub's merge happens now and the PR leaves the board; a queue, comment or
+-- label hands the merge to the repo's tool, so the card shows it pending until a refresh brings the result.
+local function runMerge(b: Block, cx: BlockCx, pr: Model.HubPR)
 	local s = b.s
-	local confirm = s.confirm
-	local card = if confirm and confirm.kind == "merge" then State.card(s, confirm.keys[1]) else nil
-	State.cancelConfirm(s)
-	if not card then return end
-	local pr = card.pr
 	if b.fixture then return cx:toast("info", "The sample board doesn't merge", pr.key) end
-	local method = { kind = State.mergeMethodFor(s, pr) } :: any
-	State.setBusy(s, pr.key, "Merging…")
+	local method = methodOf(b, pr)
+	State.setBusy(s, pr.key, MERGE_BUSY[method.kind] or "Merging…")
 	b.github.run(Github.commands.merge(pr, method), function(_, err)
 		if b.closed then return end
 		if err then
 			State.setBusy(s, pr.key, nil)
 			cx:toast("error", "Couldn't merge #" .. pr.number .. ": " .. reasonOf(err.message), pr.repo)
-		else
+		elseif method.kind == "squash" or method.kind == "merge" or method.kind == "rebase" then
 			s.acted[pr.key] = true
 			State.dropPr(s, pr.key)
 			keepCache(b)
-			cx:toast("success", "Merged #" .. pr.number, pr.title)
+			toastDone(cx, pr, method)
+			refetchSoon(b, cx)
+		else
+			State.setPending(s, pr.key, { method = method.kind, at = isoNow() })
+			State.setBusy(s, pr.key, nil)
+			keepCache(b)
+			toastDone(cx, pr, method)
 			refetchSoon(b, cx)
 		end
 		draw(b, cx)
 	end)
+end
+
+-- Merge (M): a GitHub method asks first (⌘⏎ merges, Esc cancels); a comment, label or queue runs at once, since
+-- it can be cancelled; a comment learned from the repo's history asks once.
+ACTIONS["card-merge"] = function(b, cx, key)
+	local s = b.s
+	local card = State.card(s, key)
+	if not card or s.busy[key] then return end
+	local pr = card.pr
+	if not b.fixture and not s.merges[pr.repo] then
+		-- Not known yet how this repo merges: GitHub's merge is never the guess.
+		State.select(s, key)
+		detectRepo(b, cx, pr.repo)
+		return cx:toast("info", "Checking how " .. pr.repo .. " merges…", "Try again in a moment")
+	end
+	if State.mergeStep(s, pr) == "run" then
+		State.select(s, key)
+		return runMerge(b, cx, pr)
+	end
+	State.askMerge(s, key)
+end
+
+-- Cancel merge (M on a card with a merge in flight): the method's own cancel.
+ACTIONS["card-cancel"] = function(b, cx, key)
+	local s = b.s
+	local card = State.card(s, key)
+	local pending = if card then card.pr.pending else nil
+	if not card or not pending or s.busy[key] then return end
+	local pr = card.pr
+	if b.fixture then return cx:toast("info", "The sample board doesn't cancel merges", pr.key) end
+	local method = methodOf(b, pr)
+	if pending.method == "queue" then method = { kind = "queue" } end
+	local ok, command = pcall(Github.commands.cancelMerge, pr, method)
+	if not ok or method.kind ~= pending.method then
+		return cx:toast("error", "Couldn't cancel the merge of #" .. pr.number .. ": " .. pr.repo .. " has no way to cancel it", pr.title)
+	end
+	State.setBusy(s, key, "Cancelling…")
+	b.github.run(command :: Github.Command, function(_, err)
+		if b.closed then return end
+		State.setBusy(s, key, nil)
+		if err then
+			cx:toast("error", "Couldn't cancel the merge of #" .. pr.number .. ": " .. reasonOf(err.message), pr.repo)
+		else
+			State.setPending(s, key, nil)
+			keepCache(b)
+			if method.kind == "comment" then
+				cx:toast("success", "Commented " .. (method.cancel or "") .. " on #" .. pr.number, pr.title)
+			elseif method.kind == "label" then
+				cx:toast("success", "Removed the " .. method.label .. " label from #" .. pr.number, pr.title)
+			else
+				cx:toast("success", "Removed #" .. pr.number .. " from the merge queue", pr.title)
+			end
+			refetchSoon(b, cx)
+		end
+		draw(b, cx)
+	end)
+end
+
+-- A comment, label or queue method chosen or saved in the merge menu becomes the repo's setting.
+local function setUserMethod(b: Block, cx: BlockCx, repo: string, method: Model.MergeMethod)
+	local record = recordOf(b, repo)
+	record.user = method
+	local why = saveRecord(b, repo, record)
+	if why then cx:toast("error", "Couldn't save how " .. repo .. " merges: " .. why) end
+end
+
+chooseMergeRow = function(b, cx, index)
+	local s = b.s
+	local kind = s.menu == "merge" and State.MERGE_KINDS[index] or nil
+	local repo = State.mergeRepo(s)
+	if not kind or not repo then return end
+	if kind.id == "comment" or kind.id == "label" then
+		s.menuCursor = index
+		return State.beginMethodEdit(s, kind.id)
+	end
+	setUserMethod(b, cx, repo, { kind = kind.id } :: any)
+	State.closeMenu(s)
+end
+
+ACTIONS["hub-method-save"] = function(b, cx)
+	local s = b.s
+	local edit = s.methodEdit
+	local method = State.methodOfEdit(s)
+	if not edit or not method then return end
+	setUserMethod(b, cx, edit.repo, method)
+	State.closeMenu(s)
+end
+ACTIONS["hub-method-cancel"] = function(b)
+	State.cancelMethodEdit(b.s)
+end
+
+-- Esc on the learned-method question declines it for good: the repo is not asked again.
+ACTIONS["hub-confirm-cancel"] = function(b, cx)
+	local s = b.s
+	local confirm = s.confirm
+	local card = if confirm and confirm.kind == "learned" then State.card(s, confirm.keys[1]) else nil
+	State.cancelConfirm(s)
+	if not card then return end
+	local record = recordOf(b, card.pr.repo)
+	record.learnedAnswered = true
+	saveRecord(b, card.pr.repo, record)
+	cx:toast("info", "Won't suggest that again for " .. card.pr.repo)
+end
+ACTIONS["hub-confirm"] = function(b, cx)
+	local s = b.s
+	local confirm = s.confirm
+	local card = if confirm and (confirm.kind == "merge" or confirm.kind == "learned") then State.card(s, confirm.keys[1]) else nil
+	local learned = confirm ~= nil and confirm.kind == "learned"
+	State.cancelConfirm(s)
+	if not card then return end
+	local resolved = s.merges[card.pr.repo]
+	-- Saying yes to the suggestion makes it the viewer's own setting.
+	if learned and resolved then setUserMethod(b, cx, card.pr.repo, resolved.method) end
+	runMerge(b, cx, card.pr)
 end
 
 -- Update branch (U): a Ready card that is behind main. Its checks run again, so the card waits on them.
@@ -859,13 +1086,15 @@ local block: BlockDef<Block> = {
 				probedAt = now, probeChanged = false, focusedAt = if live then now else nil, checksAt = nil,
 				refreshTried = nil, lastModified = if cache then cache.lastModified else nil,
 			},
-			closed = false, refetch = false, show = nil, step = 0,
+			closed = false, refetch = false, show = nil, step = 0, records = {}, detecting = {},
 		}
 		if fixture then
 			local sample = table.clone(SAMPLE_AGENT)
 			sample.models = table.clone(SAMPLE_AGENT.models)
 			s.agent = sample
 		elseif live then
+			-- How each repo merges is known from the first frame, before any refresh.
+			loadMerges(b)
 			loadAgent(b, cx)
 			rearm(b, cx)
 		end
@@ -905,6 +1134,10 @@ local block: BlockDef<Block> = {
 		end
 		if s.mode == "link" then
 			Fields.key(s.link, key)
+			return true
+		end
+		if s.mode == "menu" and s.methodEdit then
+			Fields.key(s.methodEdit.field, key)
 			return true
 		end
 		-- Menus and the key panel swallow the keys they don't use.

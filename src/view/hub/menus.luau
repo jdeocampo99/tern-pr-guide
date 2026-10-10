@@ -1,6 +1,7 @@
 --!strict
 -- The hub's menus (repositories, sort, agent model, a card's other actions) as Tern overlays under their
 -- buttons. A menu opened by a key draws without animation: Tern's overlay pops only for the mouse.
+local Fields = require("../../text-field")
 local Paths = require("./paths")
 local State = require("../../hub/state")
 local Ui = require("../ui")
@@ -14,6 +15,7 @@ local TITLES: { [string]: string } = {
 	sort = "Sort by",
 	agent = "Agent model",
 	actions = "More actions",
+	merge = "Merge method",
 }
 
 local function anchorOf(s: State.State): string
@@ -61,6 +63,24 @@ local function efforts(s: State.State): Node?
 	})
 end
 
+-- The merge menu's foot: where the setting came from, or the field a comment or label method asks for.
+local function mergeFoot(s: State.State): Node?
+	if s.menu ~= "merge" then return nil end
+	local edit = s.methodEdit
+	if edit then
+		local what = if edit.kind == "comment" then "Command" else "Label"
+		local placeholder = if edit.kind == "comment" then "/merge | /cancel" else "ready-to-merge"
+		return el("div", { class = "gp-md-foot gp-hm-edit", key = "edit" }, {
+			span("gp-md-label", what),
+			el("div", { class = "gp-sr-box gp-hm-field", key = "box" }, { Fields.node(edit.field, "field", placeholder) }),
+			Ui.keys("⏎"),
+		})
+	end
+	local source = State.mergeSource(s)
+	if source == nil then return nil end
+	return el("div", { class = "gp-md-foot", key = "source" }, { span("gp-md-label", source) })
+end
+
 function M.view(s: State.State): Node
 	local rows: { Node } = {}
 	for index, row in State.menuRows(s) do table.insert(rows, rowNode(s, row, index)) end
@@ -72,7 +92,7 @@ function M.view(s: State.State): Node
 		span("gp-hm-head", TITLES[s.menu :: string]),
 		el("div", { class = "gp-md-list gp-hm-list", key = "list" }, rows),
 	}
-	local foot = efforts(s)
+	local foot = efforts(s) or mergeFoot(s)
 	if foot then table.insert(kids, foot) end
 	local body = el("div", { class = "gp-md gp-hm" .. (if s.keyed then "" else " gp-soft"), key = "body" }, kids)
 	return { k = "overlay", p = { key = "menu", role = "gp.hubmenu", aria = TITLES[s.menu :: string], anchor = { node = anchorOf(s), side = "below" }, size = "md" }, c = { body } } :: any

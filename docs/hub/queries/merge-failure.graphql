@@ -1,0 +1,13 @@
+# After hub-f, only for PRs with a comment or label merge in flight (hub.cache `pending`): the latest comments
+# and the head commit's check contexts, to find a bot's failure reply or a check that failed after the merge was asked for.
+query MergeFailure($ids: [ID!]!) {
+  rateLimit { cost remaining limit resetAt }
+  nodes(ids: $ids) { ... on PullRequest { id headRefOid
+    comments(last: 10) { nodes { createdAt body author { __typename login } } }
+    commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 50) { nodes {
+      __typename
+      ... on CheckRun { name conclusion completedAt }
+      ... on StatusContext { context state createdAt }
+    } } } } } }
+  } }
+}

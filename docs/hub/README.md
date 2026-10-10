@@ -134,11 +134,12 @@ Each repo has one merge setting, stored in kv. It's one of six kinds:
 - **Where the setting comes from (first match wins):**
   1. Set by you.
   2. Declared by the repo: `.aviator/config.yml` means comment `/aviator merge`, and `repository.mergeQueue` means the merge queue.
-  3. **Learned** from the repo's last 8 merged PRs. For example, a bot merged right after a person commented `/…`. Checking costs 1 point. It's shown as a suggestion and asked once.
+  3. **Learned** from the repo's last 8 merged PRs: a bot merged right after a person commented the same `/…` command, in at least 3 of the 8 and more than half of them. Checking costs 1 point (`merge-detect.graphql`, together with the declared config). It's shown as a suggestion and asked once: ⌘⏎ saves it as your own setting and merges, Esc declines it for good (`learnedAnswered`).
   4. `viewerDefaultMergeMethod`.
 - **Detection runs once per repo and is cached.**
 - **The hub never calls GitHub's merge on a repo that merges by comment, label or queue.** Two tools can't own one branch.
-- **Queued merges:** the card shows "Commented /merge · waiting for the merge" or "Queued in Aviator". A queue rejection moves the PR to Needs fixes as **Merge failed**, with the reason from GitHub's `RemovedFromMergeQueueEvent.reason` or Aviator's blocked status. For comment merges, failure is known only from a check failing after the comment, or from the bot's reply.
+- **Queued merges:** the card shows "Commented /merge · waiting for the merge" or "Queued in Aviator". A queue rejection moves the PR to Needs fixes as **Merge failed**, with the reason from GitHub's `RemovedFromMergeQueueEvent.reason` or Aviator's blocked status. For comment merges, failure is known only from a check failing after the comment, or from the bot's reply. That lookup (`merge-failure.graphql`, 1 point for all of them) runs only for PRs whose comment or label merge the hub started and whose head commit has not changed; the lookup reads the latest 10 comments and the head's first 50 check contexts, and counts only what came after the merge was asked for. A merge started outside the hub is not watched.
+- **The chooser** (`,` or the ▾ on Merge) lists the six kinds. "Comment a command" and "Add a label" ask for text in the menu's foot: `/merge`, or `/merge | /cancel` to name the cancel comment.
 
 ### Adding a PR by link
 
@@ -196,10 +197,11 @@ To review has its own field: "Paste a pull request link to review" (`N`, from ei
 | `checks.graphql`: CI state for PRs with running checks | 1 pt for 5 or 42 PRs | 1–1.6 s | Every 30 s while any check is running |
 | REST `/notifications` with `If-Modified-Since` | free (304) | | Every 60 s, as the change probe |
 | Fixes-page details: threads with path/line/body, changes-requested reviews, failing check runs with annotations | 1 pt | | When a Needs fixes PR is opened |
-| Learning a repo's merge habit: last 8 merged PRs with `mergedBy` and comments | 1 pt | | Once per repo |
+| `merge-detect.graphql`: what a repo declares (`.aviator/config.yml`, a merge queue) and its last 8 merged PRs with `mergedBy` and comments. Measured on the smoke repo 2026-10-10 | 1 pt | | Once per repo, for repos with a Ready card; the result is cached in kv |
+| `merge-failure.graphql`: latest comments and head check contexts, via `nodes(ids:)` | 1 pt for any number of PRs (measured for 2) | | After hub-f, only when a comment or label merge is in flight on the same head |
 
 - **Don't** put thread authors inside the search query. Measured at **159 points** per call.
-- **Per refresh:** hub-f 11 + threads 5 + checks 1 = 17 on real data (42 PRs, 17 with unresolved threads, no cache), under the 18-point limit the tests hold. A cost depends on the connections a query selects times the PRs it can return (`first:` on a connection under a search doesn't change it), so an added connection is paid 150 times per hub-f call. Alias-added PRs didn't change the 11.
+- **Per refresh:** hub-f 11 + threads 5 + checks 1 = 17 on real data (18 with a merge failure lookup, which is the limit) (42 PRs, 17 with unresolved threads, no cache), under the 18-point limit the tests hold. A cost depends on the connections a query selects times the PRs it can return (`first:` on a connection under a search doesn't change it), so an added connection is paid 150 times per hub-f call. Alias-added PRs didn't change the 11.
 - **Budget:** about 220 pts/hr while the hub block exists (12 refreshes at the 18-point limit; measured 12 × 17 = 204). Even the 30 s debounce ceiling (about 2,200/hr) fits the 5,000/hr GraphQL budget, which Tandem's pr-watch shares.
 - **Latency is the real cost.** Always render from the kv cache first, then refresh in the background.
 - **Check annotations include noise.** Drop paths under `.github/` and messages like "Process completed with exit code". Measured on Tagalingo-App #1013, the useful one was `src/lib/query-persister.ts:39 Type …`.
@@ -431,7 +433,7 @@ export type RefreshRequest = { added: { PRRef }, previous: { HubPR } }   -- prev
 export type Probe = { changed: boolean, lastModified: string?, pollSeconds: number? }   -- REST /notifications
 export type ChecksUpdate = { byId: { [string]: { headOid: string, checks: Checks } }, rateLimit: RateLimit }
 export type History = { failed: number, total: number }
-export type Detected = { declared: MergeMethod?, learned: MergeMethod?, viewerDefault: "squash" | "merge" | "rebase", checkedAt: string }
+export type Detected = { declared: MergeMethod?, learned: MergeMethod?, viewerDefault: "squash" | "merge" | "rebase", checkedAt: string }   -- `checkedAt` is "" from github (it reads no clock); the block stamps it before saving
 export type Command = { argv: { string }, stdin: string? }
 
 export type Client = {
@@ -450,6 +452,8 @@ function M.client(run: Runner, decode: Decode): Client
 	-- `refresh` reads threads (threads.graphql) only for PRs with an unresolved thread whose `lastActivityAt` differs from `previous`'s.
 
 -- Pure parsers: decoded JSON in, normalized records out. They never throw on a missing field.
+function M.parseDetect(raw: any): Detected?                                  -- merge-detect.graphql
+function M.parseMergeFailure(raw: any, pending: PendingMerge): MergeFailure? -- one node of merge-failure.graphql; only events after `pending.at` count
 function M.parseHub(raw: any): { prs: { HubPR }, viewer: string, rateLimit: RateLimit, truncated: boolean }?
 function M.parseThreads(raw: any): { threads: { [string]: { OpenThread } }, rateLimit: RateLimit }?   -- keyed by node id
 function M.parseChecks(raw: any): ChecksUpdate?
@@ -459,8 +463,8 @@ function M.parseDetails(raw: any, pr: HubPR): FixDetails?
 -- Command builders: exact argv, no network. Merging squash/merge/rebase is `gh pr merge`; queue is `--auto`;
 -- comment is `gh pr comment`; label is `gh pr edit --add-label`.
 M.commands = {
-	merge = function(pr: HubPR, method: MergeMethod): Command end,   -- squash, merge, rebase: `gh pr merge <n> --repo <owner/repo> --squash|--merge|--rebase`; raises for the other kinds (#10)
-	cancelMerge = function(pr: HubPR, method: MergeMethod): Command end,
+	merge = function(pr: HubPR, method: MergeMethod): Command end,   -- squash, merge, rebase: `gh pr merge <n> --repo <owner/repo> --squash|--merge|--rebase`; queue: `--auto`; comment: `gh pr comment <n> --repo <r> --body <command>`; label: `gh pr edit <n> --repo <r> --add-label <label>`
+	cancelMerge = function(pr: HubPR, method: MergeMethod): Command end,   -- queue: `gh pr merge … --disable-auto`; comment: `--body <cancel>`; label: `--remove-label`; raises for a GitHub merge and for a comment with no cancel
 	updateBranch = function(pr: HubPR): Command end,
 	rerun = function(repo: string, runId: number): Command end,            -- gh run rerun <id> --failed
 	requestReview = function(pr: HubPR, login: string): Command end,
@@ -489,7 +493,7 @@ export type Cache = {
 }
 export type Added = { [string]: PRRef }       -- hub.added, by key
 export type Local = { added: Added, tandem: { [string]: boolean } }
-export type MergeRecord = { schema: 1, user: MergeMethod?, declared: MergeMethod?, learned: MergeMethod?, learnedAnswered: boolean, checkedAt: string? }
+export type MergeRecord = { schema: 1, user: MergeMethod?, declared: MergeMethod?, learned: MergeMethod?, learnedAnswered: boolean, checkedAt: string?, viewerDefault: string? }
 export type Opened = { repo: string, number: number, title: string, author: string, at: string }   -- hub.recent, newest first, at most RECENT_CAP
 
 M.RECENT_CAP = 8                      -- picker.luau:62
@@ -611,6 +615,7 @@ export type Card = {
 	main: CardAction?,                -- the split button's action
 	more: { CardAction },             -- behind the attached ▾
 	agent: AgentFixState?, summary: Summary?, merge: MergeResolution?,
+	note: string?,                    -- a merge in flight: "Commented /merge · waiting for the merge", "Queued in Aviator", "In the merge queue"
 	asking: string?,                  -- an inline question ("Squash and merge #412?"): Confirm (⌘⏎) and Cancel (Esc) replace the split button
 	busy: string?,                    -- an action in flight ("Merging…", "Updating…")
 	ring: ("bad" | "good")?,          -- the arrival ring, until it fades
@@ -645,7 +650,8 @@ export type State = {
 	sort: Sort,
 	search: Fields.Field, link: Fields.Field,
 	mode: Mode, menu: MenuId?, menuCursor: number,
-	confirm: { kind: string, keys: { string } }?,
+	confirm: { kind: string, keys: { string } }?,   -- kind "merge" (a GitHub method) or "learned" (the suggested comment command)
+	methodEdit: { repo: string, kind: "comment" | "label", field: Fields.Field }?,   -- the merge menu is asking for a command or a label
 	folded: { [string]: boolean },    -- true: the fold is closed; Inactive and Recently opened start closed
 	recent: { Opened },               -- hub.recent, newest first, set by the block
 	walking: boolean,                 -- Next up is being walked: the banner shows "2 of 11"
@@ -673,6 +679,10 @@ function M.reviewed(fix: AgentFix.Fix, reviewed: { [string]: boolean }): boolean
 
 -- Card actions (#7). All pure; the block runs the effects.
 function M.mergeMethodFor(s: State, pr: HubPR): "squash" | "merge" | "rebase"   -- the repo's resolved method when it is a GitHub one, else squash (viewerDefaultMergeMethod arrives with #10's detection)
+function M.mergeStep(s: State, pr: HubPR): "confirm" | "ask" | "run"   -- M on a card: a GitHub method asks first, a learned command asks once, a chosen or declared comment, label or queue runs at once
+function M.setMerge(s: State, repo: string, resolution: MergeResolution)   -- the block resolves a repo's record into the board
+function M.setPending(s: State, key: string, pending: PendingMerge?)       -- a merge in flight (or cleared)
+function M.beginMethodEdit(s: State, kind: "comment" | "label") / M.cancelMethodEdit(s) / M.methodOfEdit(s): MergeMethod?   -- the merge menu's text field
 function M.askMerge(s: State, key: string): boolean      -- opens the "Squash and merge #n?" question; mode "confirm", `confirm = { kind = "merge", keys = { key } }`
 function M.cancelConfirm(s: State)
 function M.setBusy(s: State, key: string, text: string?)
@@ -778,7 +788,7 @@ The hub has its own `ACTIONS` table, sent by clicks (`event`) and by `Keys.hubAc
 | `hub.recent` | `{ Opened }`, migrated from the picker's `recent` key | 8 entries |
 | `hub.added` | `Sync.Added`: PRs added by link | 50 entries |
 | `hub.clones` | slug (`owner/repo`) → the clone path the viewer chose ("Choose folder…"), for the agent's clone lookup | one per repo |
-| `hub.merge.<owner>/<repo>` | `Sync.MergeRecord` | one per repo |
+| `hub.merge.<owner>/<repo>` | `Sync.MergeRecord`: your choice, what the repo declares, the learned habit, whether you answered the suggestion, `viewerDefault` and when it was checked | one per repo |
 
 Never store raw GraphQL, tokens or diffs. Only `src/hub/block.luau` reads and writes these keys. The guide's `model`, `runSeconds` and the retired `recent` keys stay in `src/fetch.luau`, which deletes `recent` after the migration. AGENTS.md's Boundary and Glue lines are amended in the PRs that add `src/github.luau` and `src/hub/block.luau`, so they name those modules next to `src/fetch.luau` and `src/block.luau`.
 
