@@ -20,7 +20,7 @@ local GROUPS: { Group } = {
 	{ title = "The selected card", keys = {
 		{ "A", "Fix with agent, Stop, Try again, Clone repo, or Summarize" },
 		{ "O", "Choose folder, or open a failed fix's worktree" },
-		{ "⇧A", "Summarize feedback" },
+		{ "⇧A", "Summarize feedback, or Return worktree on a Tandem card with a failed fix" },
 		{ "C", "Copy link" },
 		{ "M", "Merge (⌘⏎ confirms), Merge when ready, or Cancel merge" },
 		{ "Q", "Re-request review from who is waiting on a re-review" },

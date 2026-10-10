@@ -203,7 +203,7 @@ Anywhere in Tern: `⌥⌘R` opens the PR hub and `⌥⇧⌘R` opens it with AI g
 | `T` | switch tab | `A` | fix with agent, Stop, Try again, Clone repo, or summarize | `F` | filter by repository |
 | | | `O` | choose an existing clone folder, or open a failed fix's retained worktree | | |
 | `I` | show or hide Inactive | `⇧⏎` | open with the AI guide started |
-| `R` | show or hide Recently opened (Review requests) | `⇧A` | summarize feedback | `S` | sort |
+| `R` | show or hide Recently opened (Review requests) | `⇧A` | summarize feedback, or Return worktree on a card Tandem watches whose failed fix still holds its worktree | `S` | sort |
 | | | `C` | copy link | `⇧M` | agent model |
 | | | `M` | merge (a GitHub merge asks first: `⌘⏎` confirms, `Esc` cancels), Merge when ready (In review cards), or cancel a merge in flight | `N` | add a pull request by link |
 | | | `Space` | select the card for Merge selected or Close stale (also `⌘`-click or `⇧`-click) | `⇧X` | select every stale pull request that isn't a draft |
