@@ -1480,8 +1480,15 @@ local function mixedAge()
 	local KEY, REMOVED, HANDED = "acme/api#116", "acme/web#303", "acme/web#101"
 	local T2 = Cases.asOf + 120
 	local NEWER = "Retitled by the newer refresh"
+	-- The PR REMOVED was added by link: the stored caches say so, as `hub.added` would have when they were written.
+	local function added(cache: any): any
+		for _, saved in cache.prs do
+			if saved.key == REMOVED then saved.addedByMe = true end
+		end
+		return cache
+	end
 	local function newer(owned: { string }): any
-		local cache = storedCache(owned, T2)
+		local cache = added(storedCache(owned, T2))
 		for _, saved in cache.prs do
 			if saved.key == API114 then saved.title = NEWER end
 		end
@@ -1498,7 +1505,7 @@ local function mixedAge()
 	local function schedule(name: string, prepare: ((w: any, b: any, cxB: any) -> any)?, act: (w: any, b: any, cxB: any, held: any) -> ())
 		withWorld(function(w, Fetch, Block)
 			w.shared = true
-			w.kv["hub.cache"] = storedCache({ WEB, API114 }, Cases.asOf)
+			w.kv["hub.cache"] = added(storedCache({ WEB, API114 }, Cases.asOf))
 			local a = live(w, Block, true)
 			local cxA = w.cx
 			local b = live(w, Block, true)
@@ -1563,6 +1570,10 @@ local function mixedAge()
 	schedule("removal", nil, function(w, b, cxB)
 		b.github = quietGithub(function() end)
 		assert(entry(b.cache, REMOVED) and entry(w.kv["hub.cache"], REMOVED))
+		-- Remove acts only on a visible card added by link, which the Review requests tab shows: without both, it is a no-op.
+		State.setTab(b.s, "review")
+		local row = State.card(b.s, REMOVED)
+		assert(row and row.pr.addedByMe and entry(w.kv["hub.cache"], REMOVED).addedByMe == true, "the removal has something to remove")
 		w.Block.event(b, { ev = "action", act = "card-remove", value = REMOVED } :: any, cxB)
 		local kept = entry(w.kv["hub.cache"], REMOVED)
 		assert(kept == nil or kept.addedByMe == false, "the removal was stored")
