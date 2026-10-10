@@ -200,7 +200,7 @@ Anywhere in Tern: `⌥⌘R` opens the PR hub and `⌥⇧⌘R` opens it with AI g
 |---|---|---|---|---|---|
 | `h` `j` `k` `l` / arrows | move between cards | `⏎` / double-click | open (Needs fixes opens the fixes page; Fix ready opens Review fix) | `/` | search |
 | `.` | next pull request that needs you, across both tabs | | | | |
-| `T` | switch tab | `A` | fix with agent, Stop, Try again, Clone repo, or summarize | `F` | filter by repository |
+| `T` | switch tab | `A` | fix with agent, Hand off to Tandem, Stop, Try again, Clone repo, or summarize | `F` | filter by repository |
 | | | `O` | choose an existing clone folder, or open a failed fix's retained worktree | | |
 | `I` | show or hide Inactive | `⇧⏎` | open with the AI guide started |
 | `R` | show or hide Recently opened (Review requests) | `⇧A` | summarize feedback, or Return worktree on a card Tandem watches whose failed fix still holds its worktree | `S` | sort |
