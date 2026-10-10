@@ -130,6 +130,7 @@ local function hubBoardKey(s: HubState.State, key: Key): Action?
 	local name = key.name
 	if isQuestionMark(key) then return act("hub-help") end
 	if name == "/" or key.text == "/" then return act("hub-search") end
+	if (key.meta or key.ctrl) and name == "r" then return act("hub-refresh") end
 	if key.ctrl or key.meta or key.alt then return nil end
 	if name == "escape" then return act("hub-escape") end
 	if name == "enter" then return act(if key.shift then "hub-open-generate" else "hub-open") end

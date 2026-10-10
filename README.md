@@ -207,7 +207,7 @@ Anywhere in Tern: `⌥⌘R` opens the PR hub and `⌥⇧⌘R` opens it with AI g
 | | | | | `⌘⏎` | confirm a question |
 | | | | | `Esc` | clear, cancel or close |
 | | | `U` | update branch (Ready cards that are behind main) | `?` | all shortcuts |
-| | | `,` | merge method | | |
+| | | `,` | merge method | `⌘R` | refresh (the sample board steps through its recorded refreshes) |
 | | | `X` | remove from Review requests (pull requests you added) | | |
 
 **Merge** uses the repository's merge method (squash and merge until the hub detects another) and

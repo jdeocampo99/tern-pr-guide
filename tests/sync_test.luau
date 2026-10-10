@@ -37,6 +37,10 @@ local function testRefreshes()
 		assert(table.concat(changes.good, ",") == table.concat(case.good, ","), case.name .. ": good")
 		local text = if changes.toast then changes.toast.text else nil
 		assert(text == case.toast, case.name .. ": toast " .. tostring(text))
+		local alerts = Sync.alerts(changes)
+		assert(table.concat(alerts.rings, ",") == table.concat(case.rings, ","), case.name .. ": alert rings")
+		assert(table.concat(alerts.good, ",") == table.concat(case.good, ","), case.name .. ": alert good")
+		assert((if alerts.toast then alerts.toast.text else nil) == case.toast, case.name .. ": alert toast")
 	end
 end
 

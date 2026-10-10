@@ -86,7 +86,7 @@ return function()
 	assert(Links.statusText(2, 10) == "PRs · 2 to review · 10 need fixes")
 	assert(Links.statusText(0, 3) == "PRs · 3 need fixes" and Links.statusText(4, 0) == "PRs · 4 to review" and Links.statusText(0, 0) == "PRs")
 	assert(Links.flashing(1000, 1009) and not Links.flashing(1000, 1010) and not Links.flashing(nil, 1000))
-	assert(Links.watchDelay(nil, 1000) == 15 and Links.watchDelay(1000, 1004) == 6 and Links.watchDelay(1000, 1020) == 15 and Links.watchDelay(1000, 1000) == 10)
+	assert(Links.watchDelay(nil, 1000) == 2 and Links.watchDelay(1000, 1004) == 2 and Links.watchDelay(1000, 1009) == 1 and Links.watchDelay(1000, 1020) == 2 and Links.watchDelay(1000, 1000) == 2)
 	local a: Links.Seen = { refreshedAt = "t1", toReview = 2, needFixes = 1, flashing = false }
 	assert(not Links.statusChanged(a, { refreshedAt = "t1", toReview = 2, needFixes = 1, flashing = false }))
 	assert(Links.statusChanged(a, { refreshedAt = "t2", toReview = 2, needFixes = 1, flashing = false }))
@@ -94,11 +94,21 @@ return function()
 	assert(Links.statusChanged(a, { refreshedAt = "t1", toReview = 2, needFixes = 1, flashing = true }))
 	assert(Links.statusChanged(nil, a) and Links.statusChanged(a, nil) and not Links.statusChanged(nil, nil))
 	local raw = { refreshedAt = "t1", counts = { toReview = 2, needFixes = 10, flashAt = 1000 } }
-	local seen = Links.statusOf(raw, 1004)
+	-- flashAt 1000 is first seen at 1013 (the watcher was late): it still flashes for 10 s from then.
+	local seen, observed = Links.watch(raw, 1013, nil)
 	assert(seen and seen.toReview == 2 and seen.needFixes == 10 and seen.flashing and seen.flashAt == 1000)
-	seen = Links.statusOf({ refreshedAt = "t1", counts = { toReview = 0, needFixes = 0 } }, 1004)
-	assert(seen and not seen.flashing and seen.flashAt == nil)
-	assert(Links.statusOf(nil, 0) == nil and Links.statusOf({ refreshedAt = "t", counts = {} }, 0) == nil and Links.statusOf({ counts = { toReview = 1, needFixes = 1 } }, 0) == nil)
+	assert(observed and observed.flashAt == 1000 and observed.at == 1013)
+	assert(Links.watchDelay(observed.at, 1013) == 2 and Links.watchDelay(observed.at, 1022) == 1)
+	seen, observed = Links.watch(raw, 1022, observed)
+	assert(seen and seen.flashing and observed and observed.at == 1013)
+	seen, observed = Links.watch(raw, 1023, observed)
+	assert(seen and not seen.flashing and observed and observed.at == 1013)
+	-- a new flashAt restarts it; no flashAt clears it
+	seen, observed = Links.watch({ refreshedAt = "t2", counts = { toReview = 2, needFixes = 11, flashAt = 1100 } }, 1101, observed)
+	assert(seen and seen.flashing and observed and observed.at == 1101)
+	seen, observed = Links.watch({ refreshedAt = "t1", counts = { toReview = 0, needFixes = 0 } }, 1104, observed)
+	assert(seen and not seen.flashing and seen.flashAt == nil and observed == nil)
+	assert(Links.watch(nil, 0, nil) == nil and Links.watch({ refreshedAt = "t", counts = {} }, 0, nil) == nil and Links.watch({ counts = { toReview = 1, needFixes = 1 } }, 0, nil) == nil)
 	-- liveness: the first hub that answers the probe wins; dead ones are skipped; none answering opens a new hub
 	local dead: { [number]: boolean } = { [7] = true }
 	local probed: { number } = {}

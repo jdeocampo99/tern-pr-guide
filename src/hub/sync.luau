@@ -275,6 +275,19 @@ function M.diff(old: Cache?, fresh: { HubPR }, now: number, suppressed: { [strin
 	return changes
 end
 
+export type Alerts = {
+	toast: { text: string, sub: string? }?, -- the one toast for the refresh
+	rings: { string }, -- keys that arrive in Needs fixes: the red ring
+	good: { string }, -- keys that became ready or approved: the green wash
+}
+
+-- What the block shows for `changes`: the toast text and the keys to ring red and to wash green.
+function M.alerts(changes: Changes): Alerts
+	local rings: { string } = {}
+	for _, arrival in changes.arrivals do table.insert(rings, arrival.key) end
+	return { toast = changes.toast, rings = rings, good = changes.good }
+end
+
 -- Schedule ----------------------------------------------------------------------------------------------------
 
 export type ScheduleInput = {

@@ -22,6 +22,7 @@ type Fix = { worktree: string, branch: string, base: string, headOid: string, co
 
 export type Mode = "board" | "search" | "link" | "menu" | "confirm" | "help"
 export type MenuId = "repositories" | "sort" | "agent" | "merge" | "actions"
+export type Ring = "bad" | "good" | "bad-out" | "good-out" -- red ring, green wash, then the same fading
 export type CardAction = { act: string, value: string?, label: string, key: string?, confirm: boolean }
 
 export type AgentFixState =
@@ -48,7 +49,7 @@ export type Card = {
 	merge: Model.MergeResolution?,
 	asking: string?, -- an inline question the card is waiting on ("Squash and merge #412?"); the split button gives way to Confirm and Cancel
 	busy: string?, -- an action in flight ("Merging…"); the split button gives way to it
-	ring: ("bad" | "good")?, -- the arrival ring, until it fades
+	ring: Ring?, -- the arrival ring or wash; the "-out" kinds are fading
 	selected: boolean,
 	marked: boolean,
 }
@@ -90,7 +91,7 @@ export type State = {
 	folded: { [string]: boolean }, -- true: the fold is closed. Inactive and Recently opened start closed
 	recent: { Opened }, -- hub.recent, newest first; the block sets it, `project` builds the Review requests fold from it
 	walking: boolean, -- Next up is being walked: the banner shows "2 of 11"
-	ringed: { [string]: "bad" | "good" },
+	ringed: { [string]: Ring },
 	agents: { [string]: AgentFixState },
 	details: { [string]: FixDetails },
 	summaries: { [string]: Summary },
