@@ -48,9 +48,12 @@ end })
 -- What the segment shows, set by the watcher below. The formatter reads only this: Tern disables a
 -- status hook that takes more than a few milliseconds, so it never touches kv or decodes anything.
 local current: Links.Seen? = nil
+local watching = false
+local startWatch: () -> ()
 
 tern.chrome.status(function(_pane): { StatusSegment }?
  local seen = current
+ if not watching then pcall(tern.timer, 0, startWatch) end
  if not seen then return nil end
  return { {
   text = Links.statusText(seen.toReview, seen.needFixes),
@@ -69,6 +72,7 @@ end)
 -- A hub pane that gains focus is told, so it can refresh when it has gone stale. A pane restored from an
 -- earlier session may have no program to receive it: that is not worth a message.
 tern.on("focus", function(ev: FocusEvent, cx: WindowCx)
+ startWatch()
  local pane = cx.session:pane(ev.pane)
  if pane and isHub(pane.block) then
   pcall(function() cx.session:event(ev.pane, { ev = "action", id = HUB_NODE, act = "hub-focused" }) end)
@@ -77,16 +81,27 @@ end)
 
 -- Blocks can't redraw the status line, so the window reads the tiny `hub.status` record the hub writes
 -- every 15 s (sooner when a flash is about to end) and redraws the line when what it shows has changed.
-tern.on("window_start", function(_cx: WindowCx)
- local function watch()
-  local now = os.time()
-  local ok, raw = pcall(tern.kv.get, "hub.status")
-  local latest = if ok then Links.statusOf(raw, now) else nil
-  if Links.statusChanged(current, latest) then
-   current = latest
-   tern.chrome.refresh()
-  end
-  tern.timer(math.ceil(Links.watchDelay(if latest then latest.flashAt else nil, now) * 1000), watch)
+-- One chain runs per module load. `window_start` doesn't fire again when the plugin reloads in a running
+-- window, so the watcher also starts from the module load, the first focus and the first status draw.
+local function watch()
+ local now = os.time()
+ local ok, raw = pcall(tern.kv.get, "hub.status")
+ local latest = if ok then Links.statusOf(raw, now) else nil
+ if Links.statusChanged(current, latest) then
+  current = latest
+  tern.chrome.refresh()
  end
+ tern.timer(math.ceil(Links.watchDelay(if latest then latest.flashAt else nil, now) * 1000), watch)
+end
+
+startWatch = function()
+ if watching then return end
+ watching = true
  watch()
+end
+
+tern.on("window_start", function(_cx: WindowCx)
+ startWatch()
 end)
+-- Deferred so nothing here depends on what is ready while the module loads.
+pcall(tern.timer, 0, startWatch)
