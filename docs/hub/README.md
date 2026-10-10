@@ -100,7 +100,8 @@ This opens the PR at what needs fixing, in the guided review layout.
 | Failing check | The annotation pinned at its line | View log (⇧L) |
 | Merge conflict | "Your branch" and "main" blocks, plus "Main changed this in #415 by @devon" | Fix with agent (A), Resolve on GitHub (G) |
 
-- **Keys:** h/l move between the steps and the code panel; j/k move within either one.
+- **Keys:** h/l move between the steps and the code panel; j/k move within either one; ⏎ goes into the panel, then chooses the highlighted action; R reply, E resolve, ⇧L view log, G open on GitHub (the conflict editor for a conflict), B bot comments, A the card's own action, Esc back to the board with the card still selected.
+- **Data:** one `details.graphql` call when the page opens (1 point, measured 2026-10-10), cached in `s.details[key]`. A thread's code is its first comment's diff hunk. Conflicts and annotated source come from `Fetch.readFixes` on the repo's checkout (or PR Guide's saved copy when already set up); with neither, the conflict step shows "No local copy of owner/repo". Bot threads are listed apart as "Not counted". Reply and Resolve write to GitHub (`commands.reply`, `commands.resolve`); the sample block applies them to the page only.
 
 ### Agent fixes (v2)
 
@@ -394,30 +395,54 @@ function M.resolveMergeMethod(evidence: MergeEvidence): MergeResolution   -- use
 
 ```luau
 export type ThreadDetail = {
-	id: string, group: "requested" | "comment",
+	id: string, group: "requested" | "comment",   -- "requested": the thread's first comment is part of a changes-requested review
 	author: string, bot: boolean,
 	path: string, line: number?,      -- nil when the thread is on the file or the line is gone
 	outdated: boolean,
 	body: string,                     -- the first comment
 	replies: number, url: string,
+	hunk: string?,                    -- the first comment's diff hunk, which ends at the commented line: the page's code for a thread
 }
 export type ReviewDetail = { author: string, body: string, at: string, url: string }   -- a changes-requested review
 export type Annotation = { path: string, line: number, level: "failure" | "warning" | "notice", title: string?, message: string }
 export type FailingCheck = {
 	name: string, workflow: string?, runId: number?, url: string,
 	summary: string?,
-	annotations: { Annotation },      -- after the noise filter: no `.github/` paths, no "Process completed with exit code"
+	annotations: { Annotation },      -- as GitHub sent them; `usable` drops `.github` paths and "Process completed with exit code"
 }
-export type Cause = { number: number?, title: string, author: string, sha: string }   -- "Main changed this in #415 by @devon"
-export type Conflict = { path: string, cause: Cause? }
+export type Cause = { number: number?, title: string, author: string, sha: string }   -- "Main changed this in #415 by @devon"; author is git's name
+export type ConflictHunk = { start: number, branch: { string }, main: { string } }   -- one conflict block, side by side
+export type Conflict = { path: string, cause: Cause?, hunks: { ConflictHunk } }
 export type FixDetails = {
 	key: string, headOid: string, fetchedAt: string,
 	reviews: { ReviewDetail },
-	threads: { ThreadDetail },
+	threads: { ThreadDetail },        -- unresolved ones only
 	checks: { FailingCheck },
 	changedPaths: { string },
 	conflicts: { Conflict }?,         -- nil until fetch.luau has read local `git merge-tree --write-tree --name-only`
+	conflictNote: string?,            -- why `conflicts` is nil: "No local copy of acme/web", "Couldn't read the conflicts: …"
+	files: { [string]: string }?,     -- annotated files as the head commit has them (`git show`), for the pinned annotations
 }
+
+export type Row = { kind: "ctx" | "add" | "del", old: number?, new: number?, text: string }
+export type Excerpt = { rows: { Row }, before: number, after: number? }   -- before/after: lines left out
+export type MergeTree = { tree: string, files: { string } }
+export type Group = "requested" | "comment" | "check" | "conflict" | "failure"
+export type Step = { id: string, group: Group, who: string, text: string, path: string?, line: number?,
+	thread: ThreadDetail?, review: ReviewDetail?, check: FailingCheck?, conflict: Conflict?, note: string? }
+
+M.GROUPS: { { id: Group, label: string, chip: string } }       -- Requested changes, Comments, Failing checks, Merge conflicts, Merge failed
+function M.usable(annotations: { Annotation }): { Annotation }  -- the noise filter
+function M.steps(d: FixDetails, pr: HubPR): { Step }            -- in group order; bot threads are no step; a merge failure alone is one "failure" step with its reason
+function M.bots(d: FixDetails): { { author: string, count: number } }
+function M.chips(steps: { Step }): { string }                   -- the header's "Address changes", "Reply", "Fix checks", "Resolve conflicts"
+function M.hunkExcerpt(hunk: string): Excerpt?                  -- the last 8 rows of a diff hunk
+function M.fileExcerpt(text: string, line: number): Excerpt?    -- 5 lines either side
+function M.parseMergeTree(text: string): MergeTree?             -- `git merge-tree --write-tree --name-only`: tree id, then the conflicted files; "" files when clean
+function M.parseHunks(content: string): { ConflictHunk }        -- conflict markers (two-sided or diff3) in `git show <tree>:<path>`
+function M.parseCause(output: string): Cause?                   -- `git log -1 --format=%H%x09%an%x09%s`; the number is the subject's "(#415)" or "Merge pull request #415"
+function M.conflicts(tree: MergeTree, shown: { [string]: string }, logs: { [string]: string }): { Conflict }
+function M.logUrl(check: FailingCheck, repo: string): string    -- the run's page, else the check's own link
 ```
 
 ### `src/github.luau` (the GitHub boundary)
@@ -592,7 +617,7 @@ function M.onlyComments(details: FixDetails): boolean    -- the only reason is c
 ### `src/hub/state.luau` (interaction state and the prepared board)
 
 ```luau
-export type Mode = "board" | "search" | "link" | "menu" | "confirm" | "help"
+export type Mode = "board" | "search" | "link" | "menu" | "confirm" | "help" | "fixes" | "reply"   -- "fixes": the fixes page is open (`s.route`); "reply": a reply is being typed
 export type MenuId = "repositories" | "sort" | "agent" | "merge" | "actions"
 export type CardAction = { act: string, value: string?, label: string, key: string?, confirm: boolean }
 
@@ -677,6 +702,13 @@ function M.project(s: State)                 -- recomputes s.board from s.prs an
 function M.mode(s: State): Mode
 function M.reviewed(fix: AgentFix.Fix, reviewed: { [string]: boolean }): boolean
 
+-- The fixes page (#12): a route over the board. `s.route = { kind = "fixes", key, cur, focus, item, loading, error, bots, resolved, replies, reply, busy }`.
+function M.openFixes(s: State, key: string): boolean / M.closeFixes(s)   -- Esc returns to the board with the card still selected
+function M.prOf(s: State, key: string): HubPR? / M.fixDetails(s) / M.fixSteps(s) / M.fixStep(s) / M.fixLeft(s)
+function M.fixItems(s: State, step: Fixes.Step?): { string } / M.fixMain(s): CardAction?   -- the panel's actions; the card's own main action
+function M.fixSelect(s, index) / M.fixMove(s, delta) / M.fixFocus(s, "steps" | "panel") / M.fixPress(s): string? / M.fixToggleBots(s)
+function M.beginReply(s): boolean / M.cancelReply(s) / M.setDetails(s, details)
+
 -- Card actions (#7). All pure; the block runs the effects.
 function M.mergeMethodFor(s: State, pr: HubPR): "squash" | "merge" | "rebase"   -- the repo's resolved method when it is a GitHub one, else squash (viewerDefaultMergeMethod arrives with #10's detection)
 function M.mergeStep(s: State, pr: HubPR): "confirm" | "ask" | "run"   -- M on a card: a GitHub method asks first, a learned command asks once, a chosen or declared comment, label or queue runs at once
@@ -737,7 +769,7 @@ The hub has its own `ACTIONS` table, sent by clicks (`event`) and by `Keys.hubAc
 
 ### `src/fetch.luau` (additions)
 
-`src/fetch.luau` keeps local git, treehouse, `omp` and Tandem CLI calls, the recent store (`recentPrs`, `rememberPr`, and `migrateRecent`, which the hub runs on first load), and one new export: `M.runner: Github.Runner`, which resolves `gh` and the shell's PATH the way `run` does (`:69-121`). The agent engine, Fix bot comments and the Tandem hand-off add their own functions here, each in the `(value?, err?)` style above.
+`src/fetch.luau` keeps local git, treehouse, `omp` and Tandem CLI calls, the recent store (`recentPrs`, `rememberPr`, and `migrateRecent`, which the hub runs on first load), and one new export: `M.runner: Github.Runner`, which resolves `gh` and the shell's PATH the way `run` does (`:69-121`). The fixes page adds `M.readFixes(repo, pr, paths, done)` (fetches the PR's refs, runs `git merge-tree`, then `git show` and `git log` per conflicted file and `git show` per annotated path; returns text as `FixRead`) and `M.readySavedCopy(slug)` (PR Guide's saved copy, only when already set up). The agent engine, Fix bot comments and the Tandem hand-off add their own functions here, each in the `(value?, err?)` style above.
 
 ## How this maps onto Tern
 
@@ -969,7 +1001,7 @@ Ship in stages that each work end to end. Each stage is a commit series that `te
 - **Queue position:** "2nd in line" needs the merge tool's own API (Aviator's sticky comment, or a token). Without it, the card says "waiting for the merge".
 - **Copy link:** plain "title url" is the acceptance. A rich HTML link through `osascript` is optional and, if added, must be tested.
 - **DESIGN.md additions** are owned by #5, together with the `--tk-*` syntax tokens in `docs/tern-tokens.css`. Confirm amber for running CI and purple for agent and Tandem work before adding them. The Components section should document washed action cards, status chips, the split button and boxes. #18 adds the agent chip.
-- **`pr-fixes.html` wording:** on #418, a Tandem repo, the page says "Fix with agent" where the hub says "Hand off to Tandem". The page should use the hub's wording.
+- **`pr-fixes.html` wording (settled in #12):** the page takes the card's own main action from `State.fixMain`, so a Tandem repo says "Hand off to Tandem" and a comments-only card says "Summarize"; the buttons send the card's action.
 
 ## Friction backlog
 

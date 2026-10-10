@@ -5,8 +5,9 @@
 -- already decoded tables and never throw on a missing field. Each call returns its own rate-limit
 -- envelope; the caller sums them. Failures are `Error` values, never thrown.
 --
--- Not built yet (each lands with the issue that first needs it): `details`, `history`, `parseDetails`
--- and the `commands` builders other than the merge, cancel-merge and update-branch ones.
+-- Not built yet (each lands with the issue that first needs it): `history` and the `commands` builders
+-- other than the merge, cancel-merge, update-branch, reply and resolve ones.
+local Fixes = require("./hub/fixes")
 local Model = require("./hub/model")
 
 type HubPR = Model.HubPR
@@ -19,6 +20,7 @@ type OpenThread = Model.OpenThread
 type MergeMethod = Model.MergeMethod
 type MergeFailure = Model.MergeFailure
 type PendingMerge = Model.PendingMerge
+type FixDetails = Fixes.FixDetails
 
 -- What `tern.process.run` gives and takes, minus the `cx`. src/fetch.luau exports the real runner.
 export type Out = { status: number, stdout: string, stderr: string, timed_out: boolean }
@@ -36,6 +38,7 @@ export type Client = {
 	refresh: (req: RefreshRequest, done: (value: Refresh?, err: Error?) -> ()) -> (),
 	probe: (since: string?, done: (value: Probe?, err: Error?) -> ()) -> (),
 	checks: (ids: { string }, done: (value: ChecksUpdate?, err: Error?) -> ()) -> (),
+	details: (pr: HubPR, done: (value: FixDetails?, err: Error?) -> ()) -> (),
 	detect: (repo: string, done: (value: Detected?, err: Error?) -> ()) -> (),
 	run: (command: Command, done: (stdout: string?, err: Error?) -> ()) -> (),
 }
@@ -111,7 +114,7 @@ query Checks($ids: [ID!]!) {
   nodes(ids: $ids) { ... on PullRequest { id number headRefOid commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 0) { checkRunCountsByState { state count } statusContextCountsByState { state count } } } } } } } }
 }]=]
 
--- These two mirror docs/hub/queries/merge-detect.graphql and merge-failure.graphql the same way.
+-- These three mirror docs/hub/queries/merge-detect.graphql, merge-failure.graphql and details.graphql the same way.
 local MERGE_DETECT_QUERY = [=[
 query MergeDetect($owner: String!, $name: String!) {
   rateLimit { cost remaining limit resetAt }
@@ -134,6 +137,30 @@ query MergeFailure($ids: [ID!]!) {
       __typename
       ... on CheckRun { name conclusion completedAt }
       ... on StatusContext { context state createdAt }
+    } } } } } }
+  } }
+}]=]
+
+local DETAILS_QUERY = [=[
+query Details($id: ID!) {
+  rateLimit { cost remaining limit resetAt }
+  node(id: $id) { ... on PullRequest {
+    id
+    headRefOid
+    reviews(last: 20, states: [CHANGES_REQUESTED]) { nodes { author { __typename login } body submittedAt url } }
+    reviewThreads(first: 50) { nodes {
+      id isResolved isOutdated path line
+      comments(first: 1) { totalCount nodes { author { __typename login } body url diffHunk pullRequestReview { state } } }
+    } }
+    files(first: 100) { nodes { path } }
+    commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 30) { nodes {
+      __typename
+      ... on CheckRun {
+        name conclusion detailsUrl summary
+        checkSuite { workflowRun { databaseId workflow { name } } }
+        annotations(first: 20) { nodes { path annotationLevel title message location { start { line } } } }
+      }
+      ... on StatusContext { context state targetUrl }
     } } } } } }
   } }
 }]=]
@@ -407,6 +434,95 @@ function M.parseProbe(stdout: string): Probe?
 	return probe
 end
 
+-- The fixes page
+
+local function levelOf(raw: any): "failure" | "warning" | "notice"
+	if raw == "FAILURE" then return "failure" end
+	if raw == "WARNING" then return "warning" end
+	return "notice"
+end
+
+local function annotationsOf(run: any): { Fixes.Annotation }
+	local out: { Fixes.Annotation } = {}
+	for _, row in list(tbl(run.annotations) and run.annotations.nodes) do
+		local path, message = str(row.path), str(row.message)
+		local start = tbl(row.location) and tbl(row.location.start)
+		local line = start and start.line
+		if path and message and type(line) == "number" then
+			local title = str(row.title)
+			table.insert(out, { path = path, line = line, level = levelOf(row.annotationLevel), title = if title == "" then nil else title, message = message })
+		end
+	end
+	return out
+end
+
+local function failingChecks(node: any): { Fixes.FailingCheck }
+	local out: { Fixes.FailingCheck } = {}
+	local commit = list(tbl(node.commits) and node.commits.nodes)[1]
+	local rollup = commit and tbl(commit.commit) and tbl(commit.commit.statusCheckRollup)
+	for _, row in list(rollup and tbl(rollup.contexts) and rollup.contexts.nodes) do
+		if row.__typename == "CheckRun" and FAILING_RUNS[str(row.conclusion) or ""] then
+			local suite = tbl(row.checkSuite)
+			local workflowRun = suite and tbl(suite.workflowRun)
+			local workflow = workflowRun and tbl(workflowRun.workflow)
+			local runId = workflowRun and workflowRun.databaseId
+			table.insert(out, {
+				name = str(row.name) or "check", workflow = workflow and str(workflow.name),
+				runId = if type(runId) == "number" then runId else nil, url = str(row.detailsUrl) or "",
+				summary = str(row.summary), annotations = annotationsOf(row),
+			})
+		elseif row.__typename == "StatusContext" and FAILING_STATUSES[str(row.state) or ""] then
+			table.insert(out, { name = str(row.context) or "status", workflow = nil, runId = nil, url = str(row.targetUrl) or "", summary = nil, annotations = {} })
+		end
+	end
+	return out
+end
+
+-- details.graphql for `pr`. `fetchedAt` is "" (the block stamps it), `conflicts` is nil until git has been read,
+-- and resolved threads and threads with no comment are left out.
+function M.parseDetails(raw: any, pr: HubPR): FixDetails?
+	local data = tbl(raw) and tbl(raw.data)
+	local node = data and tbl(data.node)
+	if node == nil then return nil end
+	local reviews: { Fixes.ReviewDetail } = {}
+	for _, row in list(tbl(node.reviews) and node.reviews.nodes) do
+		local author = tbl(row.author)
+		table.insert(reviews, {
+			author = author and str(author.login) or "ghost", body = str(row.body) or "",
+			at = str(row.submittedAt) or "", url = str(row.url) or pr.url,
+		})
+	end
+	local threads: { Fixes.ThreadDetail } = {}
+	for _, row in list(tbl(node.reviewThreads) and node.reviewThreads.nodes) do
+		local id = str(row.id)
+		local comments = tbl(row.comments)
+		local first = list(comments and comments.nodes)[1]
+		if id and first and row.isResolved ~= true then
+			local author = tbl(first.author)
+			local review = tbl(first.pullRequestReview)
+			local thread: Fixes.ThreadDetail = {
+				id = id, group = if review and review.state == "CHANGES_REQUESTED" then "requested" else "comment",
+				author = author and str(author.login) or "ghost", bot = author ~= nil and author.__typename == "Bot",
+				path = str(row.path) or "", line = if type(row.line) == "number" then row.line else nil,
+				outdated = row.isOutdated == true, body = str(first.body) or "",
+				replies = math.max(0, int(comments and comments.totalCount) - 1), url = str(first.url) or pr.url,
+				hunk = str(first.diffHunk),
+			}
+			table.insert(threads, thread)
+		end
+	end
+	local changed: { string } = {}
+	for _, row in list(tbl(node.files) and node.files.nodes) do
+		local path = str(row.path)
+		if path then table.insert(changed, path) end
+	end
+	return {
+		key = pr.key, headOid = str(node.headRefOid) or pr.headOid, fetchedAt = "",
+		reviews = reviews, threads = threads, checks = failingChecks(node), changedPaths = changed,
+		conflicts = nil, conflictNote = nil, files = nil,
+	}
+end
+
 -- The client
 
 local function firstLine(text: string): string?
@@ -486,6 +602,9 @@ local function prArgv(verb: string, pr: HubPR, ...: string): { string }
 	return argv
 end
 
+local REPLY_MUTATION = "mutation($threadId: ID!, $body: String!) { addPullRequestReviewThreadReply(input: {pullRequestReviewThreadId: $threadId, body: $body}) { comment { id url } } }"
+local RESOLVE_MUTATION = "mutation($threadId: ID!) { resolveReviewThread(input: {threadId: $threadId}) { thread { id isResolved } } }"
+
 M.commands = {
 	-- Merging asks the repo's own tool: GitHub for squash, merge and rebase, `--auto` for the queue, a comment, or a label.
 	merge = function(pr: HubPR, method: MergeMethod): Command
@@ -506,6 +625,16 @@ M.commands = {
 	end,
 	updateBranch = function(pr: HubPR): Command
 		return { argv = { "gh", "pr", "update-branch", tostring(pr.number), "--repo", pr.repo }, stdin = nil }
+	end,
+	-- Replies in a review thread, and resolves one: GraphQL writes, the only way to do either.
+	reply = function(pr: HubPR, threadId: string, body: string): Command
+		return {
+			argv = { "gh", "api", "graphql", "-f", "query=" .. REPLY_MUTATION, "-f", "threadId=" .. threadId, "-f", "body=" .. body },
+			stdin = nil,
+		}
+	end,
+	resolve = function(threadId: string): Command
+		return { argv = { "gh", "api", "graphql", "-f", "query=" .. RESOLVE_MUTATION, "-f", "threadId=" .. threadId }, stdin = nil }
 	end,
 }
 
@@ -827,6 +956,16 @@ function M.client(run: Runner, decode: Decode): Client
 		end)
 	end
 
+	local function details(pr: HubPR, done: (value: FixDetails?, err: Error?) -> ())
+		local operation, what = "gh api graphql: details", "read what needs fixing in " .. pr.key
+		graphql(DETAILS_QUERY, { "-f", "id=" .. pr.id }, operation, what, function(doc, err)
+			if err then return done(nil, err) end
+			local found = M.parseDetails(doc, pr)
+			if found == nil then return done(nil, failure(operation, what, "GitHub has no pull request " .. pr.key, nil)) end
+			done(found, nil)
+		end)
+	end
+
 	local function detect(repo: string, done: (value: Detected?, err: Error?) -> ())
 		local owner, name = string.match(repo, "^([%w_.%-]+)/([%w_.%-]+)$")
 		if owner == nil or name == nil then
@@ -855,7 +994,7 @@ function M.client(run: Runner, decode: Decode): Client
 		end)
 	end
 
-	return { refresh = refresh, probe = probe, checks = checks, detect = detect, run = runCommand }
+	return { refresh = refresh, probe = probe, checks = checks, details = details, detect = detect, run = runCommand }
 end
 
 return M

@@ -3,6 +3,7 @@
 -- built from it. Views read `State.board` and never filter, sort or classify: every rule is `model`'s.
 -- Pure: no clock, no network, no Tern. `now` is passed in.
 local Fields = require("../text-field")
+local Fixes = require("./fixes")
 local Links = require("../links")
 local Model = require("./model")
 
@@ -16,11 +17,11 @@ type Sort = Model.Sort
 -- contract, and the issue that adds each module replaces its placeholder with the module's own type.
 export type Opened = { repo: string, number: number, title: string, author: string, at: string } -- sync.Opened
 export type Summary = { verdict: string, comments: { { author: string, text: string } } } -- summary.Summary
-export type FixDetails = { key: string } -- fixes.FixDetails
+export type FixDetails = Fixes.FixDetails
 type Run = { key: string, stage: string, since: number } -- agent-fix.Run
 type Fix = { worktree: string, branch: string, base: string, headOid: string, commit: string, summary: string, usedAgent: boolean } -- agent-fix.Fix
 
-export type Mode = "board" | "search" | "link" | "menu" | "confirm" | "help"
+export type Mode = "board" | "search" | "link" | "menu" | "confirm" | "help" | "fixes" | "reply"
 export type MenuId = "repositories" | "sort" | "agent" | "merge" | "actions"
 export type Ring = "bad" | "good" | "bad-out" | "good-out" -- red ring, green wash, then the same fading
 export type CardAction = { act: string, value: string?, label: string, key: string?, confirm: boolean }
@@ -75,6 +76,22 @@ export type BoardData = {
 export type AgentModel = { selector: string, name: string, efforts: { string } }
 export type AgentChoice = { models: { AgentModel }, model: string, effort: string? }
 
+-- The fixes page, open on the Needs fixes card `key`. Its steps come from `s.details[key]` and the card's PR.
+export type Route = {
+	kind: "fixes",
+	key: string,
+	cur: number, -- the step on show, 1-based
+	focus: "steps" | "panel", -- h and l move between the two
+	item: number, -- the panel's highlighted action, 1-based
+	loading: boolean, -- details are on their way
+	error: string?, -- why they could not be read
+	bots: boolean, -- the "Not counted" bot note is open
+	resolved: { [string]: boolean }, -- thread ids resolved from the page
+	replies: { [string]: { string } }, -- replies posted from the page, by thread id
+	reply: Fields.Field?, -- the reply being written (mode "reply")
+	busy: boolean, -- a reply or resolve is in flight
+}
+
 export type State = {
 	prs: { HubPR },
 	now: number,
@@ -87,6 +104,7 @@ export type State = {
 	search: Fields.Field,
 	link: Fields.Field,
 	mode: Mode,
+	route: Route?, -- the fixes page, while it is open
 	menu: MenuId?,
 	menuCursor: number,
 	confirm: { kind: string, keys: { string } }?, -- kind "merge" (a GitHub method) or "learned" (a suggested comment command)
@@ -178,7 +196,7 @@ function M.new(prs: { HubPR }, now: number, saved: any): State
 	local s: State = {
 		prs = prs, now = now, board = emptyBoard(tab), tab = tab, selected = nil, marked = {},
 		repositories = repositories, sort = sort, search = Fields.create(""), link = Fields.create(""),
-		mode = "board", menu = nil, menuCursor = 1, confirm = nil, methodEdit = nil, folded = folded, recent = {}, walking = false,
+		mode = "board", route = nil, menu = nil, menuCursor = 1, confirm = nil, methodEdit = nil, folded = folded, recent = {}, walking = false,
 		ringed = {}, agents = {}, details = {}, summaries = {}, merges = {}, acted = {}, busy = {},
 		refreshedAt = nil, loading = false, error = nil, agent = nil,
 		keyed = false, born = {}, booted = false,
@@ -1120,6 +1138,155 @@ function M.openPlan(slug: string, number: number, generate: boolean, root: strin
 		return { kind = "refuse", text = "Couldn't open #" .. number .. " of " .. slug, sub = why or "No folder to look for a checkout in." }
 	end
 	return { kind = "open", url = Links.openLink(slug, number, dir, generate, true) }
+end
+
+-- The fixes page ------------------------------------------------------------------------------------------------
+-- A route over the board: Esc returns to it with the card still selected. All pure; the block reads the
+-- details, runs git and the writes.
+
+-- Opens the page on the PR `key`; false when no such PR is on hand. Details already read for the same
+-- commit show at once while the block reads them again.
+function M.openFixes(s: State, key: string): boolean
+	local pr = M.prOf(s, key)
+	if pr == nil then return false end
+	local known = s.details[key]
+	s.route = {
+		kind = "fixes", key = key, cur = 1, focus = "steps", item = 1,
+		loading = known == nil or known.headOid ~= pr.headOid, error = nil, bots = false,
+		resolved = {}, replies = {}, reply = nil, busy = false,
+	}
+	s.mode, s.menu, s.confirm = "fixes", nil, nil
+	return true
+end
+
+function M.closeFixes(s: State)
+	s.route, s.mode = nil, "board"
+end
+
+-- The PR with `key`, on the board or not.
+function M.prOf(s: State, key: string): HubPR?
+	for _, pr in s.prs do
+		if pr.key == key then return pr end
+	end
+	return nil
+end
+
+-- Details to build the steps from: what was read, or nothing yet (the PR's own flags still make steps).
+function M.fixDetails(s: State): FixDetails?
+	local route = s.route
+	local pr = if route then M.prOf(s, route.key) else nil
+	if route == nil or pr == nil then return nil end
+	return s.details[route.key] or {
+		key = pr.key, headOid = pr.headOid, fetchedAt = "", reviews = {}, threads = {}, checks = {}, changedPaths = {},
+		conflicts = nil, conflictNote = nil, files = nil,
+	}
+end
+
+function M.fixSteps(s: State): { Fixes.Step }
+	local route = s.route
+	local pr = if route then M.prOf(s, route.key) else nil
+	local details = M.fixDetails(s)
+	if route == nil or pr == nil or details == nil then return {} end
+	return Fixes.steps(details, pr)
+end
+
+function M.fixStep(s: State): Fixes.Step?
+	local route = s.route
+	if route == nil then return nil end
+	return M.fixSteps(s)[route.cur]
+end
+
+-- Steps still to do: not a thread resolved from the page.
+function M.fixLeft(s: State): number
+	local route = s.route
+	local left = 0
+	for _, step in M.fixSteps(s) do
+		if route == nil or step.thread == nil or not route.resolved[step.thread.id] then left += 1 end
+	end
+	return left
+end
+
+-- The actions the panel's j and k move over for `step`; "agent" is the card's own main action.
+function M.fixItems(s: State, step: Fixes.Step?): { string }
+	if step == nil then return {} end
+	local card = if s.route then M.card(s, s.route.key) else nil
+	local agent = card ~= nil and card.main ~= nil and card.main.act ~= "open"
+	if step.thread then return { "reply", "resolve" } end
+	if step.check then return { "log" } end
+	if step.conflict then return if agent then { "agent", "github" } else { "github" } end
+	return { "github" }
+end
+
+-- The card's main action, which the page shows under the card's own label ("Hand off to Tandem").
+function M.fixMain(s: State): CardAction?
+	local card = if s.route then M.card(s, s.route.key) else nil
+	local main = if card then card.main else nil
+	if main and main.act ~= "open" then return main end
+	return nil
+end
+
+function M.fixSelect(s: State, index: number)
+	local route = s.route
+	if route == nil then return end
+	route.cur = math.clamp(index, 1, math.max(1, #M.fixSteps(s)))
+	route.item, route.reply = 1, nil
+	s.mode = "fixes"
+end
+
+-- j and k: the next or previous step in the left column, or the next action in the panel.
+function M.fixMove(s: State, delta: number)
+	local route = s.route
+	if route == nil then return end
+	if route.focus == "steps" then
+		M.fixSelect(s, route.cur + delta)
+		return
+	end
+	route.item = math.clamp(route.item + delta, 1, math.max(1, #M.fixItems(s, M.fixStep(s))))
+end
+
+function M.fixFocus(s: State, focus: "steps" | "panel")
+	local route = s.route
+	if route == nil then return end
+	route.focus = focus
+	route.item = 1
+end
+
+-- ⏎: from the steps into the panel; in the panel, the highlighted action (returned for the block to run).
+function M.fixPress(s: State): string?
+	local route = s.route
+	if route == nil then return nil end
+	if route.focus == "steps" then
+		M.fixFocus(s, "panel")
+		return nil
+	end
+	return M.fixItems(s, M.fixStep(s))[route.item]
+end
+
+function M.fixToggleBots(s: State)
+	if s.route then s.route.bots = not s.route.bots end
+end
+
+-- R: starts a reply on a thread step.
+function M.beginReply(s: State): boolean
+	local route, step = s.route, M.fixStep(s)
+	if route == nil or step == nil or step.thread == nil or route.resolved[step.thread.id] then return false end
+	route.reply, route.focus = Fields.create("", true), "panel"
+	s.mode = "reply"
+	return true
+end
+
+function M.cancelReply(s: State)
+	if s.route then s.route.reply = nil end
+	if s.mode == "reply" then s.mode = "fixes" end
+end
+
+-- The details the block read: the page's steps follow them.
+function M.setDetails(s: State, details: FixDetails)
+	s.details[details.key] = details
+	if s.route and s.route.key == details.key then
+		s.route.loading, s.route.error = false, nil
+		s.route.cur = math.clamp(s.route.cur, 1, math.max(1, #M.fixSteps(s)))
+	end
 end
 
 return M

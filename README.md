@@ -198,7 +198,7 @@ Anywhere in Tern: `⌥⌘R` opens the PR hub and `⌥⇧⌘R` opens it with AI g
 
 | Move | | The selected card | | The board | |
 |---|---|---|---|---|---|
-| `h` `j` `k` `l` / arrows | move between cards | `⏎` / double-click | open | `/` | search |
+| `h` `j` `k` `l` / arrows | move between cards | `⏎` / double-click | open (a Needs fixes card opens the fixes page) | `/` | search |
 | `.` | next pull request that needs you, across both tabs | | | | |
 | `T` | switch tab | `A` | fix with agent, or summarize | `F` | filter by repository |
 | `I` | show or hide Inactive | `⇧⏎` | open with the AI guide started |
@@ -210,6 +210,28 @@ Anywhere in Tern: `⌥⌘R` opens the PR hub and `⌥⇧⌘R` opens it with AI g
 | | | `U` | update branch (Ready cards that are behind main) | `?` | all shortcuts |
 | | | `,` | merge method (also the `▾` on Merge) | `⌘R` | refresh (the sample board steps through its recorded refreshes) |
 | | | `X` | remove from Review requests (pull requests you added) | | |
+
+**Fixes page.** `⏎` on a Needs fixes card opens the pull request at what needs fixing, in the guided
+review's layout. The left column lists the problems as steps, grouped Requested changes, Comments,
+Failing checks and Merge conflicts; the right shows the code for the step on show. A comment or
+requested change is pinned at its line. A failing check's annotation is pinned at its line (annotations
+under `.github/` and "Process completed with exit code" lines are dropped). A conflict shows "Your
+branch" and the base branch side by side, and "Main changed this in #415" when the base's last commit on
+that file names its pull request. A pull request that needs fixes only because a merge failed opens with
+the reason. Bot comments are listed apart under "Not counted". The page reads GitHub once when it opens
+(1 point); conflicts and annotated source come from your clone of the repo (or PR Guide's saved copy),
+and without one the conflict step says "No local copy of owner/repo". The button next to the title
+shows the card's own wording ("Fix with agent", "Hand off to Tandem").
+
+| Fixes page | | | |
+|---|---|---|---|
+| `j` `k` / arrows | next / previous step, or action in the code | `R` | reply to the thread (`⌘⏎` posts, `Esc` cancels) |
+| `h` `l` / arrows | between the steps and the code | `E` | resolve the thread |
+| `⏎` | go to the code, or choose the highlighted action | `⇧L` | view the check's log on GitHub |
+| `A` | the card's action ("Fix with agent") | `G` | open on GitHub (the conflict editor for a conflict) |
+| `B` | show or hide the bot comments | `Esc` | back to the board, card still selected |
+
+Reply and Resolve write to GitHub straight away; the sample block applies them to the page only.
 
 **Merge** uses the repository's merge method and shows GitHub's reason when it refuses. Each repository
 has one method: squash and merge, create a merge commit, rebase and merge, merge when ready (GitHub's

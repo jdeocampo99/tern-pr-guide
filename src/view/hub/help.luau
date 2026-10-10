@@ -10,7 +10,7 @@ type Group = { title: string, keys: { { string } } } -- a key row is { keys, lab
 local GROUPS: { Group } = {
 	{ title = "Move", keys = {
 		{ "h j k l", "Move between cards", "← ↑ ↓ →" },
-		{ "⏎", "Open the card" },
+		{ "⏎", "Open the card, or a Needs fixes card at what needs fixing" },
 		{ "⇧⏎", "Open with the AI guide started" },
 		{ ".", "Next pull request that needs you" },
 		{ "T", "Switch tab" },
@@ -25,6 +25,17 @@ local GROUPS: { Group } = {
 		{ "U", "Update branch" },
 		{ ",", "Merge method" },
 		{ "X", "Remove from Review requests" },
+	} },
+	{ title = "The fixes page", keys = {
+		{ "j k", "Next or previous step, or action" },
+		{ "h l", "Between the steps and the code", "← →" },
+		{ "⏎", "Go to the code, or choose" },
+		{ "R", "Reply to the thread (⌘⏎ posts)" },
+		{ "E", "Resolve the thread" },
+		{ "⇧L", "View the check's log" },
+		{ "G", "Open on GitHub, or resolve a conflict there" },
+		{ "B", "Show or hide bot comments" },
+		{ "Esc", "Back to the board" },
 	} },
 	{ title = "The board", keys = {
 		{ "/", "Search" },
