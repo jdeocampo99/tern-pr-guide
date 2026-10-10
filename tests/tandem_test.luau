@@ -5,6 +5,7 @@
 local Cases: any = require("../fixtures/hub/cases")
 local Model = require("../src/hub/model")
 local State = require("../src/hub/state")
+local Sync = require("../src/hub/sync")
 local RawWatch: any = require("../fixtures/hub/raw-tandem-watch")
 local RawFix: any = require("../fixtures/hub/raw-tandem-pr-fix")
 
@@ -183,7 +184,7 @@ local function stubTern(w: any): any
 			return { cancel = function() end }
 		end,
 		getenv = function(): string? return nil end,
-		kv = { get = function(): any return nil end, set = function() end },
+		kv = { get = function(): any return nil end, set = function(key: string, value: any) w.kv[key] = value end },
 	}
 end
 
@@ -192,9 +193,10 @@ local function withWorld(run: (w: any, Fetch: any, Block: any) -> ())
 	local Fetch: any = require("../src/fetch")
 	local blockEnv: any, fetchEnv: any = getfenv(Block.init), getfenv(Fetch.tandemWatch)
 	local hostBlock, hostFetch, hostRunner, hostFind = blockEnv.tern, fetchEnv.tern, Fetch.runner, Fetch.findRepo
+	local hostClone, hostStart = Fetch.findAgentClone, Fetch.startAgentFix
 	local w: any = {
 		decoded = {}, encoded = {}, timers = {}, calls = {}, toasts = {}, renders = 0, throws = false, Block = Block,
-		finds = {}, holdRoot = false, rootFails = false, findThrows = false,
+		finds = {}, holdRoot = false, rootFails = false, findThrows = false, kv = {},
 	}
 	local stub = stubTern(w)
 	blockEnv.tern, fetchEnv.tern = stub, stub
@@ -213,6 +215,7 @@ local function withWorld(run: (w: any, Fetch: any, Block: any) -> ())
 	end
 	local ok, err = pcall(run, w, Fetch, Block)
 	blockEnv.tern, fetchEnv.tern, Fetch.runner, Fetch.findRepo = hostBlock, hostFetch, hostRunner, hostFind
+	Fetch.findAgentClone, Fetch.startAgentFix = hostClone, hostStart
 	if not ok then error(err, 0) end
 end
 
@@ -601,6 +604,298 @@ local function rootPaths()
 	end)
 end
 
+-- The `tandem watch --json` reads a board has asked for, oldest first.
+local function reads(w: any): { any }
+	local found = {}
+	for _, call in w.calls do
+		if call.argv[2] == "watch" then table.insert(found, call) end
+	end
+	return found
+end
+
+-- The recorded watch with a row added for each key ("owner/repo#123"), as Tandem answers once it watches them.
+local function watchWith(keys: { string }): any
+	local doc = copy(RawWatch)
+	for _, key in keys do
+		local repo: any, number: any = string.match(key, "^(.+)#(%d+)$")
+		local row = copy(doc.rows[1])
+		row.repo, row.number, row.taskId = repo, tonumber(number), nil
+		row.branch, row.url = "branch-" .. number, "https://github.com/" .. repo .. "/pull/" .. number
+		table.insert(doc.rows, row)
+	end
+	return doc
+end
+
+-- A read of Tandem that started before a hand-off returns after it, and the other way round. Every callback is
+-- settled by hand, so the order is the test's own.
+local function staleRead()
+	local KEY = "acme/api#105"
+	withWorld(function(w, Fetch, Block)
+		local b = live(w, Block)
+		w.decoded["LATER"] = watchWith({ KEY })
+		local first = reads(w)[1]
+		assert(#reads(w) == 1 and b.flights.tandem, "open's read is still out")
+		Block.event(b, { ev = "action", act = "card-handoff", value = KEY } :: any, w.cx)
+		handoffs(w)[1].done(out("DONE"))
+		assert(card(b.s, KEY).pr.tandem and b.watched[KEY] == true)
+
+		-- The older read comes back last, and its snapshot (the recorded watch) does not name the PR. It is dropped.
+		first.done(out("WATCH"))
+		local mine = card(b.s, KEY)
+		assert(mine.pr.tandem and mine.column == "in_review" and mine.chips[1].text == "Waiting on Tandem", "a hand-off is not undone by an older read")
+		assert(mine.main and mine.main.act == "card-handoff" and not offers(mine, "card-agent"), "no Fix with agent comes back")
+		assert(b.watched[KEY] == true and #reads(w) == 2 and b.flights.tandem, "a newer read is out")
+		first.done(out("WATCH"))
+		assert(#reads(w) == 2 and card(b.s, KEY).pr.tandem, "the stale answer counts once")
+
+		-- The newer read settles it, in whichever order Tandem reports.
+		reads(w)[2].done(out("LATER"))
+		assert(card(b.s, KEY).pr.tandem and #reads(w) == 2 and not b.flights.tandem)
+		assert(card(b.s, "acme/web#104").pr.tandem and not card(b.s, "acme/api#116").pr.tandem)
+
+		-- A read that began after the hand-off is authoritative: one that no longer names the PR clears the flag.
+		b.github = { refresh = function() end }
+		Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+		assert(#reads(w) == 3)
+		reads(w)[3].done(out("WATCH"))
+		assert(not card(b.s, KEY).pr.tandem and card(b.s, KEY).column == "needs_fixes" and #reads(w) == 3)
+	end)
+
+	-- A stale read that failed is dropped too, and asks again.
+	withWorld(function(w, Fetch, Block)
+		local b = live(w, Block)
+		local first = reads(w)[1]
+		Block.event(b, { ev = "action", act = "card-handoff", value = KEY } :: any, w.cx)
+		handoffs(w)[1].done(out("KEPT"))
+		first.done(out("nope"))
+		assert(card(b.s, KEY).pr.tandem and #reads(w) == 2 and b.s.error == nil and #w.toasts == 1)
+	end)
+
+	-- A closed block reads nothing more and renders nothing.
+	withWorld(function(w, Fetch, Block)
+		local b = live(w, Block)
+		local first = reads(w)[1]
+		Block.event(b, { ev = "action", act = "card-handoff", value = KEY } :: any, w.cx)
+		handoffs(w)[1].done(out("DONE"))
+		b.closed = true
+		local rendered = w.renders
+		first.done(out("WATCH"))
+		assert(#reads(w) == 1 and w.renders == rendered and b.flights.tandem == false)
+	end)
+end
+
+-- GitHub's refresh answered first and Tandem's read second: the cache and the window's status segment follow the
+-- placement the flags give, counted over every PR, and the flash time stays.
+local function counts()
+	withWorld(function(w, Fetch, Block)
+		local b = live(w, Block)
+		local FLASH = 1234
+		local fresh: any = { viewer = "jubbydev", prs = copy(Cases.prs), rateLimit = nil, calls = {}, truncated = false }
+		local cache = Sync.merge(fresh, nil, { added = {}, tandem = {} }, Cases.asOf)
+		cache.counts.flashAt = FLASH
+		b.cache = cache
+		State.replace(b.s, cache.prs, Cases.asOf, Cases.asOfIso)
+		local before = cache.counts.needFixes
+		assert(card(b.s, "acme/web#104").column == "needs_fixes" and before >= 2)
+
+		reads(w)[1].done(out("WATCH"))
+		assert(card(b.s, "acme/web#104").column == "in_review")
+		local toReview, needFixes = 0, 0
+		for _, pr in b.s.prs do
+			local column = Model.classify(pr, Cases.asOf)
+			if column == "to_review" then toReview += 1 end
+			if column == "needs_fixes" then needFixes += 1 end
+		end
+		assert(needFixes < before, "the watched PR left Needs fixes")
+		assert(b.cache.counts.needFixes == needFixes and b.cache.counts.toReview == toReview and b.cache.counts.flashAt == FLASH)
+		local status, saved = w.kv["hub.status"], w.kv["hub.cache"]
+		assert(status.counts.needFixes == needFixes and status.counts.toReview == toReview and status.counts.flashAt == FLASH, "the status segment")
+		assert(saved.counts.needFixes == needFixes and saved.counts.flashAt == FLASH, "the saved cache")
+
+		-- A hand-off moves a PR out of Needs fixes the same way.
+		w.calls = {}
+		Block.event(b, { ev = "action", act = "card-handoff", value = "acme/api#116" } :: any, w.cx)
+		handoffs(w)[1].done(out("DONE"))
+		assert(b.cache.counts.needFixes == needFixes - 1 and b.cache.counts.flashAt == FLASH)
+		assert(w.kv["hub.status"].counts.needFixes == needFixes - 1 and w.kv["hub.status"].counts.flashAt == FLASH)
+	end)
+end
+
+local TARGET = "acme/api#105"
+
+-- A live board whose agent and clone lookup are recorded calls, with Tandem read once (it names web#104 and api#114,
+-- not TARGET). `claim` then lets a later read of Tandem name TARGET.
+local function agentBoard(w: any, Fetch: any, Block: any): any
+	local b = live(w, Block)
+	reads(w)[1].done(out("WATCH"))
+	w.clones, w.started, w.details, w.stops = {}, {}, {}, 0
+	Fetch.findAgentClone = function(_near: any, _dir: string, slug: string, ask: any, done: (string?, string?) -> ())
+		table.insert(w.clones, { slug = slug, ask = ask, done = done })
+	end
+	Fetch.startAgentFix = function(request: any, _agent: any, _now: number, changed: any, done: any): any
+		table.insert(w.started, { request = request, changed = changed, done = done })
+		return {
+			stop = function() w.stops += 1 end, release = function(finished: (boolean?, string?) -> ()) finished(true, nil) end,
+			begin = function() end, held = function(): any return nil end, busy = function(): boolean return true end,
+		}
+	end
+	b.agent = { command = "/omp", path = "/omp", model = "provider/model", effort = "high", models = {}, lenses = {}, lens = "" }
+	b.github = { refresh = function() end, details = function(pr: any, done: any) table.insert(w.details, { pr = pr, done = done }) end }
+	local target: any = State.prOf(b.s, TARGET)
+	w.decoded["REFS"] = { headRefName = "topic", baseRefName = target.baseBranch, headRefOid = target.headOid }
+	w.decoded["CLAIM"] = watchWith({ TARGET })
+	assert(not target.tandem and card(b.s, TARGET).main.label == "Fix with agent")
+	return b
+end
+
+local function claim(w: any, Block: any, b: any)
+	Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+	local list = reads(w)
+	list[#list].done(out("CLAIM"))
+	assert(State.prOf(b.s, TARGET).tandem == true)
+end
+
+local function gh(w: any): any
+	for _, call in w.calls do
+		if call.argv[1] == "gh" then return call end
+	end
+	return nil
+end
+
+-- Nothing started, nothing left running, and no worktree or engine taken.
+local function noFixer(w: any, b: any, why: string)
+	assert(#w.started == 0 and b.agentFlight == nil and w.stops == 0, why)
+	assert(b.s.agents[TARGET] == nil, why .. ": a fix that never started leaves no state")
+end
+
+-- Tandem takes a PR while its agent is only being set up, or already has a failed or missing-clone state.
+local function agentOverlap()
+	-- Retry, Clone and Choose folder on a card Tandem owns go through the same entry, which starts nothing. The
+	-- same press on a card nobody watches does start looking, so the refusal is the guard's.
+	withWorld(function(w, Fetch, Block)
+		local b = agentBoard(w, Fetch, Block)
+		State.agentFailed(b.s, TARGET, "No clone was found", nil)
+		claim(w, Block, b)
+		local finds = #w.finds
+		for _, act in { "card-agent-retry", "card-agent-clone", "card-agent-folder" } do
+			Block.event(b, { ev = "action", act = act, value = TARGET } :: any, w.cx)
+		end
+		assert(#w.finds == finds and #w.clones == 0 and #w.started == 0 and b.agentFlight == nil and gh(w) == nil)
+		assert(b.s.agents[TARGET].kind == "failed" and #w.toasts == 0)
+		State.noAgentClone(b.s, TARGET, "acme/api")
+		for _, act in { "card-agent-clone", "card-agent-folder" } do
+			Block.event(b, { ev = "action", act = act, value = TARGET } :: any, w.cx)
+		end
+		assert(#w.finds == finds and #w.clones == 0 and #w.started == 0 and b.agentFlight == nil and b.s.agents[TARGET].kind == "no_clone")
+		State.agentFailed(b.s, "acme/api#116", "No clone was found", nil)
+		Block.event(b, { ev = "action", act = "card-agent-retry", value = "acme/api#116" } :: any, w.cx)
+		assert(#w.finds == finds + 1 and #w.clones == 1 and b.agentFlight ~= nil, "a PR nobody watches still starts")
+	end)
+
+	-- Each delayed step re-checks. A board that arrives with the flag set (a refresh, or another window's cache)
+	-- does not pass through the watch read, so the flag is set by hand and the step's answer is settled after.
+	local function flagged(b: any)
+		local pr: any = State.prOf(b.s, TARGET)
+		pr.tandem = true
+	end
+	local function drive(act: string, holdRoot: boolean?, settle: (w: any, b: any) -> ())
+		withWorld(function(w, Fetch, Block)
+			local b = agentBoard(w, Fetch, Block)
+			w.holdRoot = holdRoot == true
+			Block.event(b, { ev = "action", act = act, value = TARGET } :: any, w.cx)
+			assert(b.agentFlight ~= nil and b.s.agents[TARGET].kind == "running")
+			settle(w, b)
+			noFixer(w, b, act)
+			assert(#w.toasts == 0 and #w.encoded == 0)
+		end)
+	end
+	-- The repository lookup is out.
+	drive("card-agent", true, function(w, b)
+		assert(#w.finds == 2 and #w.clones == 0)
+		flagged(b)
+		w.finds[2].done({ root = REPO_ROOT }, nil)
+		assert(#w.clones == 0 and gh(w) == nil)
+	end)
+	-- The clone lookup is out.
+	drive("card-agent", false, function(w, b)
+		assert(#w.clones == 1)
+		flagged(b)
+		w.clones[1].done("/clone", nil)
+		assert(gh(w) == nil, "no PR refs are read for a PR Tandem owns")
+	end)
+	-- The folder question is out.
+	drive("card-agent-folder", false, function(w, b)
+		local finds = #w.finds
+		local ask = w.calls[#w.calls]
+		assert(ask.argv[1] == "osascript")
+		flagged(b)
+		ask.done(out("/Users/reader/clone\n"))
+		assert(#w.finds == finds and #w.clones == 0, "the chosen folder is not looked at")
+	end)
+	-- The bot feedback read is out.
+	withWorld(function(w, Fetch, Block)
+		local b = agentBoard(w, Fetch, Block)
+		b.botKeys[TARGET] = true
+		Block.event(b, { ev = "action", act = "card-agent-clone", value = TARGET } :: any, w.cx)
+		w.clones[1].done("/clone", nil)
+		assert(#w.details == 1 and b.agentFlight ~= nil)
+		flagged(b)
+		w.details[1].done(nil, { operation = "details", message = "late" })
+		noFixer(w, b, "bot feedback")
+		assert(gh(w) == nil and #w.toasts == 0, "it ends as stopped, not as a failure")
+	end)
+	-- The PR refs are out: the last step before the engine starts. The same sequence on an unwatched PR starts one.
+	for _, owned in { true, false } do
+		withWorld(function(w, Fetch, Block)
+			local b = agentBoard(w, Fetch, Block)
+			Block.event(b, { ev = "action", act = "card-agent", value = TARGET } :: any, w.cx)
+			w.clones[1].done("/clone", nil)
+			local refs = gh(w)
+			assert(refs ~= nil)
+			equal(refs.argv, { "gh", "pr", "view", "105", "--repo", "acme/api", "--json", "headRefName,baseRefName,headRefOid" })
+			if owned then flagged(b) end
+			refs.done(out("REFS"))
+			if owned then
+				noFixer(w, b, "refs")
+			else
+				assert(#w.started == 1 and w.started[1].request.key == TARGET and b.agentFlight ~= nil and b.agentFlight.engine ~= nil)
+			end
+		end)
+	end
+
+	-- A watch read that names the PR while its fix is being set up settles that fix at once: stopped, with no worktree
+	-- held, and the late folder answer starts nothing.
+	withWorld(function(w, Fetch, Block)
+		local b = agentBoard(w, Fetch, Block)
+		Block.event(b, { ev = "action", act = "card-agent-folder", value = TARGET } :: any, w.cx)
+		local ask = w.calls[#w.calls]
+		assert(ask.argv[1] == "osascript" and b.s.agents[TARGET].kind == "running")
+		claim(w, Block, b)
+		noFixer(w, b, "claimed")
+		local finds = #w.finds
+		ask.done(out("/Users/reader/clone\n"))
+		assert(#w.finds == finds and #w.clones == 0 and #w.started == 0 and b.agentFlight == nil and #w.toasts == 0)
+		Block.event(b, { ev = "action", act = "card-agent-stop", value = TARGET } :: any, w.cx)
+		assert(b.s.agents[TARGET] == nil and w.stops == 0)
+	end)
+
+	-- An engine that already holds a worktree is not cut off: Stop still reaches it.
+	withWorld(function(w, Fetch, Block)
+		local b = agentBoard(w, Fetch, Block)
+		Block.event(b, { ev = "action", act = "card-agent", value = TARGET } :: any, w.cx)
+		w.clones[1].done("/clone", nil)
+		gh(w).done(out("REFS"))
+		assert(#w.started == 1 and b.agentFlight.engine ~= nil and b.s.agents[TARGET].kind == "running")
+		claim(w, Block, b)
+		assert(#w.started == 1 and b.agentFlight ~= nil and b.s.agents[TARGET].kind == "running" and w.stops == 0, "the running engine is left alone")
+		Block.event(b, { ev = "action", act = "card-agent", value = TARGET } :: any, w.cx)
+		Block.event(b, { ev = "action", act = "card-agent-retry", value = TARGET } :: any, w.cx)
+		assert(#w.started == 1 and #w.toasts == 0)
+		Block.event(b, { ev = "action", act = "card-agent-stop", value = TARGET } :: any, w.cx)
+		assert(w.stops == 1, "Stop still stops it")
+	end)
+end
+
 local function fixture()
 	withWorld(function(w, Fetch, Block)
 		local cx: any = { cwd = REPO_ROOT }
@@ -642,5 +937,8 @@ return function()
 	fetching()
 	blockPaths()
 	rootPaths()
+	staleRead()
+	counts()
+	agentOverlap()
 	fixture()
 end

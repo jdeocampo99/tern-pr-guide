@@ -51,6 +51,7 @@ export type Block = {
 	github: Github.Client, timers: Timers,
 	flights: { refresh: boolean, checks: boolean, probe: boolean, flake: boolean, tandem: boolean }, -- one call of each kind at a time
 	watched: { [string]: boolean }, -- the PRs Tandem watches (lowercase "owner/repo#123"), from its last read
+	handoffs: number, -- hand-offs Tandem has taken this session: a read that began before one cannot name that PR
 	root: string?, -- the repository root `cx.cwd` is in, found once (Tandem's calls name the project by it)
 	rootWaiters: { (string?) -> () }?, -- the callers waiting on that lookup while it runs
 	sched: Sched,
@@ -288,6 +289,21 @@ local function persist(b: Block): string?
 	return if ok then nil else tostring(err)
 end
 
+-- Puts the cache's PRs and its Needs fixes and To review counts back in step with the board after Tandem's flags move a PR.
+-- The counts cover every PR, not the grid a search or repo filter leaves. `flashAt` stays: a count that fell is no alert.
+local function recount(b: Block)
+	local cache = b.cache
+	if not cache then return end
+	cache.prs = b.s.prs
+	local toReview, needFixes = 0, 0
+	for _, pr in cache.prs do
+		local column = Model.classify(pr, b.s.now)
+		if column == "to_review" then toReview += 1 end
+		if column == "needs_fixes" then needFixes += 1 end
+	end
+	cache.counts = { toReview = toReview, needFixes = needFixes, flashAt = cache.counts.flashAt }
+end
+
 local function cachedAt(b: Block): number?
 	return if b.cache then Model.epoch(b.cache.refreshedAt) else nil
 end
@@ -423,6 +439,21 @@ local function currentFlight(b: Block, flight: AgentFlight): boolean
 	return not b.closed and b.agentFlight == flight and not flight.settled and not flight.stopping
 end
 
+-- True while the fix may go on. One owner per branch: a fix still being set up for a PR Tandem has taken (no engine
+-- yet, so no worktree is held) ends as stopped, as Stop would end it, and never starts. A running engine is Stop's.
+local function carryOn(b: Block, cx: BlockCx, flight: AgentFlight): boolean
+	if not currentFlight(b, flight) then return false end
+	local pr = State.prOf(b.s, flight.key)
+	if not pr or not pr.tandem or flight.engine or flight.starting then return true end
+	flight.stopping = true
+	if flight.cancel then flight.cancel() end
+	flight.settled = true
+	b.agentFlight = nil
+	State.agentOutcome(b.s, flight.key, { kind = "stopped" })
+	draw(b, cx)
+	return false
+end
+
 local function settleAgent(b: Block, cx: BlockCx, flight: AgentFlight, outcome: AgentFix.Outcome)
 	if b.agentFlight ~= flight or flight.settled then return end
 	if outcome.kind == "running" then
@@ -475,7 +506,7 @@ local function readFeedback(b: Block, pr: Model.HubPR, done: (Fixes.FixDetails?,
 end
 
 local function startAgentEngine(b: Block, cx: BlockCx, flight: AgentFlight, clone: string, checkout: string, pr: Model.HubPR)
-	if not currentFlight(b, flight) then return end
+	if not carryOn(b, cx, flight) then return end
 	-- HubPR has baseBranch and headOid, but no head branch. Read and revalidate all three
 	-- together; never guess a branch from a local checkout or pass a stale head to the engine.
 	local replied = false
@@ -484,7 +515,7 @@ local function startAgentEngine(b: Block, cx: BlockCx, flight: AgentFlight, clon
 	local function metadata(out: Github.Out)
 		if replied then return end
 		replied = true
-		if not currentFlight(b, flight) then return end
+		if not carryOn(b, cx, flight) then return end
 		local ok, meta = pcall(tern.json.decode, out.stdout)
 		local latest = State.prOf(b.s, pr.key)
 		if out.status ~= 0 or out.timed_out or not ok or type(meta) ~= "table" then
@@ -537,13 +568,13 @@ local function startAgentEngine(b: Block, cx: BlockCx, flight: AgentFlight, clon
 		if not b.closed then draw(b, cx) end
 	end
 	local function refs()
-		if not currentFlight(b, flight) then return end
+		if not carryOn(b, cx, flight) then return end
 		local ok, err = pcall(Fetch.runner, { "gh", "pr", "view", tostring(pr.number), "--repo", pr.repo, "--json", "headRefName,baseRefName,headRefOid" }, { timeout_ms = 30_000 }, metadata)
 		if not ok then metadata({ status = -1, stdout = "", stderr = tostring(err), timed_out = false }) end
 	end
 	if flight.bot then
 		readFeedback(b, pr, function(details, err)
-			if not currentFlight(b, flight) then return end
+			if not carryOn(b, cx, flight) then return end
 			local latest = State.prOf(b.s, pr.key)
 			local input, prompt = State.botFeedback(b.s, pr.key)
 			if not details or not latest or not input or not prompt then
@@ -559,7 +590,8 @@ end
 local function beginAgent(b: Block, cx: BlockCx, key: string, mode: "fix" | "clone" | "folder")
 	if b.closed then return end
 	local pr = State.prOf(b.s, if key ~= "" then key else b.s.selected or "")
-	if not pr or b.s.busy[pr.key] then return end
+	-- One owner per branch: no fix starts, retries or looks for a clone on a PR Tandem watches.
+	if not pr or pr.tandem or b.s.busy[pr.key] then return end
 	if b.agentFlight then forgetReturned(b, b.agentFlight) end
 	if b.agentFlight or State.agentRunning(b.s) then return cx:toast("info", "One fix at a time") end
 	local existing = b.s.agents[pr.key]
@@ -577,7 +609,7 @@ local function beginAgent(b: Block, cx: BlockCx, key: string, mode: "fix" | "clo
 	local flight: AgentFlight = { key = pr.key, settled = false, stopping = false, releasing = false, bot = b.botKeys[pr.key] == true }
 	b.agentFlight = flight
 	draw(b, cx)
-	if not currentFlight(b, flight) then return end
+	if not carryOn(b, cx, flight) then return end
 	if b.fixture then
 		-- Even ordinary sample boards stay entirely local. ⌘R advances one recorded event.
 		local data: any = FIXTURES["agent-cards"]()
@@ -594,7 +626,7 @@ local function beginAgent(b: Block, cx: BlockCx, key: string, mode: "fix" | "clo
 	local function cloned(path: string?, err: string?)
 		if answered then return end
 		answered = true
-		if not currentFlight(b, flight) then return end
+		if not carryOn(b, cx, flight) then return end
 		if path then return startAgentEngine(b, cx, flight, path, checkout or path, pr) end
 		flight.settled = true
 		b.agentFlight = nil
@@ -604,10 +636,10 @@ local function beginAgent(b: Block, cx: BlockCx, key: string, mode: "fix" | "clo
 	end
 	local function find(allowClone: boolean)
 		local ok, err = pcall(Fetch.findAgentClone, near, dir, pr.repo, function(slug, answer)
-			if not currentFlight(b, flight) then return answer(nil) end
+			if not carryOn(b, cx, flight) then return answer(nil) end
 			if not allowClone then missing = true; return answer(nil) end
 			agentFolder(b, flight, "Choose a parent folder for " .. slug, function(parent, why)
-				if not currentFlight(b, flight) then return answer(nil) end
+				if not carryOn(b, cx, flight) then return answer(nil) end
 				if why then cloned(nil, why); return answer(nil) end
 				if not parent then cancelled = true; return answer(nil) end
 				local name = string.match(slug, "[^/]+$") :: string
@@ -619,14 +651,14 @@ local function beginAgent(b: Block, cx: BlockCx, key: string, mode: "fix" | "clo
 	local function choose()
 		if mode ~= "folder" then return find(mode == "clone") end
 		agentFolder(b, flight, "Choose the existing clone of " .. pr.repo, function(path, err)
-			if not currentFlight(b, flight) then return end
+			if not carryOn(b, cx, flight) then return end
 			if err then return cloned(nil, err) end
 			if not path then cancelled = true; return cloned(nil, nil) end
 			local checked = false
 			local function selected(repo: Fetch.Repo?, why: string?)
 				if checked then return end
 				checked = true
-				if not currentFlight(b, flight) then return end
+				if not carryOn(b, cx, flight) then return end
 				if not repo then return cloned(nil, why or "The selected folder is not a clone") end
 				local ok, problem = pcall(Fetch.rememberAgentClone, pr.repo, repo.root)
 				if not ok or problem then return cloned(nil, tostring(problem)) end
@@ -643,7 +675,7 @@ local function beginAgent(b: Block, cx: BlockCx, key: string, mode: "fix" | "clo
 	local function found(repo: Fetch.Repo?)
 		if checked then return end
 		checked = true
-		if not currentFlight(b, flight) then return end
+		if not carryOn(b, cx, flight) then return end
 		near, checkout = repo, if repo then repo.root else nil
 		choose()
 	end
@@ -956,12 +988,15 @@ end
 local function loadTandem(b: Block, cx: BlockCx)
 	if b.fixture or b.closed or b.flights.tandem or not cx.cwd then return end
 	b.flights.tandem = true
+	local epoch = b.handoffs
 	local replied = false
 	local function apply(watched: { [string]: boolean }?, err: string?)
 		if replied then return end
 		replied = true
 		b.flights.tandem = false
 		if b.closed then return end
+		-- A hand-off Tandem took while this read was out is newer than the read, which could not name that PR: drop it and read again.
+		if b.handoffs ~= epoch then return loadTandem(b, cx) end
 		if watched then b.watched = watched end
 		local flags = Model.tandemFlags(b.watched, b.s.prs)
 		local changed = false
@@ -970,7 +1005,10 @@ local function loadTandem(b: Block, cx: BlockCx)
 			if pr.tandem ~= want then pr.tandem, changed = want, true end
 		end
 		if not changed then return end
+		local flight = b.agentFlight
+		if flight then carryOn(b, cx, flight) end
 		State.project(b.s)
+		recount(b)
 		persist(b)
 		draw(b, cx)
 	end
@@ -1400,7 +1438,11 @@ ACTIONS["card-handoff"] = function(b, cx, asked)
 		else
 			current.tandem = true
 			b.watched[string.lower(repo) .. "#" .. number] = true
+			b.handoffs += 1
+			local flight = b.agentFlight
+			if flight then carryOn(b, cx, flight) end
 			State.project(s)
+			recount(b)
 			keepCache(b)
 			if outcome.notice then cx:toast("info", outcome.notice.text, key) end
 		end
@@ -2365,7 +2407,7 @@ local block: BlockDef<Block> = {
 		local b: Block = {
 			s = s, cache = cache, fixture = fixture, generate = opts ~= nil and opts.generate, agent = nil, agentFlight = nil, botKeys = {},
 			github = Github.client(Fetch.runner, tern.json.decode), timers = {},
-			flights = { refresh = false, checks = false, probe = false, flake = false, tandem = false }, watched = watched, root = nil, rootWaiters = nil,
+			flights = { refresh = false, checks = false, probe = false, flake = false, tandem = false }, watched = watched, handoffs = 0, root = nil, rootWaiters = nil,
 			sched = {
 				probedAt = now, probeChanged = false, focusedAt = if live then now else nil, checksAt = nil,
 				refreshTried = nil, lastModified = if cache then cache.lastModified else nil,
