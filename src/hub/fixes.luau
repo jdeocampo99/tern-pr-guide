@@ -114,7 +114,7 @@ end
 function M.steps(d: FixDetails, pr: HubPR): { Step }
 	local byGroup: { [Group]: { Step } } = { requested = {}, comment = {}, check = {}, conflict = {}, failure = {} }
 	for n, review in d.reviews do
-		if trimmed(review.body) ~= "" then
+		if trimmed(review.body) ~= "" and review.author ~= pr.author then
 			addStep(byGroup.requested, {
 				id = "review:" .. n, group = "requested", who = "@" .. review.author, text = M.firstLine(review.body),
 				path = nil, line = nil, thread = nil, review = review, check = nil, conflict = nil, note = nil,
@@ -122,7 +122,7 @@ function M.steps(d: FixDetails, pr: HubPR): { Step }
 		end
 	end
 	for _, thread in d.threads do
-		if not thread.bot then
+		if Model.threadCounts(pr, thread.author, thread.bot) then
 			addStep(byGroup[thread.group], {
 				id = "thread:" .. thread.id, group = thread.group, who = "@" .. thread.author, text = M.firstLine(thread.body),
 				path = thread.path, line = thread.line, thread = thread, review = nil, check = nil, conflict = nil, note = nil,

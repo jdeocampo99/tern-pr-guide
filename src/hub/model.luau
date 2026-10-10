@@ -151,20 +151,24 @@ local function active(pr: HubPR, now: number): boolean
 	return at ~= nil and now - at <= ACTIVE_SECONDS
 end
 
--- The viewer wrote their PRs, so its author is the viewer: their own reviews and threads never count.
+-- Whether a thread by `author` is feedback from a person to act on: not a bot, not the PR's author (the viewer
+-- wrote their PRs, so their own comments never count), and not someone whose latest review approved.
+function M.threadCounts(pr: HubPR, author: string, bot: boolean): boolean
+	if bot or author == pr.author then return false end
+	for _, review in pr.reviews.latest do
+		if review.author == author and review.verdict == "approved" then return false end
+	end
+	return true
+end
+
 local function personFeedback(pr: HubPR): boolean
 	local reviews = pr.reviews
-	local latestBy: { [string]: Review } = {}
 	for _, review in reviews.latest do
-		latestBy[review.author] = review
 		if not review.bot and review.author ~= pr.author and review.verdict == "changes_requested" then return true end
 	end
 	if not reviews.threadsKnown then return false end
 	for _, thread in reviews.threads do
-		if not thread.bot and thread.author ~= pr.author then
-			local theirs = latestBy[thread.author]
-			if not (theirs and theirs.verdict == "approved") then return true end
-		end
+		if M.threadCounts(pr, thread.author, thread.bot) then return true end
 	end
 	return false
 end

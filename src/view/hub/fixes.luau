@@ -65,7 +65,14 @@ local function header(s: State.State, pr: Model.HubPR, steps: { Step }): Node
 		el("div", { class = "gp-fx-hdr", key = "actions" }, actions),
 	}
 	local status: { Node } = {}
-	local chips = Fixes.chips(steps)
+	-- The card's own chips, so the page and the board never disagree; a card off the board falls back to the steps'.
+	local chips: { string } = {}
+	local card = State.card(s, pr.key)
+	if card then
+		for _, chip in card.chips do table.insert(chips, chip.text) end
+	else
+		chips = Fixes.chips(steps)
+	end
 	if route.error then
 		table.insert(status, span("gp-fx-error", route.error))
 	elseif #chips > 0 then

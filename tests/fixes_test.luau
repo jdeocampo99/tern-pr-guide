@@ -62,8 +62,8 @@ local function steps_()
 	local noCopy = Fixture.details.conflict
 	noCopy.conflictNote = "No local copy of jubbydev/tern-pr-guide-hub-smoke"
 	local pending = Fixes.steps(noCopy, Fixture.prs.conflict)
-	assert(ids(pending) == "comment:@jubbydev@smoke/conflict.txt:1 | conflict:Conflicts with main@-:nil", ids(pending))
-	assert(pending[2].note == "No local copy of jubbydev/tern-pr-guide-hub-smoke")
+	assert(ids(pending) == "conflict:Conflicts with main@-:nil", ids(pending))
+	assert(pending[1].note == "No local copy of jubbydev/tern-pr-guide-hub-smoke")
 
 	-- Merge failure alone: one note with the reason. Any other step replaces it.
 	local failure = steps("failure")
@@ -82,6 +82,26 @@ local function steps_()
 
 	local chips = Fixes.chips(Fixes.steps(d, Fixture.prs.conflict))
 	assert(table.concat(chips, ",") == "Address changes,Reply,Fix checks,Resolve conflicts")
+end
+
+local function people_()
+	-- The viewer's own thread on their PR is no step and no "Reply" chip (the recorded smoke #6 thread is by jubbydev).
+	local own = Fixes.steps(Fixture.details.conflict, Fixture.prs.conflict)
+	assert(#own == 1 and own[1].group == "conflict")
+	for _, step in own do assert(step.group ~= "comment") end
+	local chips = table.concat(Fixes.chips(own), ",")
+	assert(chips == "Resolve conflicts", chips)
+	-- A reviewer whose latest review approved leaves no step either; someone who only commented does.
+	local pr = table.clone(Fixture.prs.comment)
+	pr.reviews = table.clone(pr.reviews)
+	pr.reviews.latest = { { author = "devon", bot = false, verdict = "approved", at = "", oid = "" } }
+	assert(#Fixes.steps(Fixture.details.comment, pr) == 0)
+	pr.reviews.latest = { { author = "devon", bot = false, verdict = "commented", at = "", oid = "" } }
+	assert(#Fixes.steps(Fixture.details.comment, pr) == 1)
+	-- The one predicate the board uses.
+	local Model = require("../src/hub/model")
+	assert(Model.threadCounts(Fixture.prs.comment, "devon", false) and not Model.threadCounts(Fixture.prs.comment, "devon", true))
+	assert(not Model.threadCounts(Fixture.prs.comment, Fixture.prs.comment.author, false))
 end
 
 local function git_()
@@ -122,8 +142,8 @@ local function git_()
 	local d = Fixture.details.conflictMany
 	d.conflicts = conflicts
 	local list = Fixes.steps(d, Fixture.prs.conflictMany)
-	assert(ids(list) == "comment:@jubbydev@smoke/conflict.txt:1 | conflict:receipts.ts@src/session/receipts.ts:3 | conflict:store.ts@src/session/store.ts:2", ids(list))
-	assert(list[2].text == "· 2 conflicts" and list[3].text == "· 1 conflict")
+	assert(ids(list) == "conflict:receipts.ts@src/session/receipts.ts:3 | conflict:store.ts@src/session/store.ts:2", ids(list))
+	assert(list[1].text == "· 2 conflicts" and list[2].text == "· 1 conflict")
 end
 
 local function excerpts_()
@@ -206,6 +226,7 @@ end
 
 return function()
 	steps_()
+	people_()
 	git_()
 	excerpts_()
 	commands_()
