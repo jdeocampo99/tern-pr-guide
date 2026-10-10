@@ -40,6 +40,10 @@ type AgentFlight = {
 	failure: string?, -- why the engine failed: a lease held after it keeps this failed state, which a watched card would otherwise drop
 }
 
+-- A local edit (a pending merge, a dropped PR) the viewer made that no write has stored: the PR it named, the head it was
+-- made on, and the edit itself, which can be applied again to another board.
+type Replay = { key: string, head: string, edit: () -> () }
+
 -- The hub block's own state.
 export type Block = {
 	s: State,
@@ -55,7 +59,8 @@ export type Block = {
 	handoffs: number, -- hand-offs Tandem has taken this session: a read that began before one cannot name that PR
 	seen: { [string]: boolean }, -- write ids of caches this block stored or joined: one id is another window's word once, never again
 	heard: { { string } }, -- the PRs each other window's ownership-bearing write joined since the read of Tandem now out began, by key
-	held: string?, -- the write id of the stored cache whose snapshot `unsaved` ownership was last restored onto (see `adoptShared`)
+	held: string?, -- the write id of the stored cache this block's snapshot is: the one it last stored or adopted ("" when that had none; see `sharedCache`)
+	replays: { Replay }, -- successful local edits no write has stored yet; `persist` clears them, `adoptShared` lays them back onto an adopted cache
 	retired: { [string]: boolean }, -- write ids of stored caches a successful read of Tandem superseded whose own save failed (see `retire`)
 	unsaved: boolean, -- ownership restored onto an adopted cache that no write has stored yet (see `adoptShared`); `persist` clears it
 	root: string?, -- the repository root `cx.cwd` is in, found once (Tandem's calls name the project by it)
@@ -312,6 +317,8 @@ local function persist(b: Block): string?
 	end)
 	if ok then
 		b.unsaved = false
+		b.held = id
+		b.replays = {}
 		b.seen[id] = true
 		writeStatus(cache)
 	end
@@ -504,9 +511,10 @@ local function sharedCache(b: Block, strict: boolean): (Sync.Cache?, boolean)
 	local theirs, mine = Model.epoch(shared.refreshedAt), cachedAt(b)
 	if not theirs then return nil, true end
 	if mine == nil or theirs > mine or (not strict and theirs == mine) then return shared, true end
-	-- Ownership restored onto an adopted cache that no write has stored leaves the store's identity unreconciled: a distinct
-	-- cache at the same stamp may hold data this board lacks, so it is adopted whole (the store's own id decides, not its stamp).
-	if strict and b.unsaved and theirs == mine and storedId(shared) ~= b.held then return shared, true end
+	-- A cache stored at this block's own stamp that is not the one this block last stored or adopted is another window's
+	-- (a hand-off or a pending merge keeps the stamp) and may hold data this board lacks, whether or not an ownership is
+	-- unsaved, so it is adopted whole before anything writes (the store's own id decides, not its stamp).
+	if strict and theirs == mine and storedId(shared) ~= (b.held or "") then return shared, true end
 	return nil, true
 end
 
@@ -888,6 +896,20 @@ local function announce(b: Block, cx: BlockCx, old: Sync.Cache?, fresh: { Model.
 	end)
 end
 
+-- Applies the local edits no write has stored to the board's PRs again, each only while its PR is still there on the head
+-- it was made on: an adopted cache that moved the head knows better. Returns whether one applied.
+local function replayEdits(b: Block): boolean
+	local replayed = false
+	for _, kept in b.replays do
+		local pr = State.prOf(b.s, kept.key)
+		if pr and pr.headOid == kept.head then
+			kept.edit()
+			replayed = true
+		end
+	end
+	return replayed
+end
+
 -- Takes another window's newer cache, so windows share one refresh. The ownership this block restores onto it is stored
 -- at once, unless `hold`: a read of Tandem then writes nothing here and marks the block `unsaved`, so the successful answer's
 -- own save is the only write and no intermediate cache is left for a later guard to join. An answer that is dropped as
@@ -898,6 +920,8 @@ end
 -- It may not either when the store cannot be read, whether or not `unsaved`: "no cache" is then a guess, and the store may
 -- hold a distinct or newer cache this board lacks, so nothing that writes a snapshot goes on until a read succeeds and adopts
 -- it. A caller that cannot write one (`rearm`) may ignore the result.
+-- A local edit that no write has stored (`b.replays`) is applied to the adopted board again, so the cache that is stored next
+-- carries it.
 local function adoptShared(b: Block, cx: BlockCx, hold: boolean?): boolean
 	local shared, readable = sharedCache(b, true)
 	if not shared then return readable end
@@ -913,10 +937,11 @@ local function adoptShared(b: Block, cx: BlockCx, hold: boolean?): boolean
 	b.cache = shared
 	b.held = storedId(shared)
 	State.replace(b.s, prs, now, shared.refreshedAt)
+	local replayed = replayEdits(b)
 	reconcileFlight(b, cx)
 	-- The redraw may have closed the block: nothing is stored or counted after that.
 	if b.closed then return false end
-	if moved then
+	if moved or replayed then
 		recount(b)
 		if hold then
 			b.unsaved = true
@@ -1702,12 +1727,18 @@ end
 -- stored strictly newer than this block's own becomes the board first, with its stamp and its ownership, and `edit`
 -- lands on it: the write never lowers `refreshedAt` and never lays this block's older PR snapshot over newer data. The
 -- change says nothing about Tandem, so ownership stored at this stamp or later joins and is never written back as false.
-local function keepCache(b: Block, cx: BlockCx, edit: (() -> ())?)
+-- An `edit` that no write stores (the store could not be read, or the save failed) is kept with the head of PR `key`, and
+-- `adoptShared` applies it to the cache it adopts later, while that head stands.
+local function keepCache(b: Block, cx: BlockCx, edit: (() -> ())?, key: string?)
 	local safe = true
 	if b.cache and not b.fixture then safe = adoptShared(b, cx) end
 	-- Adopting a cache redraws, and the redraw may have closed the block: no edit and no write follow.
 	if b.closed then return end
-	if edit then edit() end
+	if edit then
+		local pr = if key then State.prOf(b.s, key) else nil
+		edit()
+		if pr and b.cache and not b.fixture then table.insert(b.replays, { key = pr.key, head = pr.headOid, edit = edit }) end
+	end
 	if b.cache then
 		joinShared(b)
 		applyOwnership(b, cx)
@@ -1839,7 +1870,7 @@ local function runMerge(b: Block, cx: BlockCx, pr: Model.HubPR, done: ((err: str
 			keepCache(b, cx, function()
 				s.acted[pr.key] = true
 				State.dropPr(s, pr.key)
-			end)
+			end, pr.key)
 			-- Adopting another window's cache may have drawn, and the draw closed the block: nothing goes on from here.
 			if b.closed then return end
 			if done then done(nil) else
@@ -1848,7 +1879,7 @@ local function runMerge(b: Block, cx: BlockCx, pr: Model.HubPR, done: ((err: str
 			end
 		else
 			State.setBusy(s, pr.key, nil)
-			keepCache(b, cx, function() State.setPending(s, pr.key, { method = method.kind, at = isoNow() }) end)
+			keepCache(b, cx, function() State.setPending(s, pr.key, { method = method.kind, at = isoNow() }) end, pr.key)
 			if b.closed then return end
 			if done then done(nil) else
 				toastDone(cx, pr, method)
@@ -1901,7 +1932,7 @@ ACTIONS["card-cancel"] = function(b, cx, key)
 		if err then
 			cx:toast("error", "Couldn't cancel the merge of #" .. pr.number .. ": " .. reasonOf(err.message), pr.repo)
 		else
-			keepCache(b, cx, function() State.setPending(s, key, nil) end)
+			keepCache(b, cx, function() State.setPending(s, key, nil) end, key)
 			if b.closed then return end
 			if method.kind == "comment" then
 				cx:toast("success", "Commented " .. (method.cancel or "") .. " on #" .. pr.number, pr.title)
@@ -1939,7 +1970,7 @@ ACTIONS["card-auto"] = function(b, cx, key)
 			cx:toast("error", "Couldn't set #" .. pr.number .. " to merge when ready: " .. reasonOf(err.message), pr.repo)
 		else
 			local kind = if method.kind == "comment" or method.kind == "label" then method.kind else "queue"
-			keepCache(b, cx, function() State.setPending(s, key, { method = kind, at = isoNow() }) end)
+			keepCache(b, cx, function() State.setPending(s, key, { method = kind, at = isoNow() }) end, key)
 			if b.closed then return end
 			cx:toast("success", "#" .. pr.number .. " will merge when ready", pr.title)
 			refetchSoon(b, cx)
@@ -1966,7 +1997,7 @@ ACTIONS["card-rerequest"] = function(b, cx, key)
 		if err then
 			cx:toast("error", "Couldn't re-request review on #" .. pr.number .. ": " .. reasonOf(err.message), pr.repo)
 		else
-			keepCache(b, cx, function() State.reRequested(s, key, logins) end)
+			keepCache(b, cx, function() State.reRequested(s, key, logins) end, key)
 			if b.closed then return end
 			cx:toast("success", "Asked " .. Model.reviewerList(logins) .. " to review #" .. pr.number .. " again", pr.title)
 			refetchSoon(b, cx)
@@ -2113,7 +2144,7 @@ local function runBatch(b: Block, cx: BlockCx, keys: { string }, merge: boolean)
 			keepCache(b, cx, function()
 				s.acted[pr.key] = true
 				State.dropPr(s, pr.key)
-			end)
+			end, pr.key)
 			after(nil)
 		end)
 	end
@@ -2171,7 +2202,7 @@ ACTIONS["card-update"] = function(b, cx, key)
 			keepCache(b, cx, function()
 				s.acted[key] = true
 				State.branchUpdated(s, key)
-			end)
+			end, key)
 			if b.closed then return end
 			cx:toast("success", "Updated #" .. pr.number .. " with " .. pr.baseBranch)
 			refetchSoon(b, cx)
@@ -2284,7 +2315,7 @@ ACTIONS["card-remove"] = function(b, cx, key)
 		local why = writeAdded(added)
 		if why then return cx:toast("error", "Couldn't remove #" .. pr.number .. ": " .. why, pr.repo) end
 	end
-	keepCache(b, cx, function() State.unadd(s, key) end)
+	keepCache(b, cx, function() State.unadd(s, key) end, key)
 	if b.closed then return end
 	cx:toast("info", "Removed #" .. pr.number .. " from Review requests", pr.repo)
 	refetch(b, cx)
@@ -2766,7 +2797,7 @@ local block: BlockDef<Block> = {
 		local b: Block = {
 			s = s, cache = cache, fixture = fixture, generate = opts ~= nil and opts.generate, agent = nil, agentFlight = nil, botKeys = {},
 			github = Github.client(Fetch.runner, tern.json.decode), timers = {},
-			flights = { refresh = false, checks = false, probe = false, flake = false, tandem = false }, watched = watched, handoffs = 0, seen = {}, heard = {}, held = nil, retired = {}, unsaved = false, root = nil, rootWaiters = nil,
+			flights = { refresh = false, checks = false, probe = false, flake = false, tandem = false }, watched = watched, handoffs = 0, seen = {}, heard = {}, held = if cache then storedId(cache) else nil, replays = {}, retired = {}, unsaved = false, root = nil, rootWaiters = nil,
 			sched = {
 				probedAt = now, probeChanged = false, focusedAt = if live then now else nil, checksAt = nil,
 				refreshTried = nil, lastModified = if cache then cache.lastModified else nil,

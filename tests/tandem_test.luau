@@ -3115,20 +3115,36 @@ local function sharedOwnership()
 		assert(#w.started == 0 and #handoffs(w) == 1, what .. ": no effect reached a branch")
 	end
 
-	withWorld(function(w, Fetch, Block)
-		local b, t3, sets = failedAdoption(w, Fetch, Block)
-		local run = mergeWhenReady(w, Block, b)
-		w.failGets = 1
-		run.done(nil, nil)
-		unsafeBoard(w, b, t3, sets, "unreadable action")
-		assert(State.prOf(b.s, MERGE_KEY).pending ~= nil and #w.toasts == 1, "the action's change stays on the board")
+	-- The action's change is a successful local edit the unreadable store could not take. It is laid back onto T3 when the next
+	-- read adopts it, and stored with it, while the PR still has the head the edit was made on; a PR that T3 moved is T3's.
+	for _, headMoved in { false, true } do
+		withWorld(function(w, Fetch, Block)
+			local what = if headMoved then "head moved" else "head kept"
+			local b, t3, sets = failedAdoption(w, Fetch, Block)
+			local run = mergeWhenReady(w, Block, b)
+			w.failGets = 1
+			run.done(nil, nil)
+			unsafeBoard(w, b, t3, sets, "unreadable action")
+			assert(State.prOf(b.s, MERGE_KEY).pending ~= nil and #w.toasts == 1, "the action's change stays on the board")
+			if headMoved then
+				for _, cached in w.kv["hub.cache"].prs do
+					if cached.key == MERGE_KEY then cached.headOid = "moved-head" end
+				end
+			end
 
-		b.github = quietGithub(function() end)
-		Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
-		reads(w)[#reads(w)].done(out("WATCH"))
-		wholeT3(w, b, t3, sets, "watch answer after an unreadable action", false)
-		assert(#w.started == 0 and #handoffs(w) == 1, "nothing else went on")
-	end)
+			b.github = quietGithub(function() end)
+			Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+			reads(w)[#reads(w)].done(out("WATCH"))
+			wholeT3(w, b, t3, sets, "watch answer after an unreadable action (" .. what .. ")", false)
+			local stored = false
+			for _, cached in w.kv["hub.cache"].prs do
+				if cached.key == MERGE_KEY then stored = cached.pending ~= nil end
+			end
+			assert((State.prOf(b.s, MERGE_KEY).pending ~= nil) == not headMoved, what .. ": the board keeps the action's change only on its head")
+			assert(stored == not headMoved, what .. ": and so does the cache that was stored")
+			assert(#w.started == 0 and #handoffs(w) == 1, "nothing else went on")
+		end)
+	end
 
 	withWorld(function(w, Fetch, Block)
 		local b, t3, sets = failedAdoption(w, Fetch, Block)
@@ -3293,6 +3309,55 @@ local function sharedOwnership()
 		keptT3(w, b, t3, sets, "refresh that was out when T3 landed")
 		assert(asked == 1 and not b.flights.refresh and not b.s.loading and #handoffs(w) == 0 and #w.started == 0, "nothing else went on")
 	end)
+
+	-- Window B stores a cache at the stamp this board holds, with a pending merge on a PR, and this window's next successful
+	-- write finds nothing unsaved. The stamp is the same, so only the id tells B's cache from this window's own: it is adopted
+	-- whole before the write, which keeps B's pending merge (Cancel merge and its failure tracking still work).
+	for _, via in { "hand-off", "refresh" } do
+		withWorld(function(w, Fetch, Block)
+			local b = agentBoard(w, Fetch, Block)
+			holdCache(w, b)
+			local answer: any = nil
+			b.github = quietGithub(function(_, done) answer = done end)
+			local function handOff()
+				Block.event(b, { ev = "action", act = "card-handoff", value = TARGET } :: any, w.cx)
+				handoffs(w)[#handoffs(w)].done(out("DONE"))
+			end
+			local function stores(id: string)
+				local theirs = storedCache({ WEB, API114 }, Cases.asOf)
+				theirs.writeId = id
+				for _, cached in theirs.prs do
+					if cached.key == MERGE_KEY then cached.pending = copy(PENDING) end
+				end
+				w.kv["hub.cache"] = theirs
+				assert(b.cache.refreshedAt == theirs.refreshedAt and not b.unsaved, via .. ": B stored at this board's stamp")
+			end
+			local id = "other-window#1"
+			if via == "refresh" then
+				-- This window has stored before, so its own id is the one it holds when B writes.
+				handOff()
+				assert(w.kv["hub.cache"].writeId ~= nil and not b.unsaved and State.prOf(b.s, TARGET).tandem == true, via .. ": this window stored")
+				id = "other-window#2"
+			end
+			stores(id)
+			assert(State.prOf(b.s, MERGE_KEY).pending == nil, via .. ": this board lacks B's pending merge")
+			local sets = w.cacheSets or 0
+			if via == "hand-off" then
+				handOff()
+			else
+				Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+				assert(answer ~= nil and b.flights.refresh, via .. ": the request is out")
+				answer(freshAnswer(), nil)
+			end
+			local stored = w.kv["hub.cache"]
+			assert((w.cacheSets or 0) > sets and stored.writeId ~= id, via .. ": this window's write followed")
+			assert(same(pendingOf(stored), PENDING) and State.prOf(b.s, MERGE_KEY).pending ~= nil, via .. ": B's pending merge went through")
+			assert(not b.unsaved and State.prOf(b.s, TARGET).tandem == true and b.watched[TARGET] == true, via .. ": and TARGET stays owned")
+			for _, cached in stored.prs do
+				if cached.key == TARGET then assert(cached.tandem == true, via .. ": and the hand-off is stored") end
+			end
+		end)
+	end
 
 	-- A closed block's entry paths are dead ends. The busy draw of a hand-off raises (the window is gone): no root is looked
 	-- up and nothing is sent, shown or armed.
