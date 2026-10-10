@@ -33,7 +33,7 @@ export type AgentFixState =
 	| { kind: "running", run: AgentFix.Run }
 	| { kind: "ready", fix: AgentFix.Fix, reviewed: { [string]: boolean }, review: ReviewFix.Review?, completion: ("push" | "discard")? }
 	| { kind: "pushing", fix: AgentFix.Fix }
-	| { kind: "failed", reason: string, worktree: string? }
+	| { kind: "failed", reason: string, worktree: string?, held: boolean? } -- `held`: the engine still holds the worktree's lease, so its return can be retried
 
 -- A pill on a card's chip line. `kind` picks its look; `running` carries the amber spinner.
 export type Chip = { text: string, kind: "bad" | "bad-soft" | "info" | "wait" | "done" | "agent" | "running" }
@@ -191,8 +191,8 @@ function M.noAgentClone(s: State, key: string, slug: string)
 	M.project(s)
 end
 
-function M.agentFailed(s: State, key: string, reason: string, worktree: string?)
-	s.agents[key] = { kind = "failed", reason = reason, worktree = worktree }
+function M.agentFailed(s: State, key: string, reason: string, worktree: string?, held: boolean?)
+	s.agents[key] = { kind = "failed", reason = reason, worktree = worktree, held = held }
 	M.project(s)
 end
 
@@ -205,8 +205,8 @@ export type AgentFlightFacts = {
 function M.agentFlight(s: State, key: string, facts: AgentFlightFacts): "wait" | "release" | "forget" | "ready"
 	local agent = s.agents[key]
 	if agent and (agent.kind == "ready" or agent.kind == "pushing") then return "ready" end
-	if agent and agent.kind == "failed" and agent.worktree ~= facts.worktree then
-		agent.worktree = facts.worktree
+	if agent and agent.kind == "failed" and (agent.worktree ~= facts.worktree or (agent.held == true) ~= (facts.worktree ~= nil)) then
+		agent.worktree, agent.held = facts.worktree, facts.worktree ~= nil
 		M.project(s)
 	end
 	if not facts.settled or facts.starting or facts.releasing then return "wait" end
@@ -476,7 +476,8 @@ local function actionsFor(pr: HubPR, column: Column, reasons: { Model.Reason }, 
 			if not (method and method.kind == "comment" and not method.cancel) then
 				table.insert(more, action("card-cancel", "Cancel merge", "M"))
 			end
-		elseif Model.canMergeWhenReady(merge, autoMerge) then
+		elseif not pr.tandem and Model.canMergeWhenReady(merge, autoMerge) then
+			-- Tandem owns the branch: no new merge is offered, only Cancel merge for one already pending.
 			table.insert(more, action("card-auto", "Merge when ready", "M"))
 		end
 		return main, more
@@ -658,8 +659,10 @@ local function toCard(pr: HubPR, placement: Model.Placement, s: State): Card
 			main, more, chips = action("card-agent-clone", "Clone repo", "A"), { action("card-agent-folder", "Choose folder…", "O") }, { chip("No local clone", "wait") }
 		elseif agent.kind == "failed" then
 			if pr.tandem then
-				-- A worktree is still held: Open worktree stays, while the branch's owner is Tandem.
+				-- A worktree is still held: Open worktree stays, while the branch's owner is Tandem. A lease whose return failed
+				-- keeps its retry as Return worktree (⇧A, free on this card), which returns it and starts no fixer.
 				main, more = action("card-handoff", "Hand off to Tandem", "A"), {}
+				if agent.held and agent.worktree then table.insert(more, action("card-agent-retry", "Return worktree", "⇧A")) end
 			else
 				main, more, chips = action("card-agent-retry", "Try again", "A"), {}, { chip("Fix failed", "bad-soft") }
 			end

@@ -385,7 +385,7 @@ local function closeAgentFlight(b: Block, flight: AgentFlight)
 		returnAgentLease(b, flight, function(ok, err)
 			if not ok then
 				local lease = (flight.engine :: AgentFix.Engine).held()
-				State.agentFailed(b.s, flight.key, err or "The worktree lease could not be returned", if lease then lease.path else nil)
+				State.agentFailed(b.s, flight.key, err or "The worktree lease could not be returned", if lease then lease.path else nil, lease ~= nil)
 			end
 		end)
 	end
@@ -740,7 +740,15 @@ local function adoptShared(b: Block, cx: BlockCx)
 	local theirs, mine = Model.epoch(shared.refreshedAt), cachedAt(b)
 	if theirs and (mine == nil or theirs > mine) then
 		local now = os.time()
-		-- This block's ownership set outranks the other window's, which may rest on an older read of Tandem.
+		-- Ownership runs one way. A PR the other window flags joins this block's set (it may be a hand-off this block's own
+		-- reads predate, so a read that began before cannot name it and is read again). The other window's silence never
+		-- clears one: only a successful read of Tandem here does, whatever the cache's age.
+		local took = false
+		for _, pr in shared.prs do
+			local key = string.lower(pr.repo) .. "#" .. pr.number
+			if pr.tandem and not b.watched[key] then b.watched[key], took = true, true end
+		end
+		if took then b.handoffs += 1 end
 		local prs = flagged(b.watched, shared.prs)
 		local moved = false
 		for i, pr in prs do
@@ -1260,20 +1268,28 @@ end
 ACTIONS["card-agent-retry"] = function(b, cx, key)
 	local agent, flight = b.s.agents[key], b.agentFlight
 	if not agent or agent.kind ~= "failed" then return end
+	-- On a PR Tandem watches this is Return worktree: it retries the guarded return and never starts a fixer.
+	local owner = State.prOf(b.s, key)
+	local cleanup = owner ~= nil and owner.tandem
+	local function afterReturn()
+		if not cleanup then return beginAgent(b, cx, key, "fix") end
+		State.project(b.s)
+		draw(b, cx)
+	end
 	-- A failed lease return retains the handle. Retry first retries that exact guarded
 	-- return, and starts no engine until it succeeds. Never release a ready worktree.
 	if flight and flight.key == key then
 		local disposition = forgetReturned(b, flight)
 		if disposition == "wait" then return cx:toast("info", "One fix at a time") end
-		if disposition ~= "release" then return beginAgent(b, cx, key, "fix") end
+		if disposition ~= "release" then return afterReturn() end
 		returnAgentLease(b, flight, function(ok, err)
 			if not ok then
 				local lease = (flight.engine :: AgentFix.Engine).held()
-				State.agentFailed(b.s, key, err or "The worktree lease could not be returned", if lease then lease.path else nil)
+				State.agentFailed(b.s, key, err or "The worktree lease could not be returned", if lease then lease.path else nil, lease ~= nil)
 				return draw(b, cx)
 			end
 			if b.closed then return end
-			beginAgent(b, cx, key, "fix")
+			afterReturn()
 		end)
 		return
 	end
@@ -1423,6 +1439,7 @@ end
 -- Tandem's answer is dropped when the card is gone or its head moved meanwhile. A refusal shows Tandem's notice
 -- and changes nothing.
 local HANDOFF_BUSY = "Handing off to Tandem…"
+local TANDEM_OWNS = "Tandem watches this pull request" -- why a push or merge on its branch is refused
 
 ACTIONS["card-handoff"] = function(b, cx, asked)
 	local s = b.s
@@ -1507,6 +1524,12 @@ end
 -- its repo's tool, or the reason it didn't.
 local function runMerge(b: Block, cx: BlockCx, pr: Model.HubPR, done: ((err: string?) -> ())?)
 	local s = b.s
+	-- One owner per branch: nothing new merges a PR Tandem watches (a merge already pending is only cancelled).
+	local owned = State.prOf(s, pr.key)
+	if owned and owned.tandem then
+		if done then return done(TANDEM_OWNS) end
+		return cx:toast("error", "Couldn't merge #" .. pr.number .. ": " .. TANDEM_OWNS, pr.repo)
+	end
 	local method = methodOf(b, pr)
 	State.setBusy(s, pr.key, MERGE_BUSY[method.kind] or "Merging…")
 	b.github.run(Github.commands.merge(pr, method), function(_, err)
@@ -1544,7 +1567,7 @@ end
 ACTIONS["card-merge"] = function(b, cx, key)
 	local s = b.s
 	local card = State.card(s, key)
-	if not card or s.busy[key] then return end
+	if not card or s.busy[key] or card.pr.tandem then return end
 	local pr = card.pr
 	if not b.fixture and not s.merges[pr.repo] then
 		-- Not known yet how this repo merges: GitHub's merge is never the guess.
@@ -1603,7 +1626,7 @@ end
 ACTIONS["card-auto"] = function(b, cx, key)
 	local s = b.s
 	local card = State.card(s, key)
-	if not card or s.busy[key] or card.pr.pending then return end
+	if not card or s.busy[key] or card.pr.pending or card.pr.tandem then return end
 	local pr = card.pr
 	State.select(s, key)
 	if b.fixture then return cx:toast("info", "The sample board doesn't merge", pr.key) end
@@ -2037,6 +2060,11 @@ local function reviewEffect(b: Block, cx: BlockCx, action: "push" | "discard")
 			return cx:toast("error", "Couldn't " .. verb .. " the fix: the worktree lease is unavailable")
 		end
 	end
+	-- One owner per branch: no push begins on a PR Tandem watches. The ready fix and its lease stay for Discard.
+	local owner = State.prOf(b.s, request.key)
+	if action == "push" and plan.command and owner and owner.tandem then
+		return cx:toast("error", "Couldn't push the fix: " .. TANDEM_OWNS)
+	end
 	local route = b.s.route :: State.Route
 	route.ask, route.error = false, nil
 	State.setBusy(b.s, request.key, if action == "push" and plan.command then "Pushing fix…" else "Returning worktree lease…")
@@ -2092,18 +2120,22 @@ local function reviewEffect(b: Block, cx: BlockCx, action: "push" | "discard")
 	local function completed(ok: boolean?, err: string?)
 		if called then return end
 		called = true
-		if not ok then return fail(err or "Git refused the push") end
+		if not ok then
+			local current = State.prOf(b.s, request.key)
+			return fail(if current and current.tandem then TANDEM_OWNS else err or "Git refused the push")
+		end
 		pushed = true
 		release()
 	end
 	if b.fixture then completed(true, nil); return end
+	-- Fetch asks this before every command of the push, the remote reads too: a PR Tandem takes meanwhile is never pushed to.
 	local function canPush(): boolean
 		local current = b.s.agents[request.key]
 		local pr = State.prOf(b.s, request.key)
 		return not b.closed and b.agentFlight == flight and current ~= nil and current == agent and current.kind == "ready"
 			and current.fix == request.fix and b.s.selected == request.key and b.s.route == route
 			and route.kind == "review-fix" and State.reviewed(current.fix, current.reviewed)
-			and pr ~= nil and pr.repo == request.repo and pr.number == request.number
+			and pr ~= nil and not pr.tandem and pr.repo == request.repo and pr.number == request.number
 			and (pr.headOid == request.fix.headOid or pr.headOid == request.fix.commit)
 	end
 	local ok, err = pcall(Fetch.pushAgentFix, plan, canPush, completed)

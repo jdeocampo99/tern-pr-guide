@@ -6,6 +6,8 @@ local Cases: any = require("../fixtures/hub/cases")
 local Model = require("../src/hub/model")
 local State = require("../src/hub/state")
 local Sync = require("../src/hub/sync")
+local ReviewFix = require("../src/hub/review-fix")
+local ReviewFixture: any = require("../fixtures/hub/review-fix")
 local RawWatch: any = require("../fixtures/hub/raw-tandem-watch")
 local RawFix: any = require("../fixtures/hub/raw-tandem-pr-fix")
 
@@ -1125,6 +1127,326 @@ local function terminalAgents()
 	end)
 end
 
+-- Window B accepted a hand-off and stored a newer cache that flags the PR, while this window's own (older) successful
+-- read of Tandem omits it. Adopting B's cache adds the PR to this window's ownership, whatever happens to the next
+-- read; only a later successful read of its own clears it.
+local function reverseSharedCache()
+	local KEY = "acme/api#116"
+	local function owned(w: any, b: any, why: string)
+		local mine = card(b.s, KEY)
+		assert(mine.pr.tandem and mine.column == "in_review" and mine.chips[1].text == "Waiting on Tandem" and b.watched[KEY] == true, why)
+		assert(mine.main and mine.main.act == "card-handoff" and not offers(mine, "card-agent"), why)
+		w.Block.event(b, { ev = "action", act = "card-agent", value = KEY } :: any, w.cx)
+		assert(b.agentFlight == nil and b.s.agents[KEY] == nil and gh(w) == nil, why .. ": no local fixer")
+	end
+
+	withWorld(function(w, Fetch, Block)
+		local b = live(w, Block)
+		reads(w)[1].done(out("WATCH"))
+		local fresh: any = { viewer = "jubbydev", prs = copy(Cases.prs), rateLimit = nil, calls = {}, truncated = false }
+		b.cache = Sync.merge(fresh, nil, { added = {}, tandem = Model.tandemFlags(b.watched, fresh.prs) }, Cases.asOf)
+		State.replace(b.s, b.cache.prs, Cases.asOf, Cases.asOfIso)
+		assert(b.watched[KEY] == nil and not card(b.s, KEY).pr.tandem)
+
+		local theirs = storedCache({ WEB, API114, KEY }, Cases.asOf + 60)
+		w.kvIn = { ["hub.cache"] = theirs }
+		b.github = quietGithub(function() end)
+		runTimers(w)
+		assert(b.cache.refreshedAt == theirs.refreshedAt, "the other window's cache was adopted")
+		assert(b.cache.counts.needFixes == needFixesOf(b) and w.kv["hub.status"].counts.needFixes == needFixesOf(b), "counted with the new owner")
+		frozen(b)
+		owned(w, b, "adopted")
+
+		-- The read that follows fails: the ownership stands.
+		assert(#reads(w) == 2 and b.flights.tandem)
+		reads(w)[2].done(out("nope"))
+		owned(w, b, "after a failed read")
+		assert(b.s.error == nil and not b.flights.tandem)
+
+		-- A successful read that began after the adoption and omits the PR clears it.
+		b.flights.refresh = false
+		b.github = { refresh = function() end }
+		Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+		assert(#reads(w) == 3)
+		reads(w)[3].done(out("WATCH"))
+		assert(not card(b.s, KEY).pr.tandem and b.watched[KEY] == nil and card(b.s, KEY).column == "needs_fixes" and card(b.s, KEY).main.label == "Fix with agent")
+		assert(b.cache.counts.needFixes == needFixesOf(b) and w.kv["hub.status"].counts.needFixes == needFixesOf(b))
+	end)
+
+	-- The block's first read is still out when the cache arrives. It began before the hand-off, so its answer, which
+	-- omits the PR, is dropped and read again; a failure of that read keeps the ownership too.
+	withWorld(function(w, Fetch, Block)
+		local b = live(w, Block)
+		assert(#reads(w) == 1 and b.flights.tandem)
+		w.kvIn = { ["hub.cache"] = storedCache({ WEB, API114, KEY }, Cases.asOf + 60) }
+		b.github = quietGithub(function() end)
+		runTimers(w)
+		frozen(b)
+		owned(w, b, "adopted while a read is out")
+		reads(w)[1].done(out("WATCH"))
+		owned(w, b, "the older read does not clear it")
+		assert(#reads(w) == 2 and b.flights.tandem)
+		reads(w)[2].done(out("", 1, "no daemon"))
+		owned(w, b, "the newer read failed")
+		assert(#reads(w) == 2 and not b.flights.tandem)
+	end)
+end
+
+-- A board whose TARGET holds a ready fix on the Review fix page, kept by a retained engine. The push and the lease
+-- return are recorded calls (the real `Fetch.pushAgentFix` needs the engine's own lease), settled by hand.
+local function withReady(run: (w: any, b: any) -> ())
+	withWorld(function(w, Fetch, Block)
+		local hostPush, hostReturn = Fetch.pushAgentFix, Fetch.returnAgentFix
+		local ok, err = pcall(function()
+			local b = agentBoard(w, Fetch, Block)
+			local fix: any = copy(ReviewFixture.fix)
+			local target: any = State.prOf(b.s, TARGET)
+			target.headOid = fix.headOid
+			local reviewed: { [string]: boolean } = {}
+			for _, hunk in fix.hunks do reviewed[hunk.id] = true end
+			b.s.agents[TARGET] = { kind = "ready", fix = fix, reviewed = reviewed, review = ReviewFix.build(fix, ReviewFixture.files, ReviewFixture.details) }
+			w.lease, w.pushes, w.returns = fix.worktree, {}, {}
+			b.agentFlight = {
+				key = TARGET, settled = true, stopping = false, releasing = false,
+				engine = {
+					stop = function() w.stops += 1 end, begin = function() end, busy = function(): boolean return false end,
+					release = function(finished: (boolean?, string?) -> ()) finished(true, nil) end,
+					held = function(): any return if w.lease then { path = w.lease } else nil end,
+				},
+			}
+			Fetch.pushAgentFix = function(plan: any, canPush: () -> boolean, done: (boolean?, string?) -> ())
+				table.insert(w.pushes, { plan = plan, canPush = canPush, done = done })
+			end
+			Fetch.returnAgentFix = function(path: string, done: (boolean?, string?) -> ())
+				table.insert(w.returns, { path = path, done = done })
+			end
+			State.project(b.s)
+			assert(State.openReviewFix(b.s, TARGET))
+			local route: any = b.s.route
+			route.loading = false
+			run(w, b)
+		end)
+		Fetch.pushAgentFix, Fetch.returnAgentFix = hostPush, hostReturn
+		if not ok then error(err, 0) end
+	end)
+end
+
+local function own(b: any, on: boolean)
+	local target: any = State.prOf(b.s, TARGET)
+	target.tandem = on
+end
+
+local function pressPush(w: any, b: any)
+	w.Block.event(b, { ev = "action", act = "review-fix-push", value = "" } :: any, w.cx)
+end
+
+-- The fix is returned and the card cleared: the lease is let go first, as the engine does.
+local function finishReturn(w: any, b: any, index: number)
+	w.lease = nil
+	w.returns[index].done(true, nil)
+	assert(b.s.agents[TARGET] == nil and b.agentFlight == nil and b.s.busy[TARGET] == nil)
+end
+
+-- A ready fix never pushes to a branch Tandem owns, whenever the ownership arrives; the fix and its lease stay for
+-- Discard, and a push that already went out still ends in its lease return.
+local function readyPush()
+	-- Ownership is there before P: nothing is pushed, and nothing is lost.
+	withReady(function(w, b)
+		own(b, true)
+		pressPush(w, b)
+		assert(#w.pushes == 0 and #w.returns == 0, "no push begins")
+		assert(b.s.agents[TARGET].kind == "ready" and b.agentFlight ~= nil and w.lease ~= nil and b.s.busy[TARGET] == nil, "the fix and its lease are kept")
+		assert(#w.toasts == 1 and w.toasts[1].kind == "error" and string.find(w.toasts[1].title, "Tandem watches this pull request", 1, true))
+
+		-- Discard still returns the lease.
+		w.Block.event(b, { ev = "action", act = "review-fix-discard", value = "" } :: any, w.cx)
+		w.Block.event(b, { ev = "action", act = "review-fix-discard-confirm", value = "" } :: any, w.cx)
+		assert(#w.returns == 1 and #w.pushes == 0)
+		finishReturn(w, b, 1)
+	end)
+
+	-- Ownership arrives while the push's own reads are out: the next command's gate refuses, and nothing is pushed.
+	withReady(function(w, b)
+		pressPush(w, b)
+		assert(#w.pushes == 1 and w.pushes[1].plan.command ~= nil)
+		local run = w.pushes[1]
+		assert(run.canPush() == true, "unwatched: the push may begin")
+		own(b, true)
+		assert(run.canPush() == false, "watched: no command of the push may run")
+		run.done(nil, "The selected fix changed")
+		assert(#w.pushes == 1 and #w.returns == 0)
+		assert(b.s.agents[TARGET].kind == "ready" and b.agentFlight ~= nil and w.lease ~= nil and b.s.busy[TARGET] == nil, "the fix and its lease are kept")
+		assert(#w.toasts == 1 and string.find(w.toasts[1].title, "Tandem watches this pull request", 1, true))
+		assert(b.s.route ~= nil and string.find((b.s.route :: any).error, "Tandem watches this pull request", 1, true))
+
+		-- P again does not push, and Discard still returns the lease.
+		pressPush(w, b)
+		assert(#w.pushes == 1)
+		w.Block.event(b, { ev = "action", act = "review-fix-discard", value = "" } :: any, w.cx)
+		w.Block.event(b, { ev = "action", act = "review-fix-discard-confirm", value = "" } :: any, w.cx)
+		assert(#w.returns == 1)
+		finishReturn(w, b, 1)
+	end)
+
+	-- A push that already went out before the ownership arrived still ends in its lease return.
+	withReady(function(w, b)
+		pressPush(w, b)
+		own(b, true)
+		w.pushes[1].done(true, nil)
+		assert(#w.returns == 1 and b.s.agents[TARGET].kind == "ready", "the lease is being returned")
+		finishReturn(w, b, 1)
+		assert(#w.pushes == 1 and w.toasts[#w.toasts].kind == "success")
+	end)
+
+	-- A return that failed after the push is retried by P on a watched PR: it pushes nothing and returns the lease.
+	withReady(function(w, b)
+		pressPush(w, b)
+		w.pushes[1].done(true, nil)
+		w.returns[1].done(nil, "busy")
+		assert(b.s.agents[TARGET].kind == "ready" and (b.s.agents[TARGET] :: any).completion == "push" and w.lease ~= nil)
+		own(b, true)
+		pressPush(w, b)
+		assert(#w.pushes == 1 and #w.returns == 2, "the retry only returns the lease")
+		finishReturn(w, b, 2)
+	end)
+end
+
+-- A lease whose return failed keeps its retry on a card Tandem owns: Return worktree returns it through the retained
+-- engine, and starts no fixer, whatever Tandem says later.
+local function retainedLease()
+	withWorld(function(w, Fetch, Block)
+		local b = agentBoard(w, Fetch, Block)
+		w.lease, w.releases = "/work/tree", {}
+		Fetch.startAgentFix = function(request: any, _agent: any, _now: number, changed: any, done: any): any
+			table.insert(w.started, { request = request, changed = changed, done = done })
+			return {
+				stop = function() w.stops += 1 end, begin = function() end, busy = function(): boolean return false end,
+				release = function(finished: (boolean?, string?) -> ()) table.insert(w.releases, finished) end,
+				held = function(): any return if w.lease then { path = w.lease } else nil end,
+			}
+		end
+		Block.event(b, { ev = "action", act = "card-agent", value = TARGET } :: any, w.cx)
+		w.clones[1].done("/clone", nil)
+		gh(w).done(out("REFS"))
+		assert(#w.started == 1 and b.agentFlight.engine ~= nil)
+		claim(w, Block, b)
+		w.started[1].done(nil, "boom")
+		local flight = b.agentFlight
+		assert(flight ~= nil and flight.settled and b.s.agents[TARGET].kind == "failed" and b.s.agents[TARGET].held == true, "the engine still holds the lease")
+
+		local mine = card(b.s, TARGET)
+		assert(mine.pr.tandem and mine.chips[1].text == "Waiting on Tandem" and mine.main and mine.main.act == "card-handoff" and mine.main.key == "A")
+		local cleanup: any = nil
+		for _, more in mine.more do
+			if more.act == "card-agent-retry" then cleanup = more end
+		end
+		assert(cleanup and cleanup.label == "Return worktree" and cleanup.key == "⇧A", "a cleanup-only control")
+		assert(offers(mine, "card-agent-worktree") and not offers(mine, "card-agent"))
+
+		-- Its key reaches the return, and a failed return stays recoverable.
+		local clones, finds = #w.clones, #w.finds
+		State.select(b.s, TARGET)
+		b.s.keyed = true
+		Block.key(b, { name = "a", shift = true } :: any, w.cx)
+		assert(#w.releases == 1 and b.s.agents[TARGET].kind == "failed" and #w.started == 1)
+		w.releases[1](false, "still busy")
+		local kept = card(b.s, TARGET)
+		assert(b.agentFlight == flight and b.s.agents[TARGET].kind == "failed" and b.s.agents[TARGET].held == true and w.lease ~= nil, "a failed return keeps the lease")
+		assert(offers(kept, "card-agent-retry") and kept.main.act == "card-handoff")
+		assert(#w.started == 1 and #w.clones == clones and #w.finds == finds)
+
+		-- The click sends the same action; on success the state clears and nothing starts.
+		Block.event(b, { ev = "action", act = "card-agent-retry", value = TARGET } :: any, w.cx)
+		assert(#w.releases == 2)
+		w.lease = nil
+		w.releases[2](true, nil)
+		assert(b.agentFlight == nil and b.s.agents[TARGET] == nil, "the retained state is cleared")
+		assert(#w.started == 1 and #w.clones == clones and #w.finds == finds and w.stops == 0)
+		local done = card(b.s, TARGET)
+		assert(done.pr.tandem and done.main and done.main.act == "card-handoff" and not offers(done, "card-agent-retry") and not offers(done, "card-agent-worktree"))
+	end)
+
+	-- Tandem letting go while the return runs does not turn it into a retry of the fix.
+	withWorld(function(w, Fetch, Block)
+		local b = agentBoard(w, Fetch, Block)
+		w.lease, w.releases = "/work/tree", {}
+		Fetch.startAgentFix = function(request: any, _agent: any, _now: number, changed: any, done: any): any
+			table.insert(w.started, { request = request, changed = changed, done = done })
+			return {
+				stop = function() w.stops += 1 end, begin = function() end, busy = function(): boolean return false end,
+				release = function(finished: (boolean?, string?) -> ()) table.insert(w.releases, finished) end,
+				held = function(): any return if w.lease then { path = w.lease } else nil end,
+			}
+		end
+		Block.event(b, { ev = "action", act = "card-agent", value = TARGET } :: any, w.cx)
+		w.clones[1].done("/clone", nil)
+		gh(w).done(out("REFS"))
+		claim(w, Block, b)
+		w.started[1].done(nil, "boom")
+		Block.event(b, { ev = "action", act = "card-agent-retry", value = TARGET } :: any, w.cx)
+		assert(#w.releases == 1)
+		own(b, false)
+		w.lease = nil
+		w.releases[1](true, nil)
+		assert(b.agentFlight == nil and #w.started == 1 and #w.clones == 1, "no fixer starts after a cleanup")
+	end)
+end
+
+-- A watched PR offers no new merge, by any method, and the handlers send nothing for a stale click. A merge already
+-- pending can still be cancelled.
+local function watchedMerge()
+	local MERGED = "acme/api#109"
+	local methods: { [string]: any } = {
+		squash = { method = { kind = "squash" }, source = "user", ask = false },
+		comment = { method = { kind = "comment", command = "/merge" }, source = "declared", ask = false },
+		label = { method = { kind = "label", label = "ready-to-merge" }, source = "declared", ask = false },
+	}
+	for name, resolution in methods do
+		local function boardFor(key: string, tandem: boolean): State.Card
+			local s = board({ pr(key, { tandem = tandem }) })
+			s.merges["acme/api"], s.autoMerge["acme/api"] = resolution, true
+			State.project(s)
+			return card(s, key)
+		end
+		assert(offers(boardFor("acme/api#114", false), "card-auto"), name .. ": an unwatched card offers Merge when ready")
+		for _, key in { MERGED, "acme/api#114" } do
+			local watched = boardFor(key, true)
+			assert(watched.column == "in_review" and watched.chips[1].text == "Waiting on Tandem", name)
+			for _, forbidden in { "card-auto", "card-merge", "card-method", "card-update" } do assert(not offers(watched, forbidden), name .. ": " .. forbidden) end
+		end
+	end
+
+	withWorld(function(w, Fetch, Block)
+		local b = live(w, Block)
+		reads(w)[1].done(out("WATCH"))
+		w.runs = {}
+		b.github = { refresh = function() end, run = function(command: any, done: any) table.insert(w.runs, { command = command, done = done }) end }
+		for name, resolution in methods do
+			w.toasts = {}
+			b.s.merges["acme/api"], b.s.autoMerge["acme/api"] = resolution, true
+			local target: any = State.prOf(b.s, MERGED)
+			target.tandem, target.pending = false, nil
+			State.project(b.s)
+			-- The question was asked before Tandem took the PR; the answer arrives after.
+			State.askMerge(b.s, MERGED)
+			target.tandem = true
+			State.project(b.s)
+			for _, act in { "card-merge", "card-auto", "hub-confirm" } do
+				Block.event(b, { ev = "action", act = act, value = MERGED } :: any, w.cx)
+			end
+			assert(#w.runs == 0 and b.s.busy[MERGED] == nil and State.prOf(b.s, MERGED).pending == nil, name .. ": nothing is sent")
+		end
+
+		-- A merge that was pending before the ownership arrived can still be cancelled.
+		b.s.merges["acme/api"], b.s.autoMerge["acme/api"] = methods.squash, true
+		State.setPending(b.s, MERGED, { method = "queue", at = "2026-10-10T00:00:00Z" })
+		local pending = card(b.s, MERGED)
+		assert(pending.pr.tandem and offers(pending, "card-cancel") and not offers(pending, "card-auto"))
+		Block.event(b, { ev = "action", act = "card-cancel", value = MERGED } :: any, w.cx)
+		assert(#w.runs == 1 and table.find(w.runs[1].command.argv, "--disable-auto") ~= nil, "Cancel merge still runs")
+	end)
+end
+
 local function fixture()
 	withWorld(function(w, Fetch, Block)
 		local cx: any = { cwd = REPO_ROOT }
@@ -1172,5 +1494,9 @@ return function()
 	cachedStartup()
 	sharedCache()
 	terminalAgents()
+	reverseSharedCache()
+	readyPush()
+	retainedLease()
+	watchedMerge()
 	fixture()
 end
