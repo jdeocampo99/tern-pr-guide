@@ -29,7 +29,7 @@ function M.card(card: State.Card): string
 	return M.ROOT .. ".body.board." .. M.columnKey(card.column) .. "." .. M.cardKey(card.pr.key)
 end
 
--- The selection bar (or its confirm): at the top of Ready to merge, or of the Inactive rows.
+-- The selection bar: at the top of Ready to merge, or of the Inactive rows.
 function M.selection(group: string): string
 	if group == "inactive" then return M.ROOT .. ".body.fold.rows.selection" end
 	return M.ROOT .. ".body.board." .. M.columnKey("ready") .. ".selection"

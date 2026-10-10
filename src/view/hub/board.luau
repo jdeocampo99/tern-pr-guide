@@ -277,6 +277,11 @@ end
 function M.layer(s: State.State): Node?
 	if s.mode == "menu" and s.menu then
 		return el("div", {}, { el("div", { class = "gp-md-scrim", key = "scrim", actions = { click = "hub-menu-close" } }), Menus.view(s) })
+	elseif s.mode == "confirm" then
+		local selection = State.selection(s)
+		if selection and selection.confirm then
+			return el("div", {}, { el("div", { class = "gp-md-scrim", key = "scrim", actions = { click = "hub-confirm-cancel" } }), Selection.overlay(selection.confirm, Paths.selection(selection.group)) })
+		end
 	elseif s.mode == "help" then
 		return el("div", {}, { el("div", { class = "gp-md-scrim", key = "scrim", actions = { click = "hub-help-close" } }), Help.view() })
 	end
