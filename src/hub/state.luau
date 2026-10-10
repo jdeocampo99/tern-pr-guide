@@ -194,6 +194,26 @@ function M.agentFailed(s: State, key: string, reason: string, worktree: string?)
 	M.project(s)
 end
 
+-- An ephemeral snapshot from Block, never stored in State. A terminal event's path
+-- describes where work happened; only the engine's held lease proves current ownership.
+export type AgentFlightFacts = {
+	settled: boolean, starting: boolean, releasing: boolean, busy: boolean, worktree: string?,
+}
+
+function M.agentFlight(s: State, key: string, facts: AgentFlightFacts): "wait" | "release" | "forget" | "ready"
+	local agent = s.agents[key]
+	if agent and (agent.kind == "ready" or agent.kind == "pushing") then return "ready" end
+	if agent and agent.kind == "failed" and agent.worktree ~= facts.worktree then
+		agent.worktree = facts.worktree
+		M.project(s)
+	end
+	if not facts.settled or facts.starting or facts.releasing then return "wait" end
+	-- busy may be false after settlement even when the lease return failed.
+	if facts.worktree then return "release" end
+	if facts.busy then return "wait" end
+	return "forget"
+end
+
 -- Closing stops only running fixes. Ready worktrees and their leases belong to #16.
 function M.closeAgent(s: State): string?
 	local key = M.agentRunning(s)

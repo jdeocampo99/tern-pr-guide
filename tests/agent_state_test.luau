@@ -42,6 +42,127 @@ local function serializable(value: any)
 	if kind == "table" then for _, child in value do serializable(child) end end
 end
 
+-- Block cannot load in the pure test runner. Exercise its shared ownership decision
+-- with #15's engine, including callbacks before the caller receives the engine handle.
+local function failureOwnership(returnFails: boolean, closing: boolean)
+	local s, key = fresh(), Cards.keys.idle
+	begin(s, key)
+	local facts: State.AgentFlightFacts = { settled = false, starting = true, releasing = false, busy = false }
+	local handle: AgentFix.Engine? = nil
+	local calls, returns, starts = 0, 0, 1
+	local acquisition: ((AgentFix.Out) -> ())? = nil
+	local pendingReturn: ((AgentFix.Out) -> ())? = nil
+	local completed = false
+	local function reconcile(): string
+		local lease = if handle then handle.held() else nil
+		facts.worktree = if lease then lease.path else nil
+		facts.busy = handle ~= nil and handle.busy()
+		local decision = State.agentFlight(s, key, facts)
+		if decision == "forget" then handle = nil end
+		return decision
+	end
+	assert(reconcile() == "wait", "lookup must hold the single-run slot")
+	local engine = AgentFix.engine(Cards.spec(key), {
+		runner = function(argv, _, done)
+			calls += 1
+			if calls == 1 then
+				if closing then acquisition = done else done({ status = 0, stdout = "acquired", stderr = "", timed_out = false }) end
+				return
+			end
+			if argv[1] == "git" then
+				assert(not closing and calls == 2 and argv[5] == "status", "fail before changing the worktree")
+				return done({ status = 1, stdout = "", stderr = "status failed", timed_out = false })
+			end
+			assert(#argv == #Tree["return"].argv)
+			for i, word in argv do assert(word == Tree["return"].argv[i], "retry must use the exact lease guards") end
+			returns += 1
+			if returns == 1 then
+				done({ status = if returnFails then 1 else 0, stdout = "", stderr = if returnFails then "pool unavailable" else "", timed_out = false })
+			else
+				assert(not pendingReturn)
+				pendingReturn = done
+			end
+		end,
+		decode = function(text) assert(text == "acquired"); return Tree.get.reply end,
+		samePath = function(_, _, done) done(false, nil) end,
+		resolutions = function() error("no agent work during failure recovery") end,
+	}, Cards.asOf, function(outcome)
+		if outcome.kind ~= "running" then facts.settled = true end
+		if closing and outcome.kind == "failed" then State.agentFailed(s, key, outcome.reason, outcome.worktree)
+		else State.agentOutcome(s, key, outcome) end
+		reconcile()
+		if not handle and outcome.kind == "failed" then
+			assert(card(s, key).agentPath == nil and #card(s, key).more == 0, "an unassigned engine cannot prove ownership")
+		end
+	end, function(fix, err)
+		assert(not fix and err ~= nil)
+		completed = true
+		assert(reconcile() == (if closing and returnFails then "release" else "wait"), "synchronous completion must retain the startup slot")
+	end)
+	engine.begin()
+	if not closing then assert(completed and facts.settled and returns == 1) end
+	handle = engine
+	facts.starting = false
+	if closing then
+		assert(State.closeAgent(s) == key)
+		engine.stop()
+		local acquired = acquisition :: (AgentFix.Out) -> ()
+		acquired({ status = 0, stdout = "acquired", stderr = "", timed_out = false })
+		assert(completed and calls == 2, "close must return the lease without running Git")
+	end
+	if not returnFails then
+		assert(reconcile() == "forget" and handle == nil and engine.held() == nil)
+		main(s, key, "Try again", "card-agent-retry", "A")
+		assert(card(s, key).agentPath == nil and #card(s, key).more == 0)
+		assert(s.agents[key].kind == "failed" and (s.agents[key] :: any).worktree == nil)
+		assert(Keys.hubAction(s, { name = "o" } :: any) == nil)
+		return
+	end
+	assert(reconcile() == "release" and handle == engine)
+	main(s, key, "Try again", "card-agent-retry", "A")
+	assert(card(s, key).agentPath == "/pool/acme/web/wt-1" and card(s, key).more[1].act == "card-agent-worktree")
+	-- Held ownership wins even for an engine that reports idle after settlement.
+	facts.busy = false
+	assert(State.agentFlight(s, key, facts) == "release")
+	facts.starting = true
+	assert(State.agentFlight(s, key, facts) == "wait", "second A during engine assignment must be refused")
+	facts.starting, facts.settled = false, false
+	assert(State.agentFlight(s, key, facts) == "wait", "second A during a run must be refused")
+	facts.settled = true
+	local function retry()
+		assert(reconcile() == "release" and handle == engine, "retry must keep the original engine")
+		facts.releasing = true
+		local retained = handle :: AgentFix.Engine
+		retained.release(function(ok)
+			facts.releasing = false
+			local decision = reconcile()
+			if ok then
+				assert(decision == "forget" and handle == nil and engine.held() == nil)
+				if not closing then
+					assert(State.beginAgent(s, key, Cards.asOf))
+					starts += 1
+				end
+			else
+				assert(decision == "release" and handle == engine and card(s, key).agentPath == "/pool/acme/web/wt-1")
+			end
+		end)
+		assert(reconcile() == "wait" and handle == engine, "second A during return must be refused")
+		assert(starts == 1 and pendingReturn ~= nil)
+	end
+	retry()
+	local reply = pendingReturn :: (AgentFix.Out) -> ()
+	pendingReturn = nil
+	reply({ status = 1, stdout = "", stderr = "still unavailable", timed_out = false })
+	assert(handle == engine and starts == 1)
+	retry()
+	reply = pendingReturn :: (AgentFix.Out) -> ()
+	pendingReturn = nil
+	reply({ status = 0, stdout = "", stderr = "", timed_out = false })
+	assert(returns == 3 and handle == nil and starts == (if closing then 1 else 2))
+	assert(card(s, key).agentPath == nil and #card(s, key).more == 0)
+	serializable(s.agents)
+end
+
 -- The real #15 engine, stopped while acquisition is pending, must capture and return the
 -- exact lease. The close decision is State's; the engine and its stop hook stay outside State.
 local function closingReturnsLease()
@@ -145,6 +266,8 @@ return function()
 	assert(card(s, key).agentCommit == "bbbbbbb" and card(s, key).agentPath == "/pool/acme/web/wt-1")
 	assert(string.find(card(s, key).agentMessage :: string, "bbbbbbb", 1, true))
 	assert(card(s, key).chips[1].text == "Fix ready" and card(s, key).chips[1].kind == "done")
+	assert(State.agentFlight(s, key, { settled = true, starting = false, releasing = false, busy = false }) == "ready")
+	assert(s.agents[key] == ready and card(s, key).agentPath == "/pool/acme/web/wt-1", "lease reconciliation must preserve ready fixes")
 	assert(not State.agentEvent(s, key, { kind = "failed", reason = "late failure" }))
 	assert(not State.beginAgent(s, key, Cards.asOf) and State.closeAgent(s) == nil)
 	assert(s.agents[key] == ready, "close must keep the ready fix and reviewed set")
@@ -187,6 +310,9 @@ return function()
 	State.closeFixes(s)
 	cloneFromNoClone()
 	closingReturnsLease()
+	failureOwnership(false, false)
+	failureOwnership(true, false)
+	failureOwnership(true, true)
 
 	local fixture = fresh()
 	for fixtureKey, agent in Cards.agents do fixture.agents[fixtureKey] = agent end
@@ -195,6 +321,7 @@ return function()
 	assert(card(fixture, Cards.keys.running).agentMessage == "Resolving conflicts…" and card(fixture, Cards.keys.running).chips[1].kind == "agent")
 	main(fixture, Cards.keys.ready, nil, nil, nil)
 	main(fixture, Cards.keys.failed, "Try again", "card-agent-retry", "A")
+	assert(card(fixture, Cards.keys.failed).agentPath == "/pool/acme/web/wt-1" and card(fixture, Cards.keys.failed).more[1].act == "card-agent-worktree")
 	main(fixture, Cards.keys.no_clone, "Clone repo", "card-agent-clone", "A")
 	serializable(fixture.agents)
 end

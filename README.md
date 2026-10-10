@@ -201,7 +201,7 @@ Anywhere in Tern: `⌥⌘R` opens the PR hub and `⌥⇧⌘R` opens it with AI g
 | `h` `j` `k` `l` / arrows | move between cards | `⏎` / double-click | open (a Needs fixes card opens the fixes page) | `/` | search |
 | `.` | next pull request that needs you, across both tabs | | | | |
 | `T` | switch tab | `A` | fix with agent, Stop, Try again, Clone repo, or summarize | `F` | filter by repository |
-| | | `O` | choose an existing clone folder, or open a failed fix's worktree | | |
+| | | `O` | choose an existing clone folder, or open a failed fix's retained worktree | | |
 | `I` | show or hide Inactive | `⇧⏎` | open with the AI guide started |
 | `R` | show or hide Recently opened (Review requests) | `⇧A` | summarize feedback | `S` | sort |
 | | | `C` | copy link | `⇧M` | agent model |
@@ -281,6 +281,11 @@ action goes away once they are asked.
 Paste a `github.com/owner/repo/pull/123` link or type `owner/repo#123`. `⏎` adds it to Review
 requests as "Added by you" (up to 50), `⇧⏎` opens it without adding. For a pull request already on
 the board, `⏎` shows it and `⇧⏎` opens it. `X` removes one you added.
+
+After a failed fix, **Open worktree** (`O`) appears only while the agent still holds its lease.
+If returning the lease failed, **Try again** (`A`) retries that return before starting another fix.
+The hub keeps the lease handle until it is returned, including when the hub closes. A Fix ready
+worktree stays in place for review.
 
 In a menu, `j` `k` move, `Space` chooses (a repository toggles), `⏎` chooses or closes, `Esc` closes, and in the agent menu `←` `→` change the effort.
 

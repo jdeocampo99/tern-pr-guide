@@ -33,7 +33,7 @@ type Sched = {
 -- completion before Fetch.startAgentFix returns its handle.
 type AgentFlight = {
 	key: string, engine: AgentFix.Engine?, settled: boolean, stopping: boolean,
-	cancel: (() -> ())?, releasing: boolean, fixtureStep: number?,
+	cancel: (() -> ())?, releasing: boolean, starting: boolean?, fixtureStep: number?,
 }
 
 -- The hub block's own state.
@@ -287,17 +287,64 @@ local function arm(b: Block, cx: BlockCx, name: "probe" | "refresh" | "checks" |
 	end)
 end
 
+local function forgetReturned(b: Block, flight: AgentFlight): string
+	local disposition
+	if b.fixture then
+		disposition = if flight.settled then "forget" else "wait"
+	else
+		local lease = if flight.engine then flight.engine.held() else nil
+		disposition = State.agentFlight(b.s, flight.key, {
+			settled = flight.settled, starting = flight.starting == true, releasing = flight.releasing,
+			busy = flight.engine ~= nil and flight.engine.busy(), worktree = if lease then lease.path else nil,
+		})
+	end
+	if disposition == "forget" and b.agentFlight == flight then b.agentFlight = nil end
+	return disposition
+end
+
+-- Retry and close return through the same retained engine. A callback alone is not
+-- proof of return: re-read held() before dropping the handle or allowing another run.
+local function returnAgentLease(b: Block, flight: AgentFlight, done: (boolean?, string?) -> ())
+	local engine = flight.engine
+	if not engine or flight.releasing then return end
+	flight.releasing = true
+	local called = false
+	local function returned(ok: boolean?, err: string?)
+		if called then return end
+		called = true
+		flight.releasing = false
+		local disposition = forgetReturned(b, flight)
+		if disposition == "release" then ok, err = nil, err or "The worktree lease could not be returned" end
+		done(ok, err)
+	end
+	local ok, err = pcall(engine.release, returned)
+	if not ok then returned(nil, tostring(err)) end
+end
+
+local function closeAgentFlight(b: Block, flight: AgentFlight)
+	local disposition = forgetReturned(b, flight)
+	if disposition == "ready" then return end
+	if not flight.settled then
+		flight.stopping = true
+		if flight.cancel then flight.cancel() end
+		-- stop waits for any worker, then returns its lease.
+		if flight.engine then flight.engine.stop() end
+	elseif disposition == "release" then
+		returnAgentLease(b, flight, function(ok, err)
+			if not ok then
+				local lease = (flight.engine :: AgentFix.Engine).held()
+				State.agentFailed(b.s, flight.key, err or "The worktree lease could not be returned", if lease then lease.path else nil)
+			end
+		end)
+	end
+end
+
 local function stop(b: Block)
 	if b.closed then return end
 	b.closed = true
 	local flight = b.agentFlight
-	local running = State.closeAgent(b.s)
-	if flight and not flight.settled and flight.key == running then
-		flight.stopping = true
-		if flight.cancel then flight.cancel() end
-		-- stop waits for any worker, then returns its lease. A ready engine is never stopped.
-		if flight.engine then flight.engine.stop() end
-	end
+	State.closeAgent(b.s)
+	if flight then closeAgentFlight(b, flight) end
 	local timers = b.timers :: any
 	for _, name in { "probe", "refresh", "checks", "debounce", "ring" } do
 		local handle: TimerHandle? = timers[name]
@@ -340,14 +387,6 @@ local function currentFlight(b: Block, flight: AgentFlight): boolean
 	return not b.closed and b.agentFlight == flight and not flight.settled and not flight.stopping
 end
 
-local function forgetReturned(b: Block, flight: AgentFlight)
-	if not flight.settled then return end
-	local agent = b.s.agents[flight.key]
-	if agent and (agent.kind == "ready" or agent.kind == "pushing") then return end
-	if flight.engine and flight.engine.busy() then return end
-	if b.agentFlight == flight then b.agentFlight = nil end
-end
-
 local function settleAgent(b: Block, cx: BlockCx, flight: AgentFlight, outcome: AgentFix.Outcome)
 	if b.agentFlight ~= flight or flight.settled then return end
 	if outcome.kind == "running" then
@@ -359,9 +398,12 @@ local function settleAgent(b: Block, cx: BlockCx, flight: AgentFlight, outcome: 
 	if outcome.kind == "ready" then
 		b.s.agents[flight.key] = { kind = "ready", fix = outcome.fix, reviewed = {} }
 		State.project(b.s)
+	elseif outcome.kind == "failed" and b.closed then
+		State.agentFailed(b.s, flight.key, outcome.reason, outcome.worktree)
 	elseif not b.closed then
 		State.agentOutcome(b.s, flight.key, outcome)
 	end
+	forgetReturned(b, flight)
 	if not b.closed then draw(b, cx) end
 end
 
@@ -401,19 +443,22 @@ local function startAgentEngine(b: Block, cx: BlockCx, flight: AgentFlight, clon
 			-- During a synchronous callback the handle is assigned just after this returns.
 			if flight.engine then forgetReturned(b, flight) end
 		end
+		flight.starting = true
 		local started, engine = pcall(Fetch.startAgentFix, {
 			key = pr.key, clone = clone, checkout = checkout, branch = meta.headRefName,
 			base = pr.baseBranch, headOid = pr.headOid, number = pr.number,
 		}, b.agent :: Agent.Agent, b.s.now, function(outcome) settleAgent(b, cx, flight, outcome) end, completed)
 		if started then flight.engine = engine else completed(nil, tostring(engine)) end
+		flight.starting = false
 		if not flight.engine then
 			completed(nil, "The agent could not start")
 			forgetReturned(b, flight)
-		elseif (b.closed or flight.stopping) and not (b.s.agents[pr.key] and b.s.agents[pr.key].kind == "ready") then
-			flight.engine.stop()
-		elseif flight.settled then
+		else
+			-- Reconcile synchronous terminal callbacks once the handle is available.
 			forgetReturned(b, flight)
+			if b.closed or flight.stopping then closeAgentFlight(b, flight) end
 		end
+		if not b.closed then draw(b, cx) end
 	end
 	local ok, err = pcall(Fetch.runner, { "gh", "pr", "view", tostring(pr.number), "--repo", pr.repo, "--json", "headRefName,baseRefName,headRefOid" }, { timeout_ms = 30_000 }, metadata)
 	if not ok then metadata({ status = -1, stdout = "", stderr = tostring(err), timed_out = false }) end
@@ -1002,6 +1047,7 @@ ACTIONS["card-agent-stop"] = function(b, cx, key)
 		flight.stopping = true
 		if flight.cancel then flight.cancel() end
 		if flight.engine then return flight.engine.stop() end
+		if flight.starting then return end
 		flight.settled = true
 		b.agentFlight = nil
 	end
@@ -1013,24 +1059,19 @@ ACTIONS["card-agent-retry"] = function(b, cx, key)
 	if not agent or agent.kind ~= "failed" then return end
 	-- A failed lease return retains the handle. Retry first retries that exact guarded
 	-- return, and starts no engine until it succeeds. Never release a ready worktree.
-	if flight and flight.key == key and flight.settled and flight.engine then
-		if flight.releasing then return cx:toast("info", "One fix at a time") end
-		flight.releasing = true
-		local called = false
-		local function returned(ok: boolean?, err: string?)
-			if called then return end
-			called = true
-			flight.releasing = false
-			if b.closed or b.agentFlight ~= flight then return end
+	if flight and flight.key == key then
+		local disposition = forgetReturned(b, flight)
+		if disposition == "wait" then return cx:toast("info", "One fix at a time") end
+		if disposition ~= "release" then return beginAgent(b, cx, key, "fix") end
+		returnAgentLease(b, flight, function(ok, err)
 			if not ok then
-				State.agentFailed(b.s, key, err or "The worktree lease could not be returned", agent.worktree)
+				local lease = (flight.engine :: AgentFix.Engine).held()
+				State.agentFailed(b.s, key, err or "The worktree lease could not be returned", if lease then lease.path else nil)
 				return draw(b, cx)
 			end
-			b.agentFlight = nil
+			if b.closed then return end
 			beginAgent(b, cx, key, "fix")
-		end
-		local ok, err = pcall(flight.engine.release, returned)
-		if not ok then returned(nil, tostring(err)) end
+		end)
 		return
 	end
 	beginAgent(b, cx, key, "fix")

@@ -80,7 +80,7 @@ Each PR appears exactly once.
 | Agent running | **Stop** (A) | |
 | Fix ready | **Review fix** (⏎) | **Discard fix** (D, with an inline confirm) |
 | Reviewed fix | **Push to branch** (P) | Discard fix (D) |
-| Fix failed | **Try again** (A) | Open worktree (O) |
+| Fix failed | **Try again** (A) | Open worktree (O), only while its lease is retained |
 | No local clone | **Clone repo** (A) | Choose folder… (O) |
 | In review | **Copy link** (C), or **Re-request review** (Q) while a reviewer waits on a re-review: copies "title url" as plain text (Tern's clipboard has no rich flavor; see the clipboard facts) | |
 | In review with a bot review | **Fix bot comments** (A); the card stays in In review | Copy link (C) |
@@ -107,6 +107,7 @@ This opens the PR at what needs fixing, in the guided review layout.
 
 - **The agent:** your own `omp`, with the model and effort from the `⇧M` menu, which guided reviews already use (`src/agent.luau`, kv key `model`).
 - **One PR at a time.** There is no "Fix all".
+- **Failed worktree ownership:** the block reconciles failure paths against `Engine.held()` during callbacks and after assigning the engine. A returned worktree has no Open worktree action. A failed lease return keeps the same engine handle; Try again retries its release before another run starts. Closing stops a running engine or retries a settled failed lease return, retaining the handle if return still fails. Fix ready worktrees are preserved.
 - **Where it works:** in a treehouse worktree, never in your checkout. It commits there and never pushes. The card goes running → **Fix ready** → **Review fix** (`review-fix.html`) → **Push to branch**.
 - **Review fix page (`review-fix.html`):**
   - The diff shows only the agent's resolution. Each line is tagged main, Your branch or Agent.
@@ -717,6 +718,14 @@ function M.replace(s: State, prs: { HubPR }, now: number, refreshedAt: string?) 
 function M.project(s: State)                 -- recomputes s.board from s.prs and the inputs
 function M.mode(s: State): Mode
 function M.reviewed(fix: AgentFix.Fix, reviewed: { [string]: boolean }): boolean
+
+-- Transient ownership facts from Block; never stored in State and never contain an engine.
+export type AgentFlightFacts = {
+	settled: boolean, starting: boolean, releasing: boolean, busy: boolean, worktree: string?,
+}
+function M.agentFlight(s: State, key: string, facts: AgentFlightFacts): "wait" | "release" | "forget" | "ready"
+-- Reconciles a failed card's path with the held lease. Block retains the handle for
+-- wait/release/ready; only forget permits dropping it. starting guards synchronous callbacks.
 
 -- The fixes page (#12): a route over the board. `s.route = { kind = "fixes", key, cur, focus, item, loading, error, bots, resolved, replies, reply, busy }`.
 function M.openFixes(s: State, key: string): boolean / M.closeFixes(s)   -- Esc returns to the board with the card still selected
