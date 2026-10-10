@@ -53,6 +53,7 @@ export type Block = {
 	flights: { refresh: boolean, checks: boolean, probe: boolean, flake: boolean, tandem: boolean }, -- one call of each kind at a time
 	watched: { [string]: boolean }, -- the PRs Tandem watches (lowercase "owner/repo#123"): the cache's flags until a read of Tandem succeeds, then that read
 	handoffs: number, -- hand-offs Tandem has taken this session: a read that began before one cannot name that PR
+	retired: { [string]: boolean }, -- write ids of stored caches a successful read of Tandem superseded whose own save failed (see `retire`)
 	root: string?, -- the repository root `cx.cwd` is in, found once (Tandem's calls name the project by it)
 	rootWaiters: { (string?) -> () }?, -- the callers waiting on that lookup while it runs
 	sched: Sched,
@@ -232,6 +233,12 @@ local function readCache(): Sync.Cache?
 	return Sync.load(kvGet(KV_CACHE))
 end
 
+-- The `writeId` of a stored cache ("" when it has none, or the store holds no valid cache).
+local function storedId(cache: Sync.Cache?): string
+	local id = if cache then (cache :: any).writeId else nil
+	return if type(id) == "string" then id else ""
+end
+
 -- Facts only this machine knows. `tandem` is the block's own read of Tandem, applied by `withTandem`.
 local function readLocal(): Sync.Local
 	local added: Sync.Added = {}
@@ -279,12 +286,21 @@ local function writeStatus(cache: Sync.Cache)
 	})
 end
 
+-- Every write of `hub.cache` carries a `writeId` no other write has: this window's nonce and a count. It is how a stored
+-- cache is told apart from another stored at the same `refreshedAt` (a hand-off keeps the stamp), and it never stands in for
+-- GitHub's freshness. A cache stored before ids existed has none, which `storedId` reads as "".
+local WINDOW = string.format("%x.%x.%s", os.time(), math.random(0, 0x7fffffff), (string.gsub(tostring({}), "%W", "")))
+local writes = 0
+
 -- Writes the cache under the size cap. Returns why it failed; memory state stands either way.
 local function persist(b: Block): string?
 	local cache = b.cache
 	if not cache then return nil end
+	writes += 1
 	local ok, err = pcall(function()
-		tern.kv.set(KV_CACHE, Sync.save(cache, CACHE_CAP_BYTES, function(value: any): number return #tern.json.encode(value) end))
+		local value = Sync.save(cache, CACHE_CAP_BYTES, function(value: any): number return #tern.json.encode(value) end)
+		value.writeId = WINDOW .. "#" .. writes
+		tern.kv.set(KV_CACHE, value)
 	end)
 	if ok then writeStatus(cache) end
 	return if ok then nil else tostring(err)
@@ -459,10 +475,20 @@ end
 -- cache's own `refreshedAt`, so the window that took it leaves the same stamp this block holds.
 local function sharedCache(b: Block, strict: boolean): Sync.Cache?
 	local shared = readCache()
-	if not shared then return nil end
+	if not shared or b.retired[storedId(shared)] then return nil end
 	local theirs, mine = Model.epoch(shared.refreshedAt), cachedAt(b)
 	if not theirs then return nil end
 	return if mine == nil or theirs > mine or (not strict and theirs == mine) then shared else nil
+end
+
+-- A successful read of Tandem has just cleared a flag, so the cache it superseded must not bring the flag back. When the
+-- answer's own save failed, the store still holds that superseded cache, at the same stamp: its `writeId` is retired,
+-- and `sharedCache` ignores a cache that carries it. Any later write, by this window or another, has a new id, so a
+-- hand-off stored after the clear (even at the same stamp) still joins. Nothing is locked and nothing waits: the id is
+-- compared when the store is read.
+local function retire(b: Block)
+	local stored = readCache()
+	if stored then b.retired[storedId(stored)] = true end
 end
 
 -- Joins the ownership of a shared cache stored at this block's cache's time or later; an older one joins nothing.
@@ -511,7 +537,8 @@ local function carryOn(b: Block, cx: BlockCx, flight: AgentFlight, superseded: b
 	local pr = State.prOf(b.s, flight.key)
 	if not pr or not pr.tandem then
 		if moved then draw(b, cx) end
-		return true
+		-- A render that raised has closed the block and settled this flight: nothing may go on to start an engine.
+		return currentFlight(b, flight)
 	end
 	flight.stopping = true
 	if flight.cancel then flight.cancel() end
@@ -1119,10 +1146,13 @@ local function loadTandem(b: Block, cx: BlockCx)
 		end
 		if watched then b.watched = watched end
 		local flags = Model.tandemFlags(b.watched, b.s.prs)
-		local changed = false
+		local changed, cleared = false, false
 		for _, pr in b.s.prs do
 			local want = flags[pr.key] == true
-			if pr.tandem ~= want then pr.tandem, changed = want, true end
+			if pr.tandem ~= want then
+				pr.tandem, changed = want, true
+				if not want then cleared = true end
+			end
 		end
 		if not changed then
 			if adopted then draw(b, cx) end
@@ -1132,7 +1162,13 @@ local function loadTandem(b: Block, cx: BlockCx)
 		if flight then carryOn(b, cx, flight, true) end
 		State.project(b.s)
 		recount(b)
-		persist(b)
+		local why = persist(b)
+		if why then
+			-- Memory state stands. Only this successful read may clear ownership, so the store's superseded cache must not
+			-- bring a cleared flag back at the same stamp.
+			if cleared then retire(b) end
+			b.s.error = { operation = KV_CACHE, message = "the cache couldn't be saved: " .. why }
+		end
 		draw(b, cx)
 	end
 	projectRoot(b, cx, function(root)
@@ -2584,7 +2620,7 @@ local block: BlockDef<Block> = {
 		local b: Block = {
 			s = s, cache = cache, fixture = fixture, generate = opts ~= nil and opts.generate, agent = nil, agentFlight = nil, botKeys = {},
 			github = Github.client(Fetch.runner, tern.json.decode), timers = {},
-			flights = { refresh = false, checks = false, probe = false, flake = false, tandem = false }, watched = watched, handoffs = 0, root = nil, rootWaiters = nil,
+			flights = { refresh = false, checks = false, probe = false, flake = false, tandem = false }, watched = watched, handoffs = 0, retired = {}, root = nil, rootWaiters = nil,
 			sched = {
 				probedAt = now, probeChanged = false, focusedAt = if live then now else nil, checksAt = nil,
 				refreshTried = nil, lastModified = if cache then cache.lastModified else nil,

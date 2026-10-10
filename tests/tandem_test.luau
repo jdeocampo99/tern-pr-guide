@@ -194,7 +194,10 @@ local function stubTern(w: any): any
 				if w.shared then return copy(w.kv[key]) end
 				return if w.kvIn then w.kvIn[key] else nil
 			end,
-			set = function(key: string, value: any) w.kv[key] = if w.shared then copy(value) else value end,
+			set = function(key: string, value: any)
+				if w.failKv then error("disk full", 0) end
+				w.kv[key] = if w.shared then copy(value) else value
+			end,
 		},
 	}
 end
@@ -2390,6 +2393,71 @@ local function sharedOwnership()
 		assert(State.prOf(b.s, OTHER).tandem == true and b.watched[OTHER] == true, "a failed read clears nothing")
 		assert(b.agentFlight ~= nil and b.s.agents[TARGET].kind == "running" and #w.started == 0 and w.stops == 0)
 		assert(gh(w) == nil and #handoffs(w) == 0, "nothing is sent")
+	end)
+
+	-- B's refs read is out when window C stores ownership of an unrelated PR and the draw that shows it raises (the block
+	-- is gone). The join's draw closed the block and settled B's flight, so the refs answer never goes on to start an engine.
+	withWorld(function(w, Fetch, Block)
+		local OTHER = "acme/api#116"
+		local b = agentBoard(w, Fetch, Block)
+		holdCache(w, b)
+		Block.event(b, { ev = "action", act = "card-agent", value = TARGET } :: any, w.cx)
+		w.clones[1].done("/clone", nil)
+		local held = gh(w)
+		assert(held ~= nil and b.agentFlight ~= nil and b.agentFlight.engine == nil and #w.started == 0, "the refs read is out")
+		local theirs = storeOwned(w, { WEB, API114, OTHER }, Cases.asOf)
+		w.cx.render = function() error("the window is gone", 0) end
+		local calls, finds = #w.calls, #w.finds
+		held.done(out("REFS"))
+		assert(b.closed and b.agentFlight == nil, "the failed draw closed the block and its flight")
+		assert(#w.started == 0 and w.stops == 0, "no engine started")
+		assert(#w.calls == calls and #w.finds == finds and #w.clones == 1 and #w.details == 0 and #handoffs(w) == 0, "no external work went on")
+		assert(b.watched[OTHER] == true and same(w.kv["hub.cache"], theirs) and #w.toasts == 0)
+	end)
+
+	-- A successful read of Tandem clears A, and its save fails: the store still holds the cache it superseded, at the same
+	-- stamp. Navigation and a setup continuation that read the store do not bring A back. A cache another window stores
+	-- later at that same stamp (its own write id) is a hand-off and joins, and it stops the fix being set up.
+	withWorld(function(w, Fetch, Block)
+		local b = agentBoard(w, Fetch, Block)
+		holdCache(w, b)
+		local retained = copy(w.kv["hub.cache"])
+		Block.event(b, { ev = "action", act = "card-agent", value = TARGET } :: any, w.cx)
+		assert(b.agentFlight ~= nil and b.agentFlight.engine == nil and #w.clones == 1)
+		Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+		local later = copy(RawWatch)
+		local rows = {}
+		for _, row in later.rows do
+			if row.number ~= 104 then table.insert(rows, row) end
+		end
+		later.rows = rows
+		w.decoded["CLEARS"] = later
+		w.failKv = true
+		reads(w)[2].done(out("CLEARS"))
+		assert(not State.prOf(b.s, WEB).tandem and b.watched[WEB] == nil, "A is cleared in memory")
+		assert(b.s.error ~= nil and b.s.error.operation == "hub.cache" and string.find(b.s.error.message, "couldn't be saved", 1, true), "the cache error is shown")
+		assert(same(w.kv["hub.cache"], retained), "the store still holds the superseded cache")
+		assert(b.cache.counts.needFixes == needFixesOf(b) and State.prOf(b.s, API114).tandem == true, "memory state is valid")
+
+		local function stays(step: string)
+			assert(not State.prOf(b.s, WEB).tandem and b.watched[WEB] == nil and card(b.s, WEB).main.label == "Fix with agent", step .. ": A stays cleared")
+			assert(#w.started == 0 and w.stops == 0 and #handoffs(w) == 0 and same(w.kv["hub.cache"], retained), step .. ": no effect and nothing stored")
+		end
+		Block.event(b, { ev = "action", act = "hub-move", value = "down" } :: any, w.cx)
+		stays("navigation")
+		Block.event(b, { ev = "action", act = "hub-select", value = API114 } :: any, w.cx)
+		stays("selection")
+		w.clones[1].done("/clone", nil)
+		assert(gh(w) ~= nil and b.agentFlight ~= nil and b.s.agents[TARGET].kind == "running", "B's setup goes on")
+		stays("setup continuation")
+
+		local theirs = storeOwned(w, { WEB, API114, TARGET }, Cases.asOf)
+		theirs.writeId = "another-window#1"
+		gh(w).done(out("REFS"))
+		noFixer(w, b, "a hand-off stored after the clear")
+		assert(b.watched[TARGET] == true and State.prOf(b.s, TARGET).tandem == true, "the later write joins")
+		assert(b.watched[WEB] == true and State.prOf(b.s, WEB).tandem == true, "and brings its own flags")
+		assert(#w.toasts == 0 and #handoffs(w) == 0 and same(w.kv["hub.cache"], theirs), "nothing was sent or stored")
 	end)
 end
 
