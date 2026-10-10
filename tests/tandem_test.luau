@@ -3,6 +3,7 @@
 -- stdin of both Tandem calls, and the real hub block driven through them. `tern` is stubbed in the module
 -- environments of block and fetch, and every process effect is a recorded call that a scenario settles by hand.
 local Cases: any = require("../fixtures/hub/cases")
+local AgentFix = require("../src/hub/agent-fix")
 local Model = require("../src/hub/model")
 local State = require("../src/hub/state")
 local Sync = require("../src/hub/sync")
@@ -1313,6 +1314,21 @@ local function readyPush()
 	end)
 end
 
+-- What the engine does once Treehouse hands it `path` and, later, when it gives up: each event steps the running state
+-- and reaches Block through the `changed` callback it was started with, then the engine's own `done` follows.
+local function holdWorktree(w: any, b: any, path: string)
+	local running = b.s.agents[TARGET]
+	assert(running and running.kind == "running")
+	w.started[1].changed(AgentFix.step(running.run, { kind = "worktree", path = path }))
+end
+
+local function failHeld(w: any, b: any, reason: string)
+	local running = b.s.agents[TARGET]
+	assert(running and running.kind == "running" and running.run.worktree ~= nil, "the engine's run names its worktree")
+	w.started[1].changed(AgentFix.step(running.run, { kind = "failed", reason = reason }))
+	w.started[1].done(nil, reason)
+end
+
 -- A lease whose return failed keeps its retry on a card Tandem owns: Return worktree returns it through the retained
 -- engine, and starts no fixer, whatever Tandem says later.
 local function retainedLease()
@@ -1331,8 +1347,9 @@ local function retainedLease()
 		w.clones[1].done("/clone", nil)
 		gh(w).done(out("REFS"))
 		assert(#w.started == 1 and b.agentFlight.engine ~= nil)
+		holdWorktree(w, b, "/work/tree")
 		claim(w, Block, b)
-		w.started[1].done(nil, "boom")
+		failHeld(w, b, "boom")
 		local flight = b.agentFlight
 		assert(flight ~= nil and flight.settled and b.s.agents[TARGET].kind == "failed" and b.s.agents[TARGET].held == true, "the engine still holds the lease")
 
@@ -1383,8 +1400,9 @@ local function retainedLease()
 		Block.event(b, { ev = "action", act = "card-agent", value = TARGET } :: any, w.cx)
 		w.clones[1].done("/clone", nil)
 		gh(w).done(out("REFS"))
+		holdWorktree(w, b, "/work/tree")
 		claim(w, Block, b)
-		w.started[1].done(nil, "boom")
+		failHeld(w, b, "boom")
 		Block.event(b, { ev = "action", act = "card-agent-retry", value = TARGET } :: any, w.cx)
 		assert(#w.releases == 1)
 		own(b, false)
