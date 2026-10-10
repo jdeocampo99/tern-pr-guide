@@ -606,7 +606,8 @@ local function refetchSoon(b: Block, cx: BlockCx)
 end
 
 -- The sample board's ⌘R: applies the next `refreshes` entry (after the last, the first again) through the same
--- announce path as a live refresh. The entry's earlier board shows first, so the arrival is seen.
+-- announce path as a live refresh. The entry's earlier board shows first, so the arrival is seen. It never
+-- touches kv or `b.cache`: the sample board must not change what the real status segment shows.
 local SETTLE_MS = 450
 
 local function fixtureRefresh(prs: { Model.HubPR }): Model.Refresh
@@ -630,17 +631,11 @@ local function stepFixture(b: Block, cx: BlockCx)
 	local function apply()
 		b.flights.refresh = false
 		if b.closed then return end
-		local cache = Sync.merge(fixtureRefresh(entry.prs), before, none, data.asOf)
-		cache.prs = entry.prs
-		-- merge stamps the fixture's frozen time; the status segment reads the real clock.
-		if cache.counts.flashAt then cache.counts.flashAt = os.time() end
 		local acted: { [string]: boolean } = {}
 		for key in entry.suppressed do acted[key] = true end
 		b.s.acted = acted
 		announce(b, cx, before, entry.prs, data.asOf)
-		b.cache = cache
 		State.replace(b.s, entry.prs, data.asOf, data.asOfIso)
-		writeStatus(cache)
 		draw(b, cx)
 	end
 	local timers = b.timers :: any
@@ -894,11 +889,7 @@ local block: BlockDef<Block> = {
 	end,
 	key = function(b: Block, key: Key, cx: BlockCx): boolean?
 		local s = b.s
-		-- ⌘R is not in Keys (its file is not this change's); it sends the same ACTIONS entry a click would.
 		local action = Keys.hubAction(s, key)
-		if not action and s.mode == "board" and key.name == "r" and (key.meta or key.ctrl) then
-			action = { act = "hub-refresh", value = nil }
-		end
 		if action then
 			s.keyed = true
 			dispatch(b, cx, action)

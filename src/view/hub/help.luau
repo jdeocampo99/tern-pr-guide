@@ -31,6 +31,7 @@ local GROUPS: { Group } = {
 		{ "F", "Filter by repository" },
 		{ "S", "Sort" },
 		{ "⇧M", "Agent model" },
+		{ "⌘R", "Refresh" },
 		{ "j k", "Move in a menu" },
 		{ "Space", "Choose in a menu" },
 		{ "⌘⏎", "Confirm a question" },

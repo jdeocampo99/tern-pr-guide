@@ -1122,11 +1122,12 @@
 /* Arrival alerts. The ring (red) and wash (green) appear at once and are held; the "-out" classes carry the fade as a
    transition, so a refresh mid-fade retargets instead of restarting. Under no .gp-soft (a key drove it) they just end. */
 .gp-hc.gp-hc-ring-bad, .gp-hc.gp-hc-ring-bad:hover { box-shadow: 0 0 0 3px light-dark(rgba(207, 34, 46, 0.45), rgba(255, 123, 114, 0.45)); }
-.gp-hc.gp-hc-ring-good, .gp-hc.gp-hc-ring-good:hover { background: var(--gp-success-wash); border-color: var(--gp-success-wash-line); }
+.gp-hc.gp-hc-ring-good, .gp-hc.gp-hc-ring-good:hover { background: var(--gp-success-wash); border-color: var(--gp-success-wash-line); box-shadow: 0 0 0 3px light-dark(rgba(26, 127, 55, 0.45), rgba(111, 221, 139, 0.45)); }
+.gp-hc.gp-hc-ring-good-out, .gp-hc.gp-hc-ring-good-out:hover { box-shadow: 0 0 0 3px transparent; }
 .gp-hc.gp-hc-ring-bad-out, .gp-hc.gp-hc-ring-bad-out:hover { box-shadow: 0 0 0 3px transparent; }
 .gp-soft .gp-hc.gp-hc-ring-bad, .gp-soft .gp-hc.gp-hc-ring-good { transition: none; }
 .gp-soft .gp-hc.gp-hc-ring-bad-out { transition: box-shadow var(--gp-dur-rare) var(--gp-ease-out); }
-.gp-soft .gp-hc.gp-hc-ring-good-out { transition: background-color var(--gp-dur-rare) var(--gp-ease-out), border-color var(--gp-dur-rare) var(--gp-ease-out); }
+.gp-soft .gp-hc.gp-hc-ring-good-out { transition: box-shadow var(--gp-dur-rare) var(--gp-ease-out), background-color var(--gp-dur-rare) var(--gp-ease-out), border-color var(--gp-dur-rare) var(--gp-ease-out); }
 @media (prefers-reduced-motion: reduce) {
   .gp-soft .gp-hc.gp-hc-ring-bad-out, .gp-soft .gp-hc.gp-hc-ring-good-out { transition-duration: var(--gp-dur-in); transition-timing-function: ease; }
 }
