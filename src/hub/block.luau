@@ -481,14 +481,15 @@ local function sharedCache(b: Block, strict: boolean): Sync.Cache?
 	return if mine == nil or theirs > mine or (not strict and theirs == mine) then shared else nil
 end
 
--- A successful read of Tandem has just cleared a flag, so the cache it superseded must not bring the flag back. When the
--- answer's own save failed, the store still holds that superseded cache, at the same stamp: its `writeId` is retired,
--- and `sharedCache` ignores a cache that carries it. Any later write, by this window or another, has a new id, so a
--- hand-off stored after the clear (even at the same stamp) still joins. Nothing is locked and nothing waits: the id is
--- compared when the store is read.
-local function retire(b: Block)
-	local stored = readCache()
-	if stored then b.retired[storedId(stored)] = true end
+-- The identity of the cache the store holds now, taken before a successful read of Tandem clears a flag. `readable` is false
+-- when the store cannot be read at all; `id` is nil when it holds no valid cache. If that answer's own save fails, this id
+-- is the one retired (`b.retired`), and `sharedCache` ignores a cache that carries it. It is captured before anything is
+-- joined or written, so a write that lands later, whatever its stamp, has another id and is never retired.
+local function storedNow(): (boolean, string?)
+	local ok, raw = pcall(tern.kv.get, KV_CACHE)
+	if not ok then return false, nil end
+	local cache = Sync.load(raw)
+	return true, if cache then storedId(cache) else nil
 end
 
 -- Joins the ownership of a shared cache stored at this block's cache's time or later; an older one joins nothing.
@@ -1135,6 +1136,7 @@ local function loadTandem(b: Block, cx: BlockCx)
 		-- The answer lands on the newest cache there is: one stored strictly newer than this block's own becomes the board
 		-- first, so what is stored next carries its stamp and snapshot and never this block's older ones.
 		local before = b.cache
+		local readable, superseded = storedNow()
 		adoptShared(b, cx)
 		local adopted = b.cache ~= before
 		joinShared(b)
@@ -1144,16 +1146,23 @@ local function loadTandem(b: Block, cx: BlockCx)
 			if applyOwnership(b, cx) or adopted then draw(b, cx) end
 			return loadTandem(b, cx)
 		end
-		if watched then b.watched = watched end
-		local flags = Model.tandemFlags(b.watched, b.s.prs)
+		local flags = Model.tandemFlags(watched or b.watched, b.s.prs)
 		local changed, cleared = false, false
 		for _, pr in b.s.prs do
 			local want = flags[pr.key] == true
 			if pr.tandem ~= want then
-				pr.tandem, changed = want, true
+				changed = true
 				if not want then cleared = true end
 			end
 		end
+		-- A clear needs the stored cache's identity, taken above: without it the superseded cache could not be told from a
+		-- later write, so the answer changes nothing and the next read decides again.
+		if cleared and not readable then
+			if adopted then draw(b, cx) end
+			return
+		end
+		if watched then b.watched = watched end
+		for _, pr in b.s.prs do pr.tandem = flags[pr.key] == true end
 		if not changed then
 			if adopted then draw(b, cx) end
 			return
@@ -1164,9 +1173,9 @@ local function loadTandem(b: Block, cx: BlockCx)
 		recount(b)
 		local why = persist(b)
 		if why then
-			-- Memory state stands. Only this successful read may clear ownership, so the store's superseded cache must not
-			-- bring a cleared flag back at the same stamp.
-			if cleared then retire(b) end
+			-- Memory state stands. Only this successful read may clear ownership, so the cache it superseded (the one stored
+			-- when the answer arrived) must not bring a cleared flag back at the same stamp.
+			if cleared and superseded then b.retired[superseded] = true end
 			b.s.error = { operation = KV_CACHE, message = "the cache couldn't be saved: " .. why }
 		end
 		draw(b, cx)
@@ -2540,6 +2549,8 @@ local function dispatch(b: Block, cx: BlockCx, action: Keys.Action)
 	if not handler then return end
 	-- Ownership another window stored joins before the handler reads a guard, so no direct effect reaches a Tandem branch.
 	if syncOwnership(b, cx) then draw(b, cx) end
+	-- A draw that raised has closed the block: the handler sends nothing for it.
+	if b.closed then return end
 	handler(b, cx, action.value or "")
 end
 
