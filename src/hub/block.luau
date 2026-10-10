@@ -49,7 +49,8 @@ export type Block = {
 	agentFlight: AgentFlight?, -- lookup, engine and retained lease; never serialized
 	botKeys: { [string]: boolean }, -- retains the bot input kind across clone/stop/retry, never saved
 	github: Github.Client, timers: Timers,
-	flights: { refresh: boolean, checks: boolean, probe: boolean, flake: boolean }, -- one call of each kind at a time
+	flights: { refresh: boolean, checks: boolean, probe: boolean, flake: boolean, tandem: boolean }, -- one call of each kind at a time
+	watched: { [string]: boolean }, -- the PRs Tandem watches (lowercase "owner/repo#123"), from its last read
 	sched: Sched,
 	closed: boolean, -- a render failed: the window is gone, so no timer starts anything
 	refetch: boolean, -- a refresh was asked for while one was running: run another when it ends
@@ -227,7 +228,7 @@ local function readCache(): Sync.Cache?
 	return Sync.load(kvGet(KV_CACHE))
 end
 
--- Facts only this machine knows. `tandem` waits for the Tandem change.
+-- Facts only this machine knows. `tandem` is the block's own read of Tandem, applied by `withTandem`.
 local function readLocal(): Sync.Local
 	local added: Sync.Added = {}
 	local raw = kvGet(KV_ADDED)
@@ -239,6 +240,30 @@ local function readLocal(): Sync.Local
 		end
 	end
 	return { added = added, tandem = {} }
+end
+
+-- The local facts for a refresh of `prs`, with Tandem's watched PRs flagged by the board's own keys.
+local function withTandem(b: Block, prs: { Model.HubPR }): Sync.Local
+	local facts = readLocal()
+	facts.tandem = Model.tandemFlags(b.watched, prs)
+	return facts
+end
+
+-- `prs` with Tandem's flag set. The list a fixture hands over is shared data, so a flagged PR is a copy of it.
+local function flagged(watched: { [string]: boolean }, prs: { Model.HubPR }): { Model.HubPR }
+	local flags = Model.tandemFlags(watched, prs)
+	local out: { Model.HubPR } = {}
+	for i, pr in prs do
+		local want = flags[pr.key] == true
+		if pr.tandem == want then
+			out[i] = pr
+		else
+			local copy = table.clone(pr)
+			copy.tandem = want
+			out[i] = copy
+		end
+	end
+	return out
 end
 
 -- The tiny record the window's status segment reads every 2 s, so it never decodes the whole cache.
@@ -900,9 +925,38 @@ local function loadFlakes(b: Block, cx: BlockCx)
 	step(1)
 end
 
+-- Reads which PRs Tandem watches and flags them, one read at a time. With no project folder, or when the read
+-- fails, the flags stay as they were (none before a first good read) and the board carries on.
+local function loadTandem(b: Block, cx: BlockCx)
+	local root = cx.cwd
+	if b.fixture or b.closed or b.flights.tandem or not root then return end
+	b.flights.tandem = true
+	local replied = false
+	local function apply(watched: { [string]: boolean }?, err: string?)
+		if replied then return end
+		replied = true
+		b.flights.tandem = false
+		if b.closed then return end
+		if watched then b.watched = watched end
+		local flags = Model.tandemFlags(b.watched, b.s.prs)
+		local changed = false
+		for _, pr in b.s.prs do
+			local want = flags[pr.key] == true
+			if pr.tandem ~= want then pr.tandem, changed = want, true end
+		end
+		if not changed then return end
+		State.project(b.s)
+		persist(b)
+		draw(b, cx)
+	end
+	local ok, err = pcall(Fetch.tandemWatch, root, apply)
+	if not ok then apply(nil, tostring(err)) end
+end
+
 startRefresh = function(b: Block, cx: BlockCx)
 	b.flights.refresh = true
 	b.s.loading = true
+	loadTandem(b, cx)
 	local refs: { Model.PRRef } = {}
 	for _, ref in readLocal().added do table.insert(refs, ref) end
 	b.github.refresh({ added = refs, previous = b.s.prs }, function(fresh, err)
@@ -916,7 +970,7 @@ startRefresh = function(b: Block, cx: BlockCx)
 		else
 			local canon, moved = State.canonicalAdded(readLocal().added, fresh.prs)
 			if moved then writeAdded(canon) end
-			local cache = Sync.merge(fresh, b.cache, readLocal(), now)
+			local cache = Sync.merge(fresh, b.cache, withTandem(b, fresh.prs), now)
 			cache.lastModified = b.sched.lastModified
 			announce(b, cx, b.cache, cache.prs, now)
 			b.cache = cache
@@ -1103,7 +1157,8 @@ end
 -- Card actions: shown with their labels and keys; their effects arrive with the changes that build them.
 ACTIONS["card-agent"] = function(b, cx, key)
 	local pr = State.prOf(b.s, if key ~= "" then key else b.s.selected or "")
-	if not pr then return end
+	-- One owner per branch: Tandem's PRs are handed to it, never fixed by an agent here.
+	if not pr or pr.tandem then return end
 	b.botKeys[pr.key] = Model.classify(pr, b.s.now) == "in_review" and State.botActionable(pr)
 	beginAgent(b, cx, pr.key, "fix")
 end
@@ -1162,7 +1217,6 @@ ACTIONS["card-agent-worktree"] = function(b, cx, key)
 	local ok, err = pcall(Fetch.runner, { "open", agent.worktree }, { timeout_ms = 15_000 }, opened)
 	if not ok then opened({ status = -1, stdout = "", stderr = tostring(err), timed_out = false }) end
 end
-ACTIONS["card-handoff"] = notYet("Hand off to Tandem")
 ACTIONS["card-summarize"] = function(b, cx, key)
 	local s = b.s
 	local pr = State.prOf(s, if key ~= "" then key else s.selected or "")
@@ -1238,7 +1292,11 @@ local function stepFixture(b: Block, cx: BlockCx)
 	local list = data.refreshes
 	if not list or #list == 0 then return end
 	b.step = b.step % #list + 1
-	local entry = list[b.step]
+	local source = list[b.step]
+	-- Every step's boards carry Tandem's flag, from the same recorded read.
+	local entry = table.clone(source)
+	entry.prs = flagged(b.watched, source.prs)
+	if source.previous then entry.previous = flagged(b.watched, source.previous) end
 	local none: Sync.Local = { added = {}, tandem = {} }
 	local before: Sync.Cache? = nil
 	if entry.previous then
@@ -1282,6 +1340,44 @@ local function keepCache(b: Block)
 		b.cache.prs = b.s.prs
 		persist(b)
 	end
+end
+
+-- Hand off to Tandem (A on a card Tandem watches): one `pr-fix` request, sent only now. Tandem's answer is
+-- dropped when the card is gone or its head moved meanwhile. A refusal shows Tandem's notice and changes nothing.
+ACTIONS["card-handoff"] = function(b, cx, key)
+	local s = b.s
+	local pr = State.prOf(s, if key ~= "" then key else s.selected or "")
+	if b.closed or not pr or s.busy[pr.key] then return end
+	if b.fixture then return cx:toast("info", "The sample board doesn't hand off to Tandem", pr.key) end
+	local root = cx.cwd
+	if not root then return cx:toast("error", "Couldn't hand off to Tandem: the project folder is unknown", pr.key) end
+	local head, repo, number = pr.headOid, pr.repo, pr.number
+	local reason = Model.handoffReason(pr, s.now)
+	State.setBusy(s, pr.key, "Handing off to Tandem…")
+	draw(b, cx)
+	local replied = false
+	local function answered(outcome: Fetch.TandemOutcome?, err: string?)
+		if replied then return end
+		replied = true
+		if b.closed then return end
+		State.setBusy(s, key, nil)
+		local current = State.prOf(s, key)
+		if not current or current.headOid ~= head then return draw(b, cx) end
+		if not outcome then
+			cx:toast("error", "Couldn't hand off to Tandem: " .. reasonOf(err or "no answer"), key)
+		elseif outcome.status == "refused" then
+			cx:toast("error", if outcome.notice then outcome.notice.text else "Tandem didn't take this pull request", key)
+		else
+			current.tandem = true
+			b.watched[string.lower(repo) .. "#" .. number] = true
+			State.project(s)
+			keepCache(b)
+			if outcome.notice then cx:toast("info", outcome.notice.text, key) end
+		end
+		draw(b, cx)
+	end
+	local ok, err = pcall(Fetch.tandemHandoff, root, repo, number, reason, answered)
+	if not ok then answered(nil, tostring(err)) end
 end
 
 -- Copy link (C): "title url" as plain text, which is all Tern's clipboard takes.
@@ -2202,11 +2298,14 @@ local block: BlockDef<Block> = {
 		local now = os.time()
 		local refreshedAt: string? = nil
 		local fixture = if opts then opts.fixture else nil
+		-- A sample board reads the recorded `tandem watch --json` with no process, and flags every list it shows.
+		local watched: { [string]: boolean } = {}
+		if fixture then watched = Model.parseTandemWatch(require("../../fixtures/hub/raw-tandem-watch")) or {} end
 		local live = opts ~= nil and fixture == nil
 		local cache: Sync.Cache? = nil
 		if fixture then
 			local data = FIXTURES[fixture]()
-			prs, now, refreshedAt = data.prs, data.asOf, data.asOfIso
+			prs, now, refreshedAt = flagged(watched, data.prs), data.asOf, data.asOfIso
 		elseif live then
 			-- Open from the cache with no network wait; the first tick refreshes in the background.
 			cache = readCache()
@@ -2229,7 +2328,7 @@ local block: BlockDef<Block> = {
 		local b: Block = {
 			s = s, cache = cache, fixture = fixture, generate = opts ~= nil and opts.generate, agent = nil, agentFlight = nil, botKeys = {},
 			github = Github.client(Fetch.runner, tern.json.decode), timers = {},
-			flights = { refresh = false, checks = false, probe = false, flake = false },
+			flights = { refresh = false, checks = false, probe = false, flake = false, tandem = false }, watched = watched,
 			sched = {
 				probedAt = now, probeChanged = false, focusedAt = if live then now else nil, checksAt = nil,
 				refreshTried = nil, lastModified = if cache then cache.lastModified else nil,
@@ -2266,6 +2365,7 @@ local block: BlockDef<Block> = {
 			-- How each repo merges is known from the first frame, before any refresh.
 			loadMerges(b)
 			loadAgent(b, cx)
+			loadTandem(b, cx)
 			rearm(b, cx)
 		end
 		return b

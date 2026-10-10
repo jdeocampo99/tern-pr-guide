@@ -461,7 +461,11 @@ local function actionsFor(pr: HubPR, column: Column, reasons: { Model.Reason }, 
 		local main, more = copy, {}
 		-- A reviewer waits on the author to say the fix is in: asking again is the card's job until they have been asked.
 		local again = Model.awaitingReReview(pr)
-		if M.botActionable(pr) then
+		if pr.tandem then
+			-- Tandem owns the branch, so the card offers the hand-off and never an agent of its own.
+			main, more = action("card-handoff", "Hand off to Tandem", "A"), { copy }
+			if again and #again.ask > 0 then table.insert(more, action("card-rerequest", "Re-request review", "Q")) end
+		elseif M.botActionable(pr) then
 			main, more = action("card-agent", "Fix bot comments", "A"), { copy, action("card-summarize", "Summarize", "⇧A") }
 			if again and #again.ask > 0 then table.insert(more, action("card-rerequest", "Re-request review", "Q")) end
 		elseif again and #again.ask > 0 then
@@ -663,7 +667,7 @@ local function toCard(pr: HubPR, placement: Model.Placement, s: State): Card
 	return {
 		flake = if flake and flake.flaky and flake.reason then "Likely flaky: " .. flake.reason else nil,
 		pr = pr, chips = chips, detail = detail, detailKind = detailKind, column = placement.column, reasons = placement.reasons, main = main, more = more,
-		agent = agent, agentSlot = agent ~= nil or placement.column == "needs_fixes" or (placement.column == "in_review" and M.botActionable(pr)),
+		agent = agent, agentSlot = agent ~= nil or placement.column == "needs_fixes" or (placement.column == "in_review" and not pr.tandem and M.botActionable(pr)),
 		agentMessage = message, agentPath = path, agentCommit = commit,
 		summary = if agent then nil else summary, merge = s.merges[pr.repo], note = M.pendingNote(s, pr),
 		asking = askingOf(s, pr), busy = s.busy[pr.key],

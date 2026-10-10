@@ -1,0 +1,533 @@
+--!strict
+-- The Tandem hand-off: the watch parser, where a watched PR sits and what its card offers, the exact argv and
+-- stdin of both Tandem calls, and the real hub block driven through them. `tern` is stubbed in the module
+-- environments of block and fetch, and every process effect is a recorded call that a scenario settles by hand.
+local Cases: any = require("../fixtures/hub/cases")
+local Model = require("../src/hub/model")
+local State = require("../src/hub/state")
+local RawWatch: any = require("../fixtures/hub/raw-tandem-watch")
+local RawFix: any = require("../fixtures/hub/raw-tandem-pr-fix")
+
+local function copy(value: any): any
+	if type(value) ~= "table" then return value end
+	local out = {}
+	for key, item in value do out[key] = copy(item) end
+	return out
+end
+
+local function same(a: any, b: any): boolean
+	if type(a) ~= "table" or type(b) ~= "table" then return a == b end
+	for key, value in a do
+		if not same(value, b[key]) then return false end
+	end
+	for key in b do
+		if a[key] == nil then return false end
+	end
+	return true
+end
+
+local function equal(actual: { string }, expected: { string })
+	assert(#actual == #expected, "argv length: " .. table.concat(actual, " "))
+	for i, value in expected do assert(actual[i] == value, "argv at " .. i) end
+end
+
+local function pr(key: string, patch: any?): any
+	for _, source in Cases.prs do
+		if source.key == key then
+			local out = copy(source)
+			for name, value in (patch or {}) do out[name] = value end
+			return out
+		end
+	end
+	error("no case " .. key)
+end
+
+local function board(prs: { any }): State.State
+	return State.new(prs, Cases.asOf, nil)
+end
+
+local function card(s: State.State, key: string): State.Card
+	local found = State.card(s, key)
+	assert(found, "missing card " .. key)
+	return found
+end
+
+-- Every action a card offers, main first.
+local function acts(c: State.Card): { string }
+	local out: { string } = {}
+	if c.main then table.insert(out, c.main.act) end
+	for _, more in c.more do table.insert(out, more.act) end
+	return out
+end
+
+local function offers(c: State.Card, act: string): boolean
+	return table.find(acts(c), act) ~= nil
+end
+
+local function parser()
+	local watched = Model.parseTandemWatch(RawWatch) :: { [string]: boolean }
+	-- The unwatched row is not owned, and the repo's case is not part of the match.
+	assert(watched["acme/web#104"] == true and watched["acme/api#114"] == true and watched["acme/api#112"] == nil)
+	local count = 0
+	for _ in watched do count += 1 end
+	assert(count == 2)
+
+	local web, api = pr("acme/web#104"), pr("acme/api#114")
+	local flags = Model.tandemFlags(watched, { web, api, pr("acme/api#112"), pr("acme/web#101") })
+	assert(flags["acme/web#104"] == true and flags["acme/api#114"] == true and flags["acme/api#112"] == nil and flags["acme/web#101"] == nil)
+	local spelled = copy(web)
+	spelled.repo, spelled.key = "Acme/Web", "Acme/Web#104"
+	assert(Model.tandemFlags(watched, { spelled })["Acme/Web#104"] == true, "flags use the board's own key")
+
+	-- A malformed row is ignored and the rest still count; a document that is not the output is rejected.
+	local doc = copy(RawWatch)
+	local good = doc.rows[1]
+	local bad: { any } = {
+		"row", {}, { repo = "acme", number = 1 },
+		{ repo = "acme/web", number = 0, branch = "b", url = "u", color = "red", checks = "", status = "", note = "" },
+		{ repo = "acme/web", number = 1.5, branch = "b", url = "u", color = "red", checks = "", status = "", note = "" },
+		{ repo = "acme/web", number = 2, branch = "b", url = "u", color = "purple", checks = "", status = "", note = "" },
+		{ repo = "acme/web", number = 3, branch = 7, url = "u", color = "red", checks = "", status = "", note = "" },
+		{ repo = "acme/web", number = 4, branch = "b", url = "u", color = "red", checks = "", status = "", note = "", checkCounts = { passed = 1 } },
+		{ repo = "acme/web", number = 5, branch = "b", url = "u", color = "red", checks = "", status = "", note = "", taskId = 9 },
+	}
+	doc.rows = { bad[1], bad[2], bad[3], bad[4], bad[5], bad[6], bad[7], bad[8], bad[9], good }
+	local filtered = Model.parseTandemWatch(doc) :: { [string]: boolean }
+	local kept = 0
+	for key in filtered do
+		kept += 1
+		assert(key == "acme/web#104", key)
+	end
+	assert(kept == 1)
+	assert(next(Model.parseTandemWatch({ now = "x", rows = {} }) :: any) == nil)
+	for _, document in { "text", 4, {}, { rows = {} }, { now = "x" }, { now = "x", rows = "no" }, { now = "x", rows = {}, readAt = 1 } } do
+		assert(Model.parseTandemWatch(document) == nil)
+	end
+	local frozen = table.freeze(copy(RawWatch))
+	assert(Model.parseTandemWatch(frozen) ~= nil, "parsing reads and never writes")
+end
+
+local function placement()
+	-- A watched PR with something to fix stays In review, and its card hands off to Tandem.
+	for _, key in { "acme/web#104", "acme/api#105", "acme/web#101", "acme/api#116" } do
+		local mine = pr(key)
+		assert(Model.classify(mine, Cases.asOf) == "needs_fixes", key)
+		mine.tandem = true
+		local placed = Model.placement(mine, Cases.asOf)
+		assert(placed.column == "in_review" and #placed.reasons == 0, key)
+		local s = board({ mine })
+		local c = card(s, key)
+		assert(c.column == "in_review" and c.chips[1].text == "Waiting on Tandem" and c.chips[1].kind == "agent")
+		assert(c.main and c.main.act == "card-handoff" and c.main.label == "Hand off to Tandem" and c.main.key == "A")
+		assert(#c.more == 1 and c.more[1].act == "card-copy" and c.more[1].label == "Copy link")
+		for _, forbidden in { "card-agent", "card-summarize", "card-rerun" } do assert(not offers(c, forbidden), forbidden) end
+		assert(not c.agentSlot, "no agent slot on a card Tandem owns")
+	end
+
+	-- The same PR with no Tandem keeps its own card.
+	local plain = card(board({ pr("acme/web#104") }), "acme/web#104")
+	assert(plain.column == "needs_fixes" and plain.main and plain.main.label == "Fix with agent")
+
+	-- A watched bot-feedback PR is handed off, not fixed with an agent.
+	local bot = card(board({ pr("acme/api#106") }), "acme/api#106")
+	assert(bot.main and bot.main.label == "Fix bot comments" and offers(bot, "card-summarize"))
+	local watchedBot = card(board({ pr("acme/api#106", { tandem = true }) }), "acme/api#106")
+	assert(watchedBot.column == "in_review" and watchedBot.main and watchedBot.main.act == "card-handoff")
+	for _, forbidden in { "card-agent", "card-summarize" } do assert(not offers(watchedBot, forbidden), forbidden) end
+	assert(bot.agentSlot and not watchedBot.agentSlot)
+
+	-- Draft, inactive and review-role PRs keep their own places, and a quiet watched PR stays where it is.
+	local draft = Model.placement(pr("acme/web#113", { tandem = true }), Cases.asOf)
+	assert(draft.column == "inactive")
+	assert(Model.placement(pr("acme/web#102", { tandem = true }), Cases.asOf).column == "inactive")
+	assert(Model.placement(pr("acme/web#301", { tandem = true }), Cases.asOf).column == "to_review")
+	assert(Model.placement(pr("acme/api#109", { tandem = true }), Cases.asOf).column == "ready")
+	local waiting = card(board({ pr("acme/api#114", { tandem = true }) }), "acme/api#114")
+	assert(waiting.column == "in_review" and waiting.chips[1].text == "Waiting on Tandem")
+
+	-- The reason a hand-off gives is stable and never empty.
+	local failing = pr("acme/web#104", { tandem = true })
+	assert(Model.handoffReason(failing, Cases.asOf) == "PR hub: failing checks")
+	assert(Model.handoffReason(failing, Cases.asOf) == Model.handoffReason(failing, Cases.asOf))
+	assert(Model.handoffReason(pr("acme/api#116", { tandem = true }), Cases.asOf) == "PR hub: the merge failed, review feedback to address, failing checks, merge conflicts")
+	assert(Model.handoffReason(pr("acme/api#114", { tandem = true }), Cases.asOf) == "Hand off from the PR hub")
+end
+
+-- The stub `tern` shared by the block's and fetch's module environments. Decoded text is looked up, and an
+-- encoded value is recorded so the test can compare the exact request table that would be written.
+local REPO_ROOT = "/Users/reader/project"
+
+local function stubTern(w: any): any
+	return {
+		json = {
+			decode = function(text: string): any
+				local value = w.decoded[text]
+				if value == nil then error("invalid json", 0) end
+				return value
+			end,
+			encode = function(value: any): string
+				table.insert(w.encoded, value)
+				return "ENVELOPE_" .. #w.encoded
+			end,
+		},
+		timer = function(_: number, fn: () -> ()): any
+			table.insert(w.timers, fn)
+			return { cancel = function() end }
+		end,
+		getenv = function(): string? return nil end,
+		kv = { get = function(): any return nil end, set = function() end },
+	}
+end
+
+local function withWorld(run: (w: any, Fetch: any, Block: any) -> ())
+	local Block: any = require("../src/hub/block")
+	local Fetch: any = require("../src/fetch")
+	local blockEnv: any, fetchEnv: any = getfenv(Block.init), getfenv(Fetch.tandemWatch)
+	local hostBlock, hostFetch, hostRunner = blockEnv.tern, fetchEnv.tern, Fetch.runner
+	local w: any = { decoded = {}, encoded = {}, timers = {}, calls = {}, toasts = {}, renders = 0, throws = false, Block = Block }
+	local stub = stubTern(w)
+	blockEnv.tern, fetchEnv.tern = stub, stub
+	Fetch.runner = function(argv: { string }, opts: any, done: (any) -> ())
+		table.insert(w.calls, { argv = table.clone(argv), opts = opts, done = done })
+		if w.throws then error("spawn failed", 0) end
+	end
+	local ok, err = pcall(run, w, Fetch, Block)
+	blockEnv.tern, fetchEnv.tern, Fetch.runner = hostBlock, hostFetch, hostRunner
+	if not ok then error(err, 0) end
+end
+
+local function out(stdout: string?, status: number?, stderr: string?, timedOut: boolean?): any
+	return { status = status or 0, stdout = stdout or "", stderr = stderr or "", timed_out = timedOut or false }
+end
+
+local function fetching()
+	withWorld(function(w, Fetch)
+		w.decoded["WATCH"] = RawWatch
+		w.decoded["DONE"], w.decoded["KEPT"], w.decoded["REFUSED"] = RawFix.done, RawFix.kept, RawFix.refusal
+
+		-- Watch: exactly `tandem watch --json` in the project root, answered once.
+		local seen: { { watched: any, err: string? } } = {}
+		local function watch(settle: (any) -> ())
+			w.calls = {}
+			seen = {}
+			Fetch.tandemWatch(REPO_ROOT, function(watched: any, err: string?) table.insert(seen, { watched = watched, err = err }) end)
+			assert(#w.calls == 1)
+			local call = w.calls[1]
+			equal(call.argv, { "tandem", "watch", "--json" })
+			assert(call.opts.cwd == REPO_ROOT and call.opts.stdin == nil)
+			settle(call)
+		end
+		watch(function(call)
+			call.done(out("WATCH"))
+			call.done(out("WATCH"))
+			assert(#seen == 1 and seen[1].err == nil and seen[1].watched["acme/web#104"] == true and seen[1].watched["acme/api#112"] == nil, "once")
+		end)
+		for name, reply in {
+			nonzero = out("WATCH", 1, "tandem: not found"), timeout = out("", 0, "", true),
+			garbage = out("not json"), shape = out("SHAPELESS"),
+		} do
+			w.decoded["SHAPELESS"] = { rows = {} }
+			watch(function(call)
+				call.done(reply)
+				assert(#seen == 1 and seen[1].watched == nil and seen[1].err ~= nil, name)
+			end)
+		end
+		w.throws = true
+		seen = {}
+		w.calls = {}
+		Fetch.tandemWatch(REPO_ROOT, function(watched: any, err: string?) table.insert(seen, { watched = watched, err = err }) end)
+		assert(#seen == 1 and seen[1].watched == nil and string.find(seen[1].err :: string, "spawn failed", 1, true))
+		w.throws = false
+		w.calls = {}
+		Fetch.tandemWatch("relative/project", function(watched: any, err: string?) table.insert(seen, { watched = watched, err = err }) end)
+		assert(#w.calls == 0 and #seen == 2 and seen[2].watched == nil, "a relative root runs nothing")
+
+		-- Hand-off: exactly `tandem native act`, with the plugin origin and the four action fields.
+		local replies: { { outcome: any, err: string? } } = {}
+		local function handoff(settle: (any) -> ())
+			w.calls, w.encoded, replies = {}, {}, {}
+			Fetch.tandemHandoff(REPO_ROOT, "acme/web", 104, "  PR hub: failing checks \n", function(outcome: any, err: string?)
+				table.insert(replies, { outcome = outcome, err = err })
+			end)
+			assert(#w.calls == 1 and #w.encoded == 1)
+			local call = w.calls[1]
+			equal(call.argv, { "tandem", "native", "act" })
+			assert(call.opts.cwd == REPO_ROOT and call.opts.stdin == "ENVELOPE_1")
+			assert(same(w.encoded[1], {
+				v = 1, origin = { plugin = "prguide", repoPath = REPO_ROOT },
+				action = { verb = "pr-fix", repo = "acme/web", number = 104, reason = "PR hub: failing checks" },
+			}), "the envelope is exact")
+			settle(call)
+		end
+		handoff(function(call)
+			call.done(out("DONE"))
+			call.done(out("REFUSED"))
+			assert(#replies == 1 and replies[1].err == nil and replies[1].outcome.status == "done" and replies[1].outcome.notice == nil, "once")
+		end)
+		handoff(function(call)
+			call.done(out("KEPT"))
+			local outcome = replies[1].outcome
+			assert(outcome.status == "kept" and outcome.notice.code == "failed" and string.find(outcome.notice.text, "No worktree is free", 1, true))
+		end)
+		handoff(function(call)
+			call.done(out("REFUSED", 0))
+			local outcome = replies[1].outcome
+			assert(replies[1].err == nil and outcome.status == "refused" and outcome.notice.text == "Tandem does not know this project")
+		end)
+		w.decoded["ODD"] = { status = "maybe" }
+		w.decoded["BADNOTICE"] = { status = "refused", notice = "text" }
+		w.decoded["NOCODE"] = { status = "refused", notice = { text = "x" } }
+		for name, reply in {
+			nonzero = out("DONE", 2, "tandem: boom"), timeout = out("", 0, "", true), garbage = out("nope"),
+			status = out("ODD"), notice = out("BADNOTICE"), code = out("NOCODE"),
+		} do
+			handoff(function(call)
+				call.done(reply)
+				assert(#replies == 1 and replies[1].outcome == nil and replies[1].err ~= nil, name)
+			end)
+		end
+		w.throws = true
+		w.calls, w.encoded, replies = {}, {}, {}
+		Fetch.tandemHandoff(REPO_ROOT, "acme/web", 104, "why", function(outcome: any, err: string?) table.insert(replies, { outcome = outcome, err = err }) end)
+		assert(#replies == 1 and replies[1].outcome == nil and string.find(replies[1].err :: string, "spawn failed", 1, true))
+		w.throws = false
+		-- A request that is not whole runs nothing.
+		w.calls, w.encoded, replies = {}, {}, {}
+		local incomplete: { { any } } = {
+			{ "acme/web", 104, "   " }, { "acme/web", 0, "why" }, { "acme/web", 1.5, "why" }, { "acme", 104, "why" }, { "acme/web", -1, "why" },
+		}
+		for _, args in incomplete do
+			Fetch.tandemHandoff(REPO_ROOT, args[1], args[2], args[3], function(outcome: any, err: string?) table.insert(replies, { outcome = outcome, err = err }) end)
+		end
+		Fetch.tandemHandoff("relative", "acme/web", 104, "why", function(outcome: any, err: string?) table.insert(replies, { outcome = outcome, err = err }) end)
+		assert(#w.calls == 0 and #w.encoded == 0 and #replies == 6)
+		for _, reply in replies do assert(reply.outcome == nil and reply.err ~= nil) end
+	end)
+end
+
+local function runTimers(w: any)
+	local pending = w.timers
+	w.timers = {}
+	for _, fn in pending do fn() end
+end
+
+-- A live board (opened with a real cwd, so the block reads Tandem) over the cases, with every effect recorded.
+local function live(w: any, Block: any): any
+	local cx: any = { cwd = REPO_ROOT }
+	function cx:render() w.renders += 1 end
+	function cx:toast(kind: string, title: string, detail: string?) table.insert(w.toasts, { kind = kind, title = title, detail = detail }) end
+	function cx:frame() end
+	function cx:open() end
+	w.decoded["WATCH"], w.decoded["DONE"], w.decoded["KEPT"], w.decoded["REFUSED"] = RawWatch, RawFix.done, RawFix.kept, RawFix.refusal
+	local b: any = Block.init(cx, {}, nil)
+	w.b, w.cx = b, cx
+	State.replace(b.s, copy(Cases.prs), Cases.asOf, Cases.asOfIso)
+	return b
+end
+
+local function press(w: any, name: string)
+	w.b.s.keyed = true
+	w.Block.key(w.b, { name = name } :: any, w.cx)
+end
+
+local function handoffs(w: any): { any }
+	local found = {}
+	for _, call in w.calls do
+		if call.argv[2] == "native" then table.insert(found, call) end
+	end
+	return found
+end
+
+local function blockPaths()
+	withWorld(function(w, Fetch, Block)
+		local b = live(w, Block)
+		-- Opening the block reads Tandem once, in the project root, and nothing else runs.
+		assert(#w.calls == 1)
+		equal(w.calls[1].argv, { "tandem", "watch", "--json" })
+		assert(w.calls[1].opts.cwd == REPO_ROOT and #handoffs(w) == 0)
+		assert(card(b.s, "acme/web#104").column == "needs_fixes", "before the read, nothing is flagged")
+		w.calls[1].done(out("WATCH"))
+		local web, api, other = card(b.s, "acme/web#104"), card(b.s, "acme/api#114"), card(b.s, "acme/api#105")
+		assert(web.column == "in_review" and web.chips[1].text == "Waiting on Tandem" and web.pr.tandem)
+		assert(api.chips[1].text == "Waiting on Tandem" and api.pr.tandem, "the repo's case does not matter")
+		assert(other.column == "needs_fixes" and not other.pr.tandem and other.main and other.main.label == "Fix with agent")
+		assert(card(b.s, "acme/api#112").column == "needs_fixes" and not card(b.s, "acme/api#112").pr.tandem, "unwatched is not owned")
+		assert(#handoffs(w) == 0, "nothing is handed off before a press")
+
+		-- A refresh reads Tandem again, once, in the same root, and still hands nothing off.
+		b.github = { refresh = function() end }
+		Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+		local reads = 0
+		for _, call in w.calls do
+			if call.argv[1] == "tandem" then
+				reads += 1
+				equal(call.argv, { "tandem", "watch", "--json" })
+				assert(call.opts.cwd == REPO_ROOT)
+			end
+		end
+		assert(reads == 2 and #handoffs(w) == 0)
+		w.calls[2].done(out("WATCH"))
+		assert(b.flights.tandem == false and card(b.s, "acme/web#104").pr.tandem)
+		w.calls = {}
+
+		-- Fix with agent is not offered on a watched card, and the handlers refuse it all the same.
+		for _, column in b.s.board.columns do
+			for _, c in column.cards do
+				if c.pr.tandem then
+					assert(c.main and c.main.act == "card-handoff" and c.main.label == "Hand off to Tandem")
+					for _, forbidden in { "card-agent", "card-summarize" } do assert(not offers(c, forbidden), forbidden) end
+				end
+			end
+		end
+		Block.event(b, { ev = "action", act = "card-agent", value = "acme/web#104" } :: any, w.cx)
+		assert(b.agentFlight == nil and b.s.agents["acme/web#104"] == nil and #w.toasts == 0 and #w.calls == 0)
+
+		-- A on the watched card hands it off: one call, the exact request, the card busy until Tandem answers.
+		State.select(b.s, "acme/web#104")
+		local renders = w.renders
+		press(w, "a")
+		assert(#w.calls == 1 and #handoffs(w) == 1 and w.renders > renders)
+		local call = handoffs(w)[1]
+		equal(call.argv, { "tandem", "native", "act" })
+		assert(call.opts.cwd == REPO_ROOT and call.opts.stdin == "ENVELOPE_1")
+		assert(same(w.encoded[1], {
+			v = 1, origin = { plugin = "prguide", repoPath = REPO_ROOT },
+			action = { verb = "pr-fix", repo = "acme/web", number = 104, reason = "PR hub: failing checks" },
+		}))
+		assert(b.s.busy["acme/web#104"] ~= nil)
+		press(w, "a")
+		assert(#w.calls == 1, "a press while the request is out sends nothing")
+		call.done(out("DONE"))
+		call.done(out("REFUSED"))
+		assert(b.s.busy["acme/web#104"] == nil and #w.toasts == 0 and card(b.s, "acme/web#104").column == "in_review", "answered once")
+		assert(card(b.s, "acme/web#104").chips[1].text == "Waiting on Tandem")
+
+		-- Done on a card Tandem was not on yet: it moves to In review as Waiting on Tandem.
+		w.calls = {}
+		w.encoded = {}
+		Block.event(b, { ev = "action", act = "card-handoff", value = "acme/api#105" } :: any, w.cx)
+		assert(#w.calls == 1 and same(w.encoded[1].action, { verb = "pr-fix", repo = "acme/api", number = 105, reason = "PR hub: merge conflicts" }))
+		w.calls[1].done(out("DONE"))
+		local moved = card(b.s, "acme/api#105")
+		assert(moved.pr.tandem and moved.column == "in_review" and moved.chips[1].text == "Waiting on Tandem" and #w.toasts == 0)
+		assert(not card(b.s, "acme/api#116").pr.tandem and card(b.s, "acme/api#116").column == "needs_fixes", "only the intended PR changes")
+		assert(b.watched["acme/api#105"] == true)
+
+		-- Kept is Waiting on Tandem too, with Tandem's own notice as an info toast.
+		w.calls, w.encoded, w.toasts = {}, {}, {}
+		Block.event(b, { ev = "action", act = "card-handoff", value = "acme/web#101" } :: any, w.cx)
+		w.calls[1].done(out("KEPT"))
+		assert(card(b.s, "acme/web#101").pr.tandem and card(b.s, "acme/web#101").chips[1].text == "Waiting on Tandem")
+		assert(#w.toasts == 1 and w.toasts[1].kind == "info" and string.find(w.toasts[1].title, "No worktree is free", 1, true))
+
+		-- Refused: the notice is the toast, and nothing about the card changes.
+		w.calls, w.encoded, w.toasts = {}, {}, {}
+		local before = card(b.s, "acme/api#116")
+		local was = { column = before.column, tandem = before.pr.tandem, main = before.main and before.main.act }
+		Block.event(b, { ev = "action", act = "card-handoff", value = "acme/api#116" } :: any, w.cx)
+		w.calls[1].done(out("REFUSED"))
+		local after = card(b.s, "acme/api#116")
+		assert(#w.toasts == 1 and w.toasts[1].kind == "error" and w.toasts[1].title == "Tandem does not know this project")
+		assert(after.column == was.column and after.pr.tandem == was.tandem and after.main and after.main.act == was.main and b.s.busy["acme/api#116"] == nil)
+		assert(b.watched["acme/api#116"] == nil)
+
+		-- A failed call is a toast and no change: non-zero, timeout, bad output, a throw.
+		for name, reply in { nonzero = out("", 1, "tandem: boom"), timeout = out("", 0, "", true), garbage = out("nope") } do
+			w.calls, w.toasts = {}, {}
+			Block.event(b, { ev = "action", act = "card-handoff", value = "acme/api#116" } :: any, w.cx)
+			w.calls[1].done(reply)
+			assert(#w.toasts == 1 and w.toasts[1].kind == "error" and string.find(w.toasts[1].title, "Couldn't hand off to Tandem", 1, true), name)
+			assert(not card(b.s, "acme/api#116").pr.tandem and b.s.busy["acme/api#116"] == nil, name)
+		end
+		w.throws, w.calls, w.toasts = true, {}, {}
+		Block.event(b, { ev = "action", act = "card-handoff", value = "acme/api#116" } :: any, w.cx)
+		assert(#w.toasts == 1 and string.find(w.toasts[1].title, "spawn failed", 1, true) and not card(b.s, "acme/api#116").pr.tandem and b.s.busy["acme/api#116"] == nil)
+		w.throws = false
+
+		-- An answer for a PR that left the board, or whose head moved, changes nothing.
+		w.calls, w.toasts = {}, {}
+		Block.event(b, { ev = "action", act = "card-handoff", value = "acme/api#116" } :: any, w.cx)
+		State.dropPr(b.s, "acme/api#116")
+		w.calls[1].done(out("DONE"))
+		assert(State.prOf(b.s, "acme/api#116") == nil and #w.toasts == 0 and b.watched["acme/api#116"] == nil)
+		w.calls = {}
+		Block.event(b, { ev = "action", act = "card-handoff", value = "acme/api#119" } :: any, w.cx)
+		local moved119: any = State.prOf(b.s, "acme/api#119")
+		moved119.headOid = "moved"
+		w.calls[1].done(out("DONE"))
+		assert(not moved119.tandem and #w.toasts == 0 and b.s.busy["acme/api#119"] == nil)
+		w.calls = {}
+		Block.event(b, { ev = "action", act = "card-handoff", value = "acme/api#118" } :: any, w.cx)
+		b.closed = true
+		local renderedBefore = w.renders
+		w.calls[1].done(out("DONE"))
+		assert(w.renders == renderedBefore and #w.toasts == 0, "a closed block does nothing")
+	end)
+
+	-- A failed or unreadable watch leaves every flag false and the board usable.
+	for name, reply in { nonzero = out("", 127, "tandem: not found"), garbage = out("nope"), timeout = out("", 0, "", true) } do
+		withWorld(function(w, Fetch, Block)
+			local b = live(w, Block)
+			w.calls[1].done(reply)
+			local c = card(b.s, "acme/web#104")
+			assert(not c.pr.tandem and c.column == "needs_fixes" and c.main and c.main.label == "Fix with agent", name)
+			assert(b.flights.tandem == false and #w.toasts == 0 and b.s.error == nil, name)
+		end)
+	end
+	withWorld(function(w, Fetch, Block)
+		w.throws = true
+		local b = live(w, Block)
+		assert(b.flights.tandem == false and not card(b.s, "acme/web#104").pr.tandem)
+	end)
+	withWorld(function(w, Fetch, Block)
+		local cx: any = { cwd = nil }
+		function cx:render() end
+		function cx:toast() end
+		function cx:frame() end
+		local b: any = Block.init(cx, {}, nil)
+		assert(#w.calls == 0 and b.flights.tandem == false, "no project folder, no read")
+	end)
+end
+
+local function fixture()
+	withWorld(function(w, Fetch, Block)
+		local cx: any = { cwd = REPO_ROOT }
+		function cx:render() w.renders += 1 end
+		function cx:toast(kind: string, title: string, detail: string?) table.insert(w.toasts, { kind = kind, title = title, detail = detail }) end
+		function cx:frame() end
+		function cx:open() end
+		local b: any = Block.init(cx, { "fixture=cases" }, nil)
+		w.b, w.cx = b, cx
+		local function chip(key: string): string
+			return card(b.s, key).chips[1].text
+		end
+		assert(#w.calls == 0 and b.s.error == nil, "the sample board runs no process")
+		assert(chip("acme/web#104") == "Waiting on Tandem" and card(b.s, "acme/web#104").column == "in_review")
+		assert(chip("acme/api#114") == "Waiting on Tandem" and not Cases.prs[1].tandem, "the recorded boards are not edited")
+		for _, source in Cases.prs do assert(source.tandem == false, source.key) end
+
+		-- Every ⌘R brings its own boards, flagged from the same recorded read.
+		for _ = 1, 3 do
+			Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, cx)
+			runTimers(w)
+			assert(#w.calls == 0)
+			assert(chip("acme/web#104") == "Waiting on Tandem" and card(b.s, "acme/web#104").pr.tandem)
+			assert(card(b.s, "acme/api#112").column == "needs_fixes" and not card(b.s, "acme/api#112").pr.tandem)
+		end
+
+		-- The sample board hands nothing off.
+		w.toasts = {}
+		State.select(b.s, "acme/web#104")
+		press(w, "a")
+		assert(#w.calls == 0 and #w.toasts == 1 and w.toasts[1].kind == "info")
+		for _, source in Cases.prs do assert(source.tandem == false, source.key) end
+	end)
+end
+
+return function()
+	parser()
+	placement()
+	fetching()
+	blockPaths()
+	fixture()
+end
