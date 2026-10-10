@@ -58,8 +58,6 @@ local SAMPLE_RECENT: { Sync.Opened } = {
 	{ repo = "acme/api", number = 398, title = "Drop the unused webhook table", author = "mei", at = "2026-09-29T11:05:48Z" },
 }
 
--- A pane narrower than this many columns is split beside a terminal: the board's columns stack.
-local NARROW_COLS = 110
 
 -- The agent a fixture board shows, so ⇧M has something to choose from without running omp.
 local SAMPLE_AGENT: State.AgentChoice = {
@@ -852,7 +850,6 @@ local block: BlockDef<Block> = {
 		end
 		s.refreshedAt = refreshedAt
 		s.loading = live and cache == nil
-		s.narrow = cx.cols > 0 and cx.cols < NARROW_COLS
 		if problem then s.error = { operation = "hub", message = problem } end
 		local b: Block = {
 			s = s, cache = cache, fixture = fixture, generate = opts ~= nil and opts.generate, agent = nil,
@@ -912,9 +909,6 @@ local block: BlockDef<Block> = {
 		end
 		-- Menus and the key panel swallow the keys they don't use.
 		return s.mode ~= "board"
-	end,
-	resize = function(b: Block, cols: number, rows: number, cx: BlockCx)
-		b.s.narrow = cols < NARROW_COLS
 	end,
 	save = function(b: Block): any
 		return State.saved(b.s)

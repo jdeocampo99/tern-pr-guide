@@ -657,7 +657,6 @@ export type State = {
 	busy: { [string]: string },       -- by card key: the action in flight
 	refreshedAt: string?, loading: boolean, error: Error?,
 	agent: AgentChoice?,
-	narrow: boolean,                  -- the pane is split beside a terminal: the columns stack
 	keyed: boolean,                   -- as src/state.luau:108
 	born: { [string]: string }, booted: boolean,   -- arrival motion, as src/state.luau:113
 }

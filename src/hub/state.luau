@@ -102,7 +102,6 @@ export type State = {
 	loading: boolean,
 	error: Model.Error?,
 	agent: AgentChoice?, -- nil until the block has found the agent
-	narrow: boolean, -- the pane is split beside a terminal: the columns stack
 	keyed: boolean, -- the change being drawn came from a key: it never animates
 	born: { [string]: string },
 	booted: boolean, -- arrival motion, as src/state.luau
@@ -178,7 +177,7 @@ function M.new(prs: { HubPR }, now: number, saved: any): State
 		repositories = repositories, sort = sort, search = Fields.create(""), link = Fields.create(""),
 		mode = "board", menu = nil, menuCursor = 1, confirm = nil, folded = folded, recent = {}, walking = false,
 		ringed = {}, agents = {}, details = {}, summaries = {}, merges = {}, acted = {}, busy = {},
-		refreshedAt = nil, loading = false, error = nil, agent = nil, narrow = false,
+		refreshedAt = nil, loading = false, error = nil, agent = nil,
 		keyed = false, born = {}, booted = false,
 	}
 	M.project(s)

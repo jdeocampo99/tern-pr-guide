@@ -1045,14 +1045,14 @@
 .gp-hub-up { align-self: flex-start; max-width: 100%; display: flex; gap: 10px; align-items: center; min-width: 0; padding: 7px 7px 7px 14px; border: 1px solid var(--l2); border-radius: var(--r-ctl); background: var(--sf-shade); cursor: pointer; transition: border-color 140ms ease; }
 .gp-hub-up:hover { border-color: var(--l3); }
 .gp-hub-up-l { flex-shrink: 0; font-family: var(--sans); font-size: 12.5px; color: var(--t3); }
-.gp-hub-up-t { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--sans); font-size: 13.5px; font-weight: 500; color: var(--t1); }
-.gp-hub-up-m { flex-shrink: 0; font-size: 12px; color: var(--t3); }
+.gp-hub-up-t { flex: 0 8 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--sans); font-size: 13.5px; font-weight: 500; color: var(--t1); }
+.gp-hub-up-m { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--t3); }
 .gp-hub-up-go { flex-shrink: 0; display: flex; gap: 8px; align-items: center; padding: 2px 5px 2px 10px; background: var(--card); border-color: var(--l3); color: var(--t1); }
 .gp-hub-body { flex: 1 1 auto; display: flex; flex-direction: column; gap: 24px; padding: 16px 0 56px; }
 .gp-hub-body > * { flex-shrink: 0; }
-.gp-hub-board { display: flex; gap: 24px; align-items: flex-start; }
-.gp-hub-narrow .gp-hub-board { flex-direction: column; align-items: stretch; gap: 20px; }
-.gp-hub-col { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+/* the columns sit side by side while three fit, and stack, each full width, in a narrower pane */
+.gp-hub-board { display: flex; flex-wrap: wrap; gap: 20px 24px; align-items: flex-start; }
+.gp-hub-col { flex: 1 1 300px; min-width: 300px; display: flex; flex-direction: column; gap: 8px; }
 .gp-hub-col > * { flex-shrink: 0; }
 .gp-hub-col-act { flex-grow: 1.35; }
 .gp-hub-colhead { display: flex; gap: 8px; align-items: center; margin-bottom: 4px; padding: 0 0 10px; border-bottom: 1px solid var(--l2); }
@@ -1185,7 +1185,7 @@
 .gp-hub-rc-when { width: 64px; flex-shrink: 0; text-align: right; font-size: 12.5px; color: var(--t3); font-variant-numeric: tabular-nums; }
 
 /* the menus and the key panel: Tern overlays holding rows like the model menu's */
-[data-role='gp.hubmenu'] .sf-ov-body, [data-role='gp.hubhelp'] .sf-ov-body, [data-role='gp.hubhelpn'] .sf-ov-body { padding: 0; gap: 0; }
+[data-role='gp.hubmenu'] .sf-ov-body, [data-role='gp.hubhelp'] .sf-ov-body { padding: 0; gap: 0; }
 .gp-hm-head { padding: 10px 14px 0; font-family: var(--sans); font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--t3); }
 .gp-hm-list { max-height: 360px; }
 .gp-hm-row { font-size: 13px; white-space: nowrap; }
@@ -1198,17 +1198,14 @@
 .gp-hm-count { font-size: 11.5px; color: var(--t3); font-variant-numeric: tabular-nums; }
 .gp-hm-sub { padding-left: 16px; font-size: 12px; color: var(--t3); }
 .gp-hm-clear .gp-hm-label { color: var(--t2); }
-.gp-hh { display: flex; gap: 28px; padding: 18px 22px 16px; background: var(--card); }
-.gp-hh .gp-keycol { flex: 0 0 280px; width: 280px; min-width: 0; }
-/* in a split block the columns stack, one per row, in a panel that fits the block */
-.gp-hh-narrow { flex-direction: column; gap: 18px; }
-.gp-hh-narrow .gp-keycol { flex: 0 0 auto; width: auto; }
+.gp-hh { display: flex; flex-wrap: wrap; gap: 18px 28px; padding: 18px 22px 16px; background: var(--card); }
+.gp-hh .gp-keycol { flex: 1 1 240px; min-width: 240px; }
 .gp-hh .gp-keyrow { gap: 10px; align-items: flex-start; }
 .gp-hh .gp-keylabel { white-space: nowrap; }
 .gp-hh-keys { display: flex; flex-direction: column; gap: 3px; flex-shrink: 0; width: 76px; }
 /* menus and the key panel are opaque cards, so the board never shows through; the menus are narrow */
-.sf-overlay[data-role='gp.hubmenu'] .sf-ov-card, .sf-overlay[data-role='gp.hubhelp'] .sf-ov-card, .sf-overlay[data-role='gp.hubhelpn'] .sf-ov-card { background: var(--card); }
+.sf-overlay[data-role='gp.hubmenu'] .sf-ov-card, .sf-overlay[data-role='gp.hubhelp'] .sf-ov-card { background: var(--card); }
 .sf-overlay[data-role='gp.hubmenu'], .sf-overlay[data-role='gp.hubmenu'] .sf-ov-card { width: 260px; }
-/* the key panel is wider than Tern's lg overlay: three 280px columns, or one column in a split block */
-.sf-overlay[data-role='gp.hubhelp'], .sf-overlay[data-role='gp.hubhelp'] .sf-ov-card { width: 940px; }
-.sf-overlay[data-role='gp.hubhelpn'], .sf-overlay[data-role='gp.hubhelpn'] .sf-ov-card { width: 400px; }
+/* the key panel is wider than Tern's lg overlay: three columns that wrap to fewer in a narrower pane */
+.sf-overlay[data-role='gp.hubhelp'], .sf-overlay[data-role='gp.hubhelp'] .sf-ov-card { width: 940px; max-width: 100%; }
+.sf-overlay[data-role='gp.hubhelpn'] { width: 400px; }

@@ -27,7 +27,7 @@ local EMPTY: { [Model.Column]: string } = {
 local M = {}
 
 local function rootClass(s: State.State): string
-	return "gp-root gp-hub" .. (if s.narrow then " gp-hub-narrow" else "") .. (if s.keyed then "" else " gp-soft")
+	return "gp-root gp-hub" .. (if s.keyed then "" else " gp-soft")
 end
 
 local function tabs(s: State.State): Node
@@ -67,7 +67,7 @@ local function controls(s: State.State): Node
 	})
 end
 
--- Next up: one quiet line above the board. Position while walking, count at rest; split view drops the repo and count.
+-- Next up: one quiet line in the header. Position while walking, count at rest; a narrow pane clips the repo and count.
 local function nextUp(s: State.State): Node?
 	local next, card = s.board.nextUp, State.nextCard(s)
 	if not next or not card then return nil end
@@ -75,10 +75,8 @@ local function nextUp(s: State.State): Node?
 	local kids: { Node } = { span("gp-hub-up-l", "Next up") }
 	if card.chips[1] then table.insert(kids, Card.chip(card.chips[1])) end
 	table.insert(kids, span("gp-hub-up-t", pr.title))
-	if not s.narrow then
-		local count = if s.walking then next.index .. " of " .. next.total else next.total .. " left"
-		table.insert(kids, span("gp-hub-up-m", (string.match(pr.repo, "[^/]+$") :: string) .. " #" .. pr.number .. " · " .. count))
-	end
+	local count = if s.walking then next.index .. " of " .. next.total else next.total .. " left"
+	table.insert(kids, span("gp-hub-up-m", (string.match(pr.repo, "[^/]+$") :: string) .. " #" .. pr.number .. " · " .. count))
 	table.insert(kids, el("span", { class = "gp-btn gp-btn-sm gp-hub-up-go", key = "go", actions = { click = "hub-next" } }, { span("gp-hub-up-gol", "Go"), Ui.keys(".") }))
 	return el("div", { class = "gp-hub-up", key = "up", actions = { click = "hub-next" } }, kids)
 end
@@ -266,7 +264,7 @@ function M.layer(s: State.State): Node?
 	if s.mode == "menu" and s.menu then
 		return el("div", {}, { el("div", { class = "gp-md-scrim", key = "scrim", actions = { click = "hub-menu-close" } }), Menus.view(s) })
 	elseif s.mode == "help" then
-		return el("div", {}, { el("div", { class = "gp-md-scrim", key = "scrim", actions = { click = "hub-help-close" } }), Help.view(s.narrow) })
+		return el("div", {}, { el("div", { class = "gp-md-scrim", key = "scrim", actions = { click = "hub-help-close" } }), Help.view() })
 	end
 	return nil
 end
