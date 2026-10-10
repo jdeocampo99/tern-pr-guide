@@ -794,7 +794,8 @@ end
 
 -- Puts the ownership this block holds onto its PRs now, so the card and the action guards are safe before any read or
 -- refresh answers: a fix still being set up for a PR that just became Tandem's ends as stopped (`carryOn`), and the
--- counts follow. Positive only: a flag is set here, never cleared; a successful read of Tandem is the one that clears.
+-- counts follow. The flight is reconciled even when no flag moved here, since an adopted cache may already have set
+-- the flag. Positive only: a flag is set here, never cleared; a successful read of Tandem is the one that clears.
 -- Nothing is persisted; the caller decides what to store. Returns whether a PR moved.
 local function applyOwnership(b: Block, cx: BlockCx): boolean
 	local flags = Model.tandemFlags(b.watched, b.s.prs)
@@ -802,9 +803,9 @@ local function applyOwnership(b: Block, cx: BlockCx): boolean
 	for _, pr in b.s.prs do
 		if flags[pr.key] and not pr.tandem then pr.tandem, moved = true, true end
 	end
-	if not moved then return false end
 	local flight = b.agentFlight
 	if flight then carryOn(b, cx, flight) end
+	if not moved then return false end
 	State.project(b.s)
 	recount(b)
 	return true
