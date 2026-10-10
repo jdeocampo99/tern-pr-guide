@@ -2396,20 +2396,22 @@ local function sharedOwnership()
 	end)
 
 	-- B's refs read is out when window C stores ownership of an unrelated PR and the draw that shows it raises (the block
-	-- is gone). The join's draw closed the block and settled B's flight, so the refs answer never goes on to start an engine.
+	-- is gone). The join's draw closed the block and stopped B's flight (it stays held for the closed block, unsettled and
+	-- without an engine), so the refs answer never goes on to start an engine.
 	withWorld(function(w, Fetch, Block)
 		local OTHER = "acme/api#116"
 		local b = agentBoard(w, Fetch, Block)
 		holdCache(w, b)
 		Block.event(b, { ev = "action", act = "card-agent", value = TARGET } :: any, w.cx)
 		w.clones[1].done("/clone", nil)
-		local held = gh(w)
-		assert(held ~= nil and b.agentFlight ~= nil and b.agentFlight.engine == nil and #w.started == 0, "the refs read is out")
+		local held, flight = gh(w), b.agentFlight
+		assert(held ~= nil and flight ~= nil and flight.engine == nil and #w.started == 0, "the refs read is out")
 		local theirs = storeOwned(w, { WEB, API114, OTHER }, Cases.asOf)
 		w.cx.render = function() error("the window is gone", 0) end
 		local calls, finds = #w.calls, #w.finds
 		held.done(out("REFS"))
-		assert(b.closed and b.agentFlight == nil, "the failed draw closed the block and its flight")
+		assert(State.prOf(b.s, OTHER).tandem == true and b.watched[OTHER] == true, "the lookup joined it before the draw")
+		assert(b.closed and flight.stopping and flight.engine == nil, "the failed draw closed the block and stopped its flight")
 		assert(#w.started == 0 and w.stops == 0, "no engine started")
 		assert(#w.calls == calls and #w.finds == finds and #w.clones == 1 and #w.details == 0 and #handoffs(w) == 0, "no external work went on")
 		assert(b.watched[OTHER] == true and same(w.kv["hub.cache"], theirs) and #w.toasts == 0)
