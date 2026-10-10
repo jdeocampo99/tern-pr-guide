@@ -2957,7 +2957,8 @@ local function sharedOwnership()
 		handoffs(w)[1].done(out("DONE"))
 		w.failWhen = nil
 		assert(failed and t3 ~= nil, "T3 landed while the adoption's save failed")
-		assert(b.cache.refreshedAt == t2.refreshedAt and b.unsaved, "this board is T2's, with its ownership unsaved")
+		assert(b.cache.refreshedAt == t3.refreshedAt and b.held == "other-window#3", "this board is T3's, installed whole by the last read")
+		assert(State.prOf(b.s, API114).title == "Retitled by T3", "with T3's data")
 		assert(State.prOf(b.s, TARGET).tandem == true and b.watched[TARGET] == true, "the hand-off stays on the board")
 		assert((w.cacheSets or 0) == before + 1, "the failed adoption save was the only attempt: nothing was stored after it")
 		assert(same(w.kv["hub.cache"], t3) and w.kv["hub.cache"].writeId == "other-window#3", "the store keeps T3 whole")
@@ -3062,8 +3063,8 @@ local function sharedOwnership()
 		handoffs(w)[1].done(out("DONE"))
 		w.failWhen = nil
 		assert(failed and t3 ~= nil, "T3 landed while the adoption's save failed")
-		assert(b.cache.refreshedAt == t2.refreshedAt and b.cache.refreshedAt == t3.refreshedAt and b.unsaved, "this board is T2's at T3's stamp, its ownership unsaved")
-		assert(State.prOf(b.s, API114).title ~= "Retitled by T3", "and it lacks T3's data")
+		assert(b.cache.refreshedAt == t3.refreshedAt and b.held == "other-window#3", "this board is T3's, installed whole by the last read")
+		assert(State.prOf(b.s, API114).title == "Retitled by T3", "with T3's data")
 		assert((w.cacheSets or 0) == before + 1 and same(w.kv["hub.cache"], t3), "the failed save was the only attempt and T3 stands")
 		return b, t3, before + 1
 	end
