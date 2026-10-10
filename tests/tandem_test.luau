@@ -184,7 +184,7 @@ local function stubTern(w: any): any
 			return { cancel = function() end }
 		end,
 		getenv = function(): string? return nil end,
-		kv = { get = function(): any return nil end, set = function(key: string, value: any) w.kv[key] = value end },
+		kv = { get = function(key: string): any return if w.kvIn then w.kvIn[key] else nil end, set = function(key: string, value: any) w.kv[key] = value end },
 	}
 end
 
@@ -335,8 +335,8 @@ local function runTimers(w: any)
 end
 
 -- A live board (opened in a subfolder of the repository, so the block finds the root and reads Tandem) over the
--- cases, with every effect recorded.
-local function live(w: any, Block: any): any
+-- cases, with every effect recorded. With `cached`, the board opens from the cache in `w.kvIn` and keeps what it holds.
+local function live(w: any, Block: any, cached: boolean?): any
 	local cx: any = { cwd = SUBFOLDER }
 	function cx:render() w.renders += 1 end
 	function cx:toast(kind: string, title: string, detail: string?) table.insert(w.toasts, { kind = kind, title = title, detail = detail }) end
@@ -345,7 +345,7 @@ local function live(w: any, Block: any): any
 	w.decoded["WATCH"], w.decoded["DONE"], w.decoded["KEPT"], w.decoded["REFUSED"] = RawWatch, RawFix.done, RawFix.kept, RawFix.refusal
 	local b: any = Block.init(cx, {}, nil)
 	w.b, w.cx = b, cx
-	State.replace(b.s, copy(Cases.prs), Cases.asOf, Cases.asOfIso)
+	State.replace(b.s, if cached then b.s.prs else copy(Cases.prs), Cases.asOf, Cases.asOfIso)
 	return b
 end
 
@@ -896,6 +896,230 @@ local function agentOverlap()
 	end)
 end
 
+-- A cache another run or window stored at `at`, with `owned` (keys) flagged as Tandem's.
+local function storedCache(owned: { string }, at: number): any
+	local tandem: { [string]: boolean } = {}
+	for _, key in owned do tandem[key] = true end
+	local fresh: any = { viewer = "jubbydev", prs = copy(Cases.prs), rateLimit = nil, calls = {}, truncated = false }
+	return Sync.save(Sync.merge(fresh, nil, { added = {}, tandem = tandem }, at), math.huge, function() return 1 end)
+end
+
+-- A GitHub client that answers `refresh` as the test settles it and nothing else.
+local function quietGithub(refresh: (opts: any, done: (any, any) -> ()) -> ()): any
+	return setmetatable({ refresh = refresh }, { __index = function(): any return function() end end })
+end
+
+local function needFixesOf(b: any): number
+	local count = 0
+	for _, pr in b.s.prs do
+		if Model.classify(pr, b.s.now) == "needs_fixes" then count += 1 end
+	end
+	return count
+end
+
+local WEB, API114 = "acme/web#104", "acme/api#114"
+
+-- A refresh or an adopted cache stamps the board with the real clock; the recorded PRs are dated to `Cases.asOf`.
+local function frozen(b: any)
+	State.replace(b.s, b.s.prs, Cases.asOf, Cases.asOfIso)
+end
+
+-- A board that opens from a cache holding Tandem's flags keeps them until a read of Tandem succeeds.
+local function cachedStartup()
+	local function owned(b: any)
+		for _, key in { WEB, API114 } do
+			local mine = card(b.s, key)
+			assert(mine.pr.tandem and mine.column == "in_review" and mine.chips[1].text == "Waiting on Tandem", key)
+			assert(mine.main and mine.main.act == "card-handoff" and not offers(mine, "card-agent"), key)
+		end
+	end
+
+	-- The first read fails: nothing moves, and no fixer starts on a PR it names.
+	withWorld(function(w, Fetch, Block)
+		w.kvIn = { ["hub.cache"] = storedCache({ WEB, API114 }, Cases.asOf) }
+		local b = live(w, Block, true)
+		owned(b)
+		assert(b.watched[WEB] == true and b.watched[API114] == true and #reads(w) == 1)
+		local needFixes = b.cache.counts.needFixes
+		reads(w)[1].done(out("nope"))
+		owned(b)
+		assert(b.watched[WEB] == true and b.s.error == nil and not b.flights.tandem and b.cache.counts.needFixes == needFixes)
+		Block.event(b, { ev = "action", act = "card-agent", value = WEB } :: any, w.cx)
+		assert(b.agentFlight == nil and b.s.agents[WEB] == nil and gh(w) == nil and #w.toasts == 0)
+	end)
+
+	-- A failed read that exits nonzero or times out changes nothing either.
+	for _, failure in { out("", 1, "no daemon"), out("", 0, "", true) } do
+		withWorld(function(w, Fetch, Block)
+			w.kvIn = { ["hub.cache"] = storedCache({ WEB, API114 }, Cases.asOf) }
+			local b = live(w, Block, true)
+			reads(w)[1].done(failure)
+			owned(b)
+		end)
+	end
+
+	-- GitHub's refresh answers before the first read of Tandem: the cache's ownership stands, and the read that
+	-- follows is authoritative, so one that no longer names a PR clears it.
+	withWorld(function(w, Fetch, Block)
+		w.kvIn = { ["hub.cache"] = storedCache({ WEB, API114 }, Cases.asOf) }
+		local b = live(w, Block, true)
+		local answer: any = nil
+		b.github = quietGithub(function(_, done) answer = done end)
+		Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+		assert(answer ~= nil and #reads(w) == 1 and b.flights.tandem, "the first read is still out")
+		answer({ viewer = "jubbydev", prs = copy(Cases.prs), rateLimit = nil, calls = {}, truncated = false }, nil)
+		frozen(b)
+		owned(b)
+		for _, saved in { b.cache, w.kv["hub.cache"] } do
+			for _, key in { WEB, API114 } do
+				for _, cached in saved.prs do
+					if cached.key == key then assert(cached.tandem == true, key) end
+				end
+			end
+		end
+
+		local later = copy(RawWatch)
+		local rows = {}
+		for _, row in later.rows do
+			if row.number ~= 104 then table.insert(rows, row) end
+		end
+		later.rows = rows
+		w.decoded["LATER"] = later
+		reads(w)[1].done(out("LATER"))
+		assert(not card(b.s, WEB).pr.tandem and card(b.s, WEB).column == "needs_fixes" and card(b.s, WEB).main.label == "Fix with agent")
+		assert(card(b.s, API114).pr.tandem and b.watched[WEB] == nil)
+		assert(b.cache.counts.needFixes == needFixesOf(b) and w.kv["hub.status"].counts.needFixes == needFixesOf(b))
+	end)
+end
+
+-- Window A accepted a hand-off; window B stored a newer cache from an older read of Tandem. Adopting it keeps A's flag.
+local function sharedCache()
+	local KEY = "acme/api#116"
+	withWorld(function(w, Fetch, Block)
+		local b = live(w, Block)
+		reads(w)[1].done(out("WATCH"))
+		local fresh: any = { viewer = "jubbydev", prs = copy(Cases.prs), rateLimit = nil, calls = {}, truncated = false }
+		b.cache = Sync.merge(fresh, nil, { added = {}, tandem = Model.tandemFlags(b.watched, fresh.prs) }, Cases.asOf)
+		State.replace(b.s, b.cache.prs, Cases.asOf, Cases.asOfIso)
+		Block.event(b, { ev = "action", act = "card-handoff", value = KEY } :: any, w.cx)
+		handoffs(w)[1].done(out("KEPT"))
+		assert(card(b.s, KEY).pr.tandem and b.watched[KEY] == true)
+
+		-- B's cache is newer and does not name the PR.
+		local theirs = storedCache({ WEB, API114 }, Cases.asOf + 60)
+		w.kvIn = { ["hub.cache"] = theirs }
+		b.github = quietGithub(function() end)
+		Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+		assert(b.cache.refreshedAt == theirs.refreshedAt, "the other window's cache was adopted")
+		assert(b.cache.counts.needFixes == needFixesOf(b) and w.kv["hub.status"].counts.needFixes == needFixesOf(b), "counted with A's flags")
+		for _, cached in b.cache.prs do
+			if cached.key == KEY then assert(cached.tandem == true) end
+		end
+		frozen(b)
+		local mine = card(b.s, KEY)
+		assert(mine.pr.tandem and mine.column == "in_review" and mine.chips[1].text == "Waiting on Tandem", "an accepted hand-off survives adoption")
+		assert(mine.main and mine.main.act == "card-handoff" and not offers(mine, "card-agent"))
+		assert(card(b.s, WEB).pr.tandem and card(b.s, API114).pr.tandem)
+
+		-- Only a read of Tandem that began after the hand-off and omits the PR clears it.
+		assert(#reads(w) == 2)
+		reads(w)[2].done(out("WATCH"))
+		assert(not card(b.s, KEY).pr.tandem and card(b.s, KEY).column == "needs_fixes" and card(b.s, KEY).main.label == "Fix with agent")
+		assert(b.cache.counts.needFixes == needFixesOf(b) and w.kv["hub.status"].counts.needFixes == needFixesOf(b))
+	end)
+end
+
+-- A card Tandem owns shows Waiting on Tandem and Hand off to Tandem, never the Clone repo or Try again of a fix that
+-- cannot start. Whichever way the ownership arrives, a failed or missing-clone state with no worktree is dropped; a
+-- failed one that still names a worktree keeps it (Open worktree) and offers no retry.
+local function terminalAgents()
+	local function projected(w: any, b: any, why: string)
+		local mine = card(b.s, TARGET)
+		assert(mine.pr.tandem and mine.column == "in_review" and mine.chips[1].text == "Waiting on Tandem" and #mine.chips == 1, why)
+		assert(mine.main and mine.main.act == "card-handoff" and mine.main.label == "Hand off to Tandem" and mine.main.key == "A", why)
+		for _, forbidden in { "card-agent", "card-agent-retry", "card-agent-clone", "card-agent-folder", "card-summarize" } do
+			assert(not offers(mine, forbidden), why .. ": " .. forbidden)
+		end
+		return mine
+	end
+	local function aPresses(w: any, b: any, why: string)
+		State.select(b.s, TARGET)
+		local before = #handoffs(w)
+		press(w, "a")
+		local sent = handoffs(w)
+		assert(#sent == before + 1 and sent[#sent].argv[3] == "act" and b.agentFlight == nil and #w.started == 0, why .. ": A hands off")
+	end
+
+	for _, terminal in { "failed", "no_clone" } do
+		withWorld(function(w, Fetch, Block)
+			local b = agentBoard(w, Fetch, Block)
+			if terminal == "failed" then State.agentFailed(b.s, TARGET, "No clone was found", nil) else State.noAgentClone(b.s, TARGET, "acme/api") end
+			local plain = card(b.s, TARGET)
+			assert(plain.main and plain.main.act == (if terminal == "failed" then "card-agent-retry" else "card-agent-clone"), "an unwatched card recovers as before")
+			claim(w, Block, b)
+			assert(b.s.agents[TARGET] == nil, terminal .. ": the obsolete state is dropped")
+			assert(projected(w, b, terminal).agent == nil)
+			aPresses(w, b, terminal)
+		end)
+
+		-- Ownership that arrives with a hand-off drops it too.
+		withWorld(function(w, Fetch, Block)
+			local b = agentBoard(w, Fetch, Block)
+			if terminal == "failed" then State.agentFailed(b.s, TARGET, "No clone was found", nil) else State.noAgentClone(b.s, TARGET, "acme/api") end
+			Block.event(b, { ev = "action", act = "card-handoff", value = TARGET } :: any, w.cx)
+			handoffs(w)[1].done(out("DONE"))
+			assert(b.s.agents[TARGET] == nil)
+			projected(w, b, terminal .. " by hand-off")
+		end)
+
+		-- And so does a cache another window stored, adopted by a block whose own set names the PR.
+		withWorld(function(w, Fetch, Block)
+			local b = agentBoard(w, Fetch, Block)
+			if terminal == "failed" then State.agentFailed(b.s, TARGET, "No clone was found", nil) else State.noAgentClone(b.s, TARGET, "acme/api") end
+			b.watched[TARGET] = true
+			w.kvIn = { ["hub.cache"] = storedCache({ WEB, API114, TARGET }, Cases.asOf + 60) }
+			Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+			assert(b.s.agents[TARGET] == nil)
+			frozen(b)
+			projected(w, b, terminal .. " by shared cache")
+		end)
+	end
+
+	-- A cache that opens the board with ownership has no state to drop, and shows the Tandem card at once.
+	withWorld(function(w, Fetch, Block)
+		w.kvIn = { ["hub.cache"] = storedCache({ WEB }, Cases.asOf) }
+		local b = live(w, Block, true)
+		State.noAgentClone(b.s, WEB, "acme/web")
+		assert(b.s.agents[WEB] == nil and card(b.s, WEB).main.act == "card-handoff")
+	end)
+
+	-- A failed state that still names a worktree keeps it for cleanup: Open worktree stays, Try again is gone, and the
+	-- card's A is the hand-off.
+	withWorld(function(w, Fetch, Block)
+		local b = agentBoard(w, Fetch, Block)
+		State.agentFailed(b.s, TARGET, "boom", "/work/tree")
+		claim(w, Block, b)
+		local kept = b.s.agents[TARGET]
+		assert(kept and kept.kind == "failed" and kept.worktree == "/work/tree", "the retained worktree is not discarded")
+		local mine = projected(w, b, "retained")
+		assert(mine.agent == kept and offers(mine, "card-agent-worktree") and mine.agentMessage ~= nil)
+		Block.event(b, { ev = "action", act = "card-agent-retry", value = TARGET } :: any, w.cx)
+		assert(b.agentFlight == nil and #w.started == 0 and b.s.agents[TARGET] == kept and #w.toasts == 0)
+		aPresses(w, b, "retained")
+	end)
+
+	-- A running engine stays Stop's, and its card keeps Stop.
+	withWorld(function(w, Fetch, Block)
+		local b = agentBoard(w, Fetch, Block)
+		Block.event(b, { ev = "action", act = "card-agent", value = TARGET } :: any, w.cx)
+		w.clones[1].done("/clone", nil)
+		gh(w).done(out("REFS"))
+		claim(w, Block, b)
+		local running = card(b.s, TARGET)
+		assert(running.agent and running.agent.kind == "running" and running.main and running.main.act == "card-agent-stop")
+	end)
+end
+
 local function fixture()
 	withWorld(function(w, Fetch, Block)
 		local cx: any = { cwd = REPO_ROOT }
@@ -940,5 +1164,8 @@ return function()
 	staleRead()
 	counts()
 	agentOverlap()
+	cachedStartup()
+	sharedCache()
+	terminalAgents()
 	fixture()
 end

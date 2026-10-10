@@ -50,7 +50,7 @@ export type Block = {
 	botKeys: { [string]: boolean }, -- retains the bot input kind across clone/stop/retry, never saved
 	github: Github.Client, timers: Timers,
 	flights: { refresh: boolean, checks: boolean, probe: boolean, flake: boolean, tandem: boolean }, -- one call of each kind at a time
-	watched: { [string]: boolean }, -- the PRs Tandem watches (lowercase "owner/repo#123"), from its last read
+	watched: { [string]: boolean }, -- the PRs Tandem watches (lowercase "owner/repo#123"): the cache's flags until a read of Tandem succeeds, then that read
 	handoffs: number, -- hand-offs Tandem has taken this session: a read that began before one cannot name that PR
 	root: string?, -- the repository root `cx.cwd` is in, found once (Tandem's calls name the project by it)
 	rootWaiters: { (string?) -> () }?, -- the callers waiting on that lookup while it runs
@@ -740,9 +740,20 @@ local function adoptShared(b: Block, cx: BlockCx)
 	local theirs, mine = Model.epoch(shared.refreshedAt), cachedAt(b)
 	if theirs and (mine == nil or theirs > mine) then
 		local now = os.time()
-		announce(b, cx, b.cache, shared.prs, now)
+		-- This block's ownership set outranks the other window's, which may rest on an older read of Tandem.
+		local prs = flagged(b.watched, shared.prs)
+		local moved = false
+		for i, pr in prs do
+			if pr ~= shared.prs[i] then moved = true; break end
+		end
+		shared.prs = prs
+		announce(b, cx, b.cache, prs, now)
 		b.cache = shared
-		State.replace(b.s, shared.prs, now, shared.refreshedAt)
+		State.replace(b.s, prs, now, shared.refreshedAt)
+		if moved then
+			recount(b)
+			persist(b)
+		end
 	end
 end
 
@@ -2390,6 +2401,10 @@ local block: BlockDef<Block> = {
 			cache = readCache()
 			if cache then
 				prs, refreshedAt = cache.prs, cache.refreshedAt
+				-- Ownership the cache holds stands until a read of Tandem succeeds: a failed read or an earlier GitHub refresh keeps it.
+				for _, pr in prs do
+					if pr.tandem then watched[string.lower(pr.repo) .. "#" .. pr.number] = true end
+				end
 				writeStatus(cache)
 			end
 		end

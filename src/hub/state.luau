@@ -657,7 +657,12 @@ local function toCard(pr: HubPR, placement: Model.Placement, s: State): Card
 		elseif agent.kind == "no_clone" then
 			main, more, chips = action("card-agent-clone", "Clone repo", "A"), { action("card-agent-folder", "Choose folder…", "O") }, { chip("No local clone", "wait") }
 		elseif agent.kind == "failed" then
-			main, more, chips = action("card-agent-retry", "Try again", "A"), {}, { chip("Fix failed", "bad-soft") }
+			if pr.tandem then
+				-- A worktree is still held: Open worktree stays, while the branch's owner is Tandem.
+				main, more = action("card-handoff", "Hand off to Tandem", "A"), {}
+			else
+				main, more, chips = action("card-agent-retry", "Try again", "A"), {}, { chip("Fix failed", "bad-soft") }
+			end
 			if agent.worktree then table.insert(more, action("card-agent-worktree", "Open worktree", "O")) end
 		else
 			-- Enter and double-click use hub-open for Review fix; keep the lifecycle card's stable action slot.
@@ -731,7 +736,17 @@ local function pruneMarks(s: State, byKey: { [string]: HubPR }, placements: { [s
 end
 
 -- Recomputes `s.board` from `s.prs` and the inputs. Keeps the selection only while its card is on the board.
+-- One owner per branch: a no_clone or failed state with no worktree on a PR Tandem watches is obsolete (its Clone repo
+-- and Try again start nothing now), so it is dropped. A failed state that still names a worktree is kept for its cleanup.
+local function dropObsoleteAgents(s: State)
+	for _, pr in s.prs do
+		local agent = s.agents[pr.key]
+		if pr.tandem and agent and (agent.kind == "no_clone" or (agent.kind == "failed" and not agent.worktree)) then s.agents[pr.key] = nil end
+	end
+end
+
 function M.project(s: State)
+	dropObsoleteAgents(s)
 	local filter: Model.Filter = { repositories = s.repositories, search = s.search.text }
 	local placements: { [string]: Model.Placement } = {}
 	local counts = { mine = 0, review = 0 }
