@@ -37,6 +37,7 @@ type Sched = {
 type AgentFlight = {
 	key: string, engine: AgentFix.Engine?, settled: boolean, stopping: boolean,
 	input: AgentFix.Input?, bot: boolean?, cancel: (() -> ())?, releasing: boolean, starting: boolean?, fixtureStep: number?,
+	failure: string?, -- why the engine failed: a lease held after it keeps this failed state, which a watched card would otherwise drop
 }
 
 -- The hub block's own state.
@@ -345,6 +346,12 @@ local function forgetReturned(b: Block, flight: AgentFlight): string
 		disposition = if flight.settled then "forget" else "wait"
 	else
 		local lease = if flight.engine then flight.engine.held() else nil
+		-- The engine's held lease is the truth. A failure that reached the board before any worktree event, or before the
+		-- engine handle existed, names no path, and a card Tandem owns drops such a state; put it back so the lease keeps
+		-- its Return worktree until a guarded return succeeds.
+		if lease and flight.settled and flight.failure and b.s.agents[flight.key] == nil then
+			State.agentFailed(b.s, flight.key, flight.failure, lease.path, true)
+		end
 		disposition = State.agentFlight(b.s, flight.key, {
 			settled = flight.settled, starting = flight.starting == true, releasing = flight.releasing,
 			busy = flight.engine ~= nil and flight.engine.busy(), worktree = if lease then lease.path else nil,
@@ -461,6 +468,7 @@ local function settleAgent(b: Block, cx: BlockCx, flight: AgentFlight, outcome: 
 		return
 	end
 	flight.settled = true
+	if outcome.kind == "failed" then flight.failure = outcome.reason end
 	-- A ready callback is preserved even if closure was detected just before it arrived.
 	if outcome.kind == "ready" then
 		b.s.agents[flight.key] = { kind = "ready", fix = outcome.fix, reviewed = {} }
@@ -733,22 +741,32 @@ local function announce(b: Block, cx: BlockCx, old: Sync.Cache?, fresh: { Model.
 	end)
 end
 
+-- Ownership runs one way. A PR the other window's cache flags joins this block's set (it may be a hand-off this block's
+-- own reads predate, so a read that began before cannot name it and is read again). The other window's silence never
+-- clears one: only a successful read of Tandem here does, whatever the cache's age.
+local function joinOwnership(b: Block, shared: Sync.Cache)
+	local took = false
+	for _, pr in shared.prs do
+		local key = string.lower(pr.repo) .. "#" .. pr.number
+		if pr.tandem and not b.watched[key] then b.watched[key], took = true, true end
+	end
+	if took then b.handoffs += 1 end
+end
+
+-- The cache another window stored since this block's own, if there is one.
+local function newerShared(b: Block): Sync.Cache?
+	local shared = readCache()
+	if not shared then return nil end
+	local theirs, mine = Model.epoch(shared.refreshedAt), cachedAt(b)
+	return if theirs and (mine == nil or theirs > mine) then shared else nil
+end
+
 -- Takes another window's newer cache, so windows share one refresh.
 local function adoptShared(b: Block, cx: BlockCx)
-	local shared = readCache()
-	if not shared then return end
-	local theirs, mine = Model.epoch(shared.refreshedAt), cachedAt(b)
-	if theirs and (mine == nil or theirs > mine) then
+	local shared = newerShared(b)
+	if shared then
 		local now = os.time()
-		-- Ownership runs one way. A PR the other window flags joins this block's set (it may be a hand-off this block's own
-		-- reads predate, so a read that began before cannot name it and is read again). The other window's silence never
-		-- clears one: only a successful read of Tandem here does, whatever the cache's age.
-		local took = false
-		for _, pr in shared.prs do
-			local key = string.lower(pr.repo) .. "#" .. pr.number
-			if pr.tandem and not b.watched[key] then b.watched[key], took = true, true end
-		end
-		if took then b.handoffs += 1 end
+		joinOwnership(b, shared)
 		local prs = flagged(b.watched, shared.prs)
 		local moved = false
 		for i, pr in prs do
@@ -1055,6 +1073,10 @@ startRefresh = function(b: Block, cx: BlockCx)
 		else
 			local canon, moved = State.canonicalAdded(readLocal().added, fresh.prs)
 			if moved then writeAdded(canon) end
+			-- Another window's newer cache may flag a PR this block's own set does not hold yet. Join it before the answer is
+			-- merged and persisted, so the stored cache cannot erase it; a read of Tandem still out predates it and is read again.
+			local shared = newerShared(b)
+			if shared then joinOwnership(b, shared) end
 			local cache = Sync.merge(fresh, b.cache, withTandem(b, fresh.prs), now)
 			cache.lastModified = b.sched.lastModified
 			announce(b, cx, b.cache, cache.prs, now)
