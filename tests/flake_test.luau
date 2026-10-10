@@ -150,7 +150,7 @@ return function()
 	State.setFlake(s, both.key, { flaky = true, reason = "x", runs = { 1 }, headOid = both.headOid })
 	local mixed = State.card(s, both.key) :: State.Card
 	assert((mixed.main :: State.CardAction).label == "Fix with agent" and mixed.more[#mixed.more].act == "card-rerun")
-	-- Feedback alone has no failing check, so no re-run.
+	-- Feedback alone has no failing check, so no re-run: only Summarize is behind the agent.
 	local feedback = State.card(s, "acme/web#103") :: State.Card
-	assert(#feedback.more == 0)
+	assert(#feedback.more == 1 and feedback.more[1].act == "card-summarize" and feedback.more[1].key == "⇧A")
 end

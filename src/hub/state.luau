@@ -8,17 +8,16 @@ local Fixes = require("./fixes")
 local Links = require("../links")
 local Model = require("./model")
 local ReviewFix = require("./review-fix")
+local Summary = require("./summary")
 
 type HubPR = Model.HubPR
 type Tab = Model.Tab
 type Column = Model.Column
 type Sort = Model.Sort
 
--- The modules this one will require once they exist (sync, summary) are
--- not written yet. Their types the state needs are declared here with the same shapes as the spec's
--- contract, and the issue that adds each module replaces its placeholder with the module's own type.
+-- The recent store retains the shared Opened shape; summaries use their pure module contract.
 export type Opened = { repo: string, number: number, title: string, author: string, at: string } -- sync.Opened
-export type Summary = { verdict: string, comments: { { author: string, text: string } } } -- summary.Summary
+export type Summary = Summary.Summary
 export type FixDetails = Fixes.FixDetails
 
 export type Mode = "board" | "search" | "link" | "menu" | "confirm" | "help" | "fixes" | "reply" | "review-fix"
@@ -144,6 +143,7 @@ export type State = {
 export type MenuRow = { label: string, sub: string?, count: number?, on: boolean, kind: "choice" | "check" | "clear" }
 
 local M = {}
+M.SUMMARIZING = "Summarizing feedback…"
 
 -- Lifecycle data only. The block owns the engine, cancellation and lease effects.
 function M.agentRunning(s: State): string?
@@ -318,6 +318,21 @@ end
 
 -- Swaps in a refresh's pull requests: records the time, clears loading and the error, and rebuilds the board.
 function M.replace(s: State, prs: { HubPR }, now: number, refreshedAt: string?)
+	-- GitHub feedback changes without the head moving (a review, a resolved thread, a dismissal), so a
+	-- summary and its details are dropped whenever the board's feedback metadata for the PR changed.
+	-- An open fixes page keeps its details: its actions read live before they trust them.
+	local function changed(key: string): boolean
+		local previous = M.prOf(s, key)
+		local latest: HubPR? = nil
+		for _, pr in prs do if pr.key == key then latest = pr; break end end
+		return not latest or not previous or M.feedbackSignature(latest) ~= M.feedbackSignature(previous)
+	end
+	for key in s.summaries do
+		if changed(key) then s.summaries[key] = nil end
+	end
+	for key in s.details do
+		if changed(key) and not (s.route and s.route.key == key) then s.details[key] = nil end
+	end
 	s.prs, s.now, s.refreshedAt = prs, now, refreshedAt
 	s.loading, s.error = false, nil
 	M.project(s)
@@ -361,7 +376,51 @@ local function action(act: string, label: string, key: string?): CardAction
 	return { act = act, value = nil, label = label, key = key, confirm = false }
 end
 
-local function actionsFor(pr: HubPR, column: Column, reasons: { Model.Reason }, merge: Model.MergeResolution?, flake: Flake?, autoMerge: boolean?): (CardAction?, { CardAction })
+-- What the board knows of a PR's feedback, as one string: equal strings mean the same head, reviews and threads.
+-- The PR's last activity stands in for an edited comment, which changes no other field the board reads.
+function M.feedbackSignature(pr: HubPR): string
+	local parts = { pr.headOid, pr.reviews.decision, tostring(pr.reviews.unresolved), tostring(pr.reviews.comments), pr.lastActivityAt }
+	for _, review in pr.reviews.latest do
+		table.insert(parts, review.author .. ":" .. review.verdict .. ":" .. review.oid .. ":" .. review.at)
+	end
+	for _, thread in pr.reviews.threads do
+		table.insert(parts, thread.author .. (if thread.bot then "!" else ""))
+	end
+	return table.concat(parts, "\n")
+end
+
+-- Bot feedback the details can supply: an unresolved bot thread, or a bot review at the current head that
+-- requested changes or commented (the details carry the bodies of both).
+function M.botActionable(pr: HubPR): boolean
+	if not Model.botFeedback(pr) then return false end
+	if pr.reviews.threadsKnown then
+		for _, thread in pr.reviews.threads do
+			if thread.bot then return true end
+		end
+	end
+	for _, review in pr.reviews.latest do
+		if review.bot and ((review.verdict == "changes_requested" and (review.oid == "" or review.oid == pr.headOid))
+			or (review.verdict == "commented" and review.oid ~= "" and review.oid == pr.headOid)) then return true end
+	end
+	return false
+end
+
+-- What Fix bot comments would hand the agent right now: the cached details narrowed to the feedback that is
+-- live on the PR, its bot reviewers, and the exact prompt. Equal prompts mean the same feedback; nil when the
+-- details are missing, belong to another head or hold no bot feedback.
+function M.botFeedback(s: State, key: string): (AgentFix.Input?, string?)
+	local pr, known = M.prOf(s, key), s.details[key]
+	if not pr or not known or known.headOid ~= pr.headOid then return nil, nil end
+	local authors: { string } = {}
+	for _, review in pr.reviews.latest do
+		if review.bot and not table.find(authors, review.author) then table.insert(authors, review.author) end
+	end
+	local details = Summary.current(known, pr)
+	if not AgentFix.hasBotFeedback(details, authors) then return nil, nil end
+	return { kind = "bot", details = details, authors = authors }, AgentFix.botPrompt(details, authors)
+end
+
+local function actionsFor(pr: HubPR, column: Column, reasons: { Model.Reason }, merge: Model.MergeResolution?, flake: Flake?, autoMerge: boolean?, details: FixDetails?): (CardAction?, { CardAction })
 	if column == "needs_fixes" then
 		local feedback, checks = false, false
 		for _, reason in reasons do
@@ -369,7 +428,18 @@ local function actionsFor(pr: HubPR, column: Column, reasons: { Model.Reason }, 
 			if reason == "checks" then checks = true end
 		end
 		local main, more
-		if feedback and #reasons == 1 then
+		local commentsOnly = false
+		if details and details.headOid == pr.headOid then
+			commentsOnly = Summary.onlyComments(Summary.current(details, pr))
+		else
+			-- Before details arrive, a live changes-requested review keeps A on Fix with agent.
+			commentsOnly = pr.reviews.threadsKnown
+			for _, review in pr.reviews.latest do
+				if not review.bot and review.author ~= pr.author and review.verdict == "changes_requested"
+					and (review.oid == "" or review.oid == pr.headOid) then commentsOnly = false end
+			end
+		end
+		if feedback and #reasons == 1 and commentsOnly then
 			main, more = action("card-summarize", "Summarize", "A"), {}
 		else
 			main = if pr.tandem then action("card-handoff", "Hand off to Tandem", "A") else action("card-agent", "Fix with agent", "A")
@@ -391,7 +461,10 @@ local function actionsFor(pr: HubPR, column: Column, reasons: { Model.Reason }, 
 		local main, more = copy, {}
 		-- A reviewer waits on the author to say the fix is in: asking again is the card's job until they have been asked.
 		local again = Model.awaitingReReview(pr)
-		if again and #again.ask > 0 then
+		if M.botActionable(pr) then
+			main, more = action("card-agent", "Fix bot comments", "A"), { copy, action("card-summarize", "Summarize", "⇧A") }
+			if again and #again.ask > 0 then table.insert(more, action("card-rerequest", "Re-request review", "Q")) end
+		elseif again and #again.ask > 0 then
 			main, more = action("card-rerequest", "Re-request review", "Q"), { copy }
 		end
 		if pr.pending then
@@ -555,14 +628,25 @@ end
 local function toCard(pr: HubPR, placement: Model.Placement, s: State): Card
 	local known = s.flakes[pr.key]
 	local flake = if known and known.headOid == pr.headOid then known else nil
-	local main, more = actionsFor(pr, placement.column, placement.reasons, s.merges[pr.repo], flake, s.autoMerge[pr.repo])
+	local main, more = actionsFor(pr, placement.column, placement.reasons, s.merges[pr.repo], flake, s.autoMerge[pr.repo], s.details[pr.key])
 	local chips, detail, detailKind = chipsFor(pr, placement, s.now)
 	local agent = s.agents[pr.key]
+	local summary = s.summaries[pr.key]
 	local message: string? = nil
 	local path: string? = nil
 	local commit: string? = nil
+	if summary then
+		-- Keep the first job and give the verdict room on narrow cards. The full reasons
+		-- still determine actions and remain available on the fixes page.
+		if #chips > 1 then chips = { chips[1] } end
+		detail, detailKind = summary.verdict, if pr.role == "mine" then "bad" else "info"
+	end
 	if agent then
 		message, path, commit = M.agentMessage(agent)
+		if agent.kind == "running" and placement.column == "in_review" and M.botActionable(pr) then
+			if agent.run.stage == "agent" then message = "Fixing bot comments…"
+			elseif agent.run.stage == "merge" then message = "Preparing worktree…" end
+		end
 		detail, detailKind = nil, nil
 		if agent.kind == "running" then
 			main, more, chips = action("card-agent-stop", "Stop", "A"), {}, { chip("Agent running", "agent") }
@@ -579,9 +663,9 @@ local function toCard(pr: HubPR, placement: Model.Placement, s: State): Card
 	return {
 		flake = if flake and flake.flaky and flake.reason then "Likely flaky: " .. flake.reason else nil,
 		pr = pr, chips = chips, detail = detail, detailKind = detailKind, column = placement.column, reasons = placement.reasons, main = main, more = more,
-		agent = agent, agentSlot = agent ~= nil or placement.column == "needs_fixes",
+		agent = agent, agentSlot = agent ~= nil or placement.column == "needs_fixes" or (placement.column == "in_review" and M.botActionable(pr)),
 		agentMessage = message, agentPath = path, agentCommit = commit,
-		summary = s.summaries[pr.key], merge = s.merges[pr.repo], note = M.pendingNote(s, pr),
+		summary = if agent then nil else summary, merge = s.merges[pr.repo], note = M.pendingNote(s, pr),
 		asking = askingOf(s, pr), busy = s.busy[pr.key],
 		ring = s.ringed[pr.key], selected = s.selected == pr.key, marked = s.marked[pr.key] == true,
 	}
@@ -1655,11 +1739,32 @@ end
 
 -- The details the block read: the page's steps follow them.
 function M.setDetails(s: State, details: FixDetails)
+	local known = s.details[details.key]
+	if known and (known.headOid ~= details.headOid or M.feedbackPrompt(s, known) ~= M.feedbackPrompt(s, details)) then s.summaries[details.key] = nil end
 	s.details[details.key] = details
 	if s.route and s.route.kind == "fixes" and s.route.key == details.key then
 		s.route.loading, s.route.error = false, nil
 		s.route.cur = math.clamp(s.route.cur, 1, math.max(1, #M.fixSteps(s)))
 	end
+	M.project(s)
+end
+
+-- The summary prompt for the feedback that is live on the board's PR (the raw details when it has left the board).
+function M.feedbackPrompt(s: State, details: FixDetails): string
+	local pr = M.prOf(s, details.key)
+	return Summary.prompt(if pr then Summary.current(details, pr) else details)
+end
+
+-- Installs only a complete answer for the exact feedback and head still on the board. Never saved.
+function M.installSummary(s: State, details: FixDetails, text: string): boolean
+	local pr, known = M.prOf(s, details.key), s.details[details.key]
+	if not pr or pr.headOid ~= details.headOid or not known or known.headOid ~= details.headOid
+		or M.feedbackPrompt(s, known) ~= M.feedbackPrompt(s, details) then return false end
+	local parsed = Summary.parse(text)
+	if not parsed or not Summary.matches(details, parsed) then return false end
+	s.summaries[details.key] = parsed
+	M.project(s)
+	return true
 end
 
 -- Review fix reuses the fixes route's frame without changing fixes/reply's fields or keys.
@@ -1667,6 +1772,7 @@ export type ReviewPage = {
 	pr: HubPR, fix: AgentFix.Fix, review: ReviewFix.Review?, reviewed: { [string]: boolean },
 	current: ReviewFix.Hunk?, lines: { ReviewFix.Line },
 	count: number, all: boolean, cur: number, original: boolean, ask: boolean,
+	bot: boolean?, -- prepared wording for bot edit hunks; the review and Push contracts are unchanged
 	busy: boolean, loading: boolean, error: string?, progress: string?, completion: ("push" | "discard")?,
 }
 
@@ -1698,6 +1804,7 @@ function M.reviewPage(s: State): ReviewPage?
 		busy = s.busy[route.key] ~= nil, loading = route.loading, error = route.error or (if agent.review then agent.review.error else nil),
 		progress = s.busy[route.key],
 		completion = agent.completion,
+		bot = agent.fix.hunks[1] ~= nil and string.sub(agent.fix.hunks[1].id, 1, 4) == "bot:",
 	}
 end
 

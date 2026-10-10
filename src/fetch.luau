@@ -16,6 +16,7 @@ local Model = require("./hub/model")
 local Pr = require("./pr")
 local Review = require("./review")
 local ReviewFix = require("./hub/review-fix")
+local Summary = require("./hub/summary")
 local Sync = require("./hub/sync")
 local Text = require("./text")
 
@@ -812,6 +813,26 @@ function M.runner(argv: { string }, opts: { cwd: string?, stdin: string?, timeou
  end)
 end
 
+-- Runs the read-only summary: one ephemeral, tool-free omp call. The command is built here from the
+-- validated fields by Summary.plan, never taken from the caller. No cwd, worktree, file or kv write.
+function M.summarizeFeedback(agent: { command: string, model: string, effort: string? }, prompt: string, done: (string?, string?) -> ())
+ local argv = Summary.plan(agent.command, agent.model, agent.effort, prompt)
+ if not argv then return done(nil, "Invalid read-only summary command") end
+ local called = false
+ local function finish(text: string?, err: string?)
+  if called then return end
+  called = true
+  done(text, err)
+ end
+ local ok, err = pcall(M.runner, argv, { timeout_ms = AGENT_MS }, function(out)
+  if out.status ~= 0 or out.timed_out then
+   return finish(nil, if out.timed_out then "Summarizing feedback timed out" else Text.errorLine(out.stderr ~= "" and out.stderr or "The agent returned no answer"))
+  end
+  finish(out.stdout, nil)
+ end)
+ if not ok then finish(nil, Text.errorLine(err)) end
+end
+
 -- Agent fixes: only this boundary reads Tandem's database, hub.clones, local journals and
 -- environment. The caller owns the folder question and card lifecycle. No UI effects here.
 local CLONES_KEY = "hub.clones"
@@ -868,10 +889,11 @@ function M.findAgentClone(near: Repo?, dir: string, slug: string, ask: (string, 
 end
 
 local activeAgentFix: AgentFix.Engine? = nil
+local activeBotFix: AgentFix.Fix? = nil
 
 export type AgentFixRequest = {
  key: string, clone: string, checkout: string, branch: string, base: string, headOid: string,
- number: number, regenerate: { [string]: { string } }?,
+ number: number, regenerate: { [string]: { string } }?, input: AgentFix.Input?,
 }
 
 -- Start separately from clone lookup, so the glue can finish its folder question first.
@@ -889,7 +911,9 @@ function M.startAgentFix(request: AgentFixRequest, agent: Agent.Agent, now: numb
   pool = tern.getenv("TANDEM_POOL_ROOT") or (home .. "/.tandem/pool"),
   branch = request.branch, base = request.base, headOid = request.headOid, number = request.number,
   tool = tern.plugin.dir .. "/tools/conflicts", omp = agent.command, model = agent.model,
-  effort = agent.effort, regenerate = request.regenerate,
+  effort = agent.effort, regenerate = request.regenerate, input = request.input,
+  -- A bot edit runs in macOS Seatbelt; where it is missing the run fails and nothing is applied.
+  sandbox = if request.input then { exec = "/usr/bin/sandbox-exec", home = home } else nil,
  }
  local function samePath(a: string, b: string, callback: (boolean?, string?) -> ())
   -- Physical paths protect /tmp versus /private/tmp and symlinked checkouts. Also reject
@@ -915,7 +939,9 @@ function M.startAgentFix(request: AgentFixRequest, agent: Agent.Agent, now: numb
   end)
  end
  local engine: AgentFix.Engine
+ activeBotFix = nil
  engine = AgentFix.engine(spec, { runner = M.runner, decode = tern.json.decode, samePath = samePath, resolutions = resolutions }, now, changed, function(fix, err)
+  if fix and request.input then activeBotFix = fix end
   if not fix and not engine.busy() then activeAgentFix = nil end
   done(fix, err)
  end)
@@ -933,7 +959,7 @@ function M.returnAgentFix(path: string, done: (boolean?, string?) -> ())
  if not lease or lease.path ~= path then return done(nil, "The worktree does not belong to this agent fix") end
  engine.release(function(ok, err)
   if ok and (engine.held() ~= nil or engine.busy()) then ok, err = nil, "The engine still holds the worktree lease" end
-  if ok and activeAgentFix == engine then activeAgentFix = nil end
+  if ok and activeAgentFix == engine then activeAgentFix, activeBotFix = nil, nil end
   done(ok, err)
  end)
 end
@@ -965,6 +991,16 @@ function M.readAgentFix(fix: AgentFix.Fix, done: (AgentFixRead?, string?) -> ())
    if out.status ~= 0 or out.timed_out then return done(nil, if out.timed_out then "Reading the fix timed out" else Text.errorLine(if out.stderr ~= "" then out.stderr else "Git could not read the fix")) end
    if not ownsAgentFix(fix) then return done(nil, "The worktree lease changed") end
    if command.argv[4] == "rev-parse" then
+    if activeBotFix == fix then
+     -- Bot edits have exact original sides in the retained engine result, with no conflict journal.
+     -- Only this exact ready result may use them; commit files still pass ReviewFix.build.
+     local snapshots: { [string]: ReviewFix.Original } = {}
+     for _, hunk in fix.hunks do
+      snapshots[hunk.id] = { path = hunk.path, start = hunk.start, base = table.clone(hunk.base), ours = table.clone(hunk.ours), theirs = table.clone(hunk.theirs) }
+     end
+     result.originals = snapshots
+     return nextCommand()
+    end
     local ok, originals = pcall(function()
      local journal = tern.json.decode(tern.fs.read(trimmed(out.stdout) .. "/prguide-conflicts.json", 16 * 1024 * 1024))
      assert(type(journal.identity) == "string" and string.sub(journal.identity, 1, #fix.headOid + 1) == fix.headOid .. ":", "The conflict journal belongs to a different pull request head")

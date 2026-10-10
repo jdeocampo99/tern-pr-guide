@@ -1,5 +1,5 @@
 --!strict
--- The retained agent fix as conflict steps and tagged commit lines. Reads prepared state; builds nodes only.
+-- The retained agent fix as review steps and tagged commit lines. Reads prepared state; builds nodes only.
 local State = require("../../hub/state")
 local Text = require("../../text")
 local Ui = require("../ui")
@@ -31,7 +31,7 @@ local function header(page: State.ReviewPage): Node
 		status = { span("gp-status-text", "Reading fix…") }
 	else
 		status = {
-			span("gp-status-text", page.count .. " of " .. #page.fix.hunks .. " conflicts reviewed"),
+			span("gp-status-text", page.count .. " of " .. #page.fix.hunks .. (if page.bot then " changes reviewed" else " conflicts reviewed")),
 			span("gp-status-sep", "·"),
 			span("gp-rfix-agent", if page.fix.usedAgent then "Fix by agent" else "Merged without the agent"),
 			span("gp-fx-repo", string.sub(page.fix.commit, 1, 7) .. " · " .. page.fix.branch),
@@ -61,7 +61,7 @@ local function outline(page: State.ReviewPage): Node
 		local here, reviewed = index == page.cur, page.reviewed[hunk.id] == true
 		local detail: { Node } = {}
 		if here then
-			if hunk.resolved then table.insert(detail, span("gp-fx-muted", if hunk.resolved.by == "rule" then "Resolved by rule" else "Agent's resolution")) end
+			if hunk.resolved then table.insert(detail, span("gp-fx-muted", if hunk.resolved.by == "rule" then "Resolved by rule" else (if page.bot then "Agent's changes" else "Agent's resolution"))) end
 			table.insert(detail, Ui.check(reviewed, "Reviewed", "review-fix-reviewed=" .. index, "⏎"))
 		end
 		table.insert(rows, el("div", {
@@ -71,15 +71,15 @@ local function outline(page: State.ReviewPage): Node
 			el("div", { class = "gp-ol-step" .. (if here then " gp-ol-here" else "") }, {
 				el("span", { class = "gp-ol-dot" .. (if reviewed then " gp-fx-dot-done" else "") }, { Ui.icon(if reviewed then "check" else "file-code") }),
 				el("span", { class = "gp-ol-steptitle gp-fx-st-t" }, {
-					span("", "Conflict " .. index .. " of " .. #page.fix.hunks), span("gp-fx-pth", hunk.path),
+					span("", (if page.bot then "Change " else "Conflict ") .. index .. " of " .. #page.fix.hunks), span("gp-fx-pth", hunk.path),
 				}),
 			}),
 			el("div", { class = "gp-ol-stepbody" }, detail),
 		}))
 	end
-	if #rows == 0 then table.insert(rows, span("gp-fx-muted", "No conflicts to review.")) end
+	if #rows == 0 then table.insert(rows, span("gp-fx-muted", (if page.bot then "No changes to review." else "No conflicts to review."))) end
 	return el("div", { class = "gp-outline gp-ccard gp-sticky gp-fx-steps", key = "steps" }, {
-		span("gp-ccard-h gp-fx-first", "Conflicts"), el("div", { class = "gp-ccard-steps" }, rows),
+		span("gp-ccard-h gp-fx-first", (if page.bot then "Changes" else "Conflicts")), el("div", { class = "gp-ccard-steps" }, rows),
 	})
 end
 
@@ -87,7 +87,7 @@ local function excerpt(page: State.ReviewPage): Node
 	local hunk = page.current
 	if not hunk then
 		return el("div", { class = "gp-panel gp-fx-note" }, {
-			span("gp-fx-t", if page.loading then "Reading fix…" elseif page.error then "No resolution available." else "No conflicts to review."),
+			span("gp-fx-t", if page.loading then "Reading fix…" elseif page.error then "No resolution available." else (if page.bot then "No changes to review." else "No conflicts to review.")),
 		})
 	end
 	local rows: { Node } = {}
@@ -105,8 +105,8 @@ local function excerpt(page: State.ReviewPage): Node
 			el("span", { class = "gp-fpath gp-fx-path" }, {
 				span("gp-fdir", Text.dirName(hunk.path)), span("gp-fbase", Text.baseName(hunk.path)),
 			}),
-			span("gp-rfix-tag", if page.original then "Before the agent" else "Agent's resolution"), Ui.spacer(),
-			button(if page.original then "Show resolution" else "Original conflict", "B", "review-fix-original", nil, page.busy or page.ask),
+			span("gp-rfix-tag", if page.original then "Before the agent" else (if page.bot then "Agent's changes" else "Agent's resolution")), Ui.spacer(),
+			button(if page.original then (if page.bot then "Show changes" else "Show resolution") else (if page.bot then "Original code" else "Original conflict"), "B", "review-fix-original", nil, page.busy or page.ask),
 			Ui.check(page.reviewed[hunk.id] == true, "Reviewed", "review-fix-reviewed", "⏎"),
 		}),
 		el("div", { class = "gp-body" }, {
@@ -123,7 +123,7 @@ local function hints(page: State.ReviewPage): Node
 	if page.ask then kids = { span("gp-hb-mode", "Discard the fix?"), Ui.spacer(), item("⌘⏎", "discard fix"), item("esc", "cancel") }
 	else kids = {
 		span("gp-hb-mode", "Review fix"), Ui.spacer(), item("j k", "move"), item("⏎", "reviewed"),
-		item("B", "original conflict"), item("P", if page.completion == "push" then "return lease" else "push"), item("esc", "back"),
+		item("B", if page.bot then "original code" else "original conflict"), item("P", if page.completion == "push" then "return lease" else "push"), item("esc", "back"),
 	} end
 	return el("div", { class = "gp-hintbar", key = "hints" }, kids)
 end

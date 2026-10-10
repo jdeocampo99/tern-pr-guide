@@ -241,7 +241,10 @@ return function()
 	assert(mainOf("acme/api#122") == "none" and mainOf("acme/web#306", "review") == "none")
 	assert(State.card(fresh(), "acme/api#103") == nil)
 	local fixes = State.card(fresh(), "acme/web#103") :: State.Card
-	assert(fixes.main and fixes.main.label == "Summarize" and fixes.main.key == "A", "feedback alone: A summarizes")
+	assert(fixes.main and fixes.main.label == "Fix with agent" and fixes.main.key == "A" and #fixes.more == 1
+		and fixes.more[1].label == "Summarize" and fixes.more[1].key == "⇧A", "a requested change: A fixes, ⇧A summarizes")
+	local comments = State.card(fresh(), "acme/api#119") :: State.Card
+	assert(comments.main and comments.main.label == "Summarize" and comments.main.key == "A" and #comments.more == 0, "comments alone: A summarizes")
 	local both = State.card(fresh(), "acme/api#116") :: State.Card
 	assert(both.main and both.main.label == "Fix with agent" and #both.more == 2 and both.more[1].key == "⇧A" and both.more[2].label == "Re-run failed checks" and both.more[2].key == "⇧R")
 	local added = State.card(fresh({ tab = "review" }), "acme/web#303") :: State.Card
