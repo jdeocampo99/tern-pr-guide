@@ -2738,11 +2738,12 @@ local function sharedOwnership()
 			local theirs = storeOwned(w, { WEB, API114, TARGET }, Cases.asOf + 60)
 			w.cx.render = function() error("the window is gone", 0) end
 			w.toasts = {}
+			local sets = w.cacheSets or 0
 			w.runs[1].done(nil, nil)
 			assert(b.closed and b.watched[TARGET] == true, what .. ": adopting the ownership drew it and the draw closed the block")
 			assert(#w.runs == 1 and b.s.busy[SECOND] == nil, what .. ": no second command")
 			assert(#w.toasts == 0 and #w.started == 0 and #handoffs(w) == 0, what .. ": nothing else went on")
-			assert(same(w.kv["hub.cache"], theirs), what .. ": nothing was stored")
+			assert((w.cacheSets or 0) == sets and same(w.kv["hub.cache"], theirs), what .. ": nothing was stored")
 		end)
 	end
 

@@ -869,6 +869,8 @@ local function adoptShared(b: Block, cx: BlockCx, hold: boolean?)
 		b.cache = shared
 		State.replace(b.s, prs, now, shared.refreshedAt)
 		reconcileFlight(b, cx)
+		-- The redraw may have closed the block: nothing is stored or counted after that.
+		if b.closed then return end
 		if moved then
 			recount(b)
 			if hold then b.unsaved = true else persist(b) end
@@ -895,6 +897,7 @@ end
 local function rearm(b: Block, cx: BlockCx)
 	if b.fixture or b.closed then return end
 	adoptShared(b, cx)
+	if b.closed then return end
 	local sched = b.sched
 	local last, tried = cachedAt(b), sched.refreshTried
 	local plan = Sync.schedule({
@@ -1145,6 +1148,7 @@ local function loadTandem(b: Block, cx: BlockCx)
 		local before = b.cache
 		local readable, superseded = storedNow()
 		adoptShared(b, cx, true)
+		if b.closed then return end
 		local adopted = b.cache ~= before
 		joinShared(b)
 		-- A hand-off Tandem took while this read was out is newer than the read, which could not name that PR: drop it and read
@@ -1244,6 +1248,7 @@ end
 onRefresh = function(b, cx)
 	if b.flights.refresh then return end
 	adoptShared(b, cx)
+	if b.closed then return end
 	-- Another window refreshed a moment ago: its cache is the answer.
 	local last = cachedAt(b)
 	if last and os.time() - last < Sync.DEBOUNCE then
@@ -1267,6 +1272,7 @@ onChecks = function(b, cx)
 			-- The results land on the newest cache there is: one stored strictly newer than this block's own becomes the board
 			-- first (its stamp stays), and a PR whose head it moved is skipped below like any other moved head.
 			adoptShared(b, cx)
+			if b.closed then return end
 			local changed = false
 			for _, pr in b.s.prs do
 				local result = update.byId[pr.id]
@@ -1603,6 +1609,8 @@ end
 -- change says nothing about Tandem, so ownership stored at this stamp or later joins and is never written back as false.
 local function keepCache(b: Block, cx: BlockCx, edit: (() -> ())?)
 	if b.cache and not b.fixture then adoptShared(b, cx) end
+	-- Adopting a cache redraws, and the redraw may have closed the block: no edit and no write follow.
+	if b.closed then return end
 	if edit then edit() end
 	if b.cache then
 		joinShared(b)
@@ -1649,6 +1657,7 @@ ACTIONS["card-handoff"] = function(b, cx, asked)
 			State.project(s)
 			recount(b)
 			keepCache(b, cx)
+			if b.closed then return end
 			if outcome.notice then cx:toast("info", outcome.notice.text, key) end
 		end
 		draw(b, cx)
@@ -1789,6 +1798,7 @@ ACTIONS["card-cancel"] = function(b, cx, key)
 			cx:toast("error", "Couldn't cancel the merge of #" .. pr.number .. ": " .. reasonOf(err.message), pr.repo)
 		else
 			keepCache(b, cx, function() State.setPending(s, key, nil) end)
+			if b.closed then return end
 			if method.kind == "comment" then
 				cx:toast("success", "Commented " .. (method.cancel or "") .. " on #" .. pr.number, pr.title)
 			elseif method.kind == "label" then
@@ -1826,6 +1836,7 @@ ACTIONS["card-auto"] = function(b, cx, key)
 		else
 			local kind = if method.kind == "comment" or method.kind == "label" then method.kind else "queue"
 			keepCache(b, cx, function() State.setPending(s, key, { method = kind, at = isoNow() }) end)
+			if b.closed then return end
 			cx:toast("success", "#" .. pr.number .. " will merge when ready", pr.title)
 			refetchSoon(b, cx)
 		end
@@ -1852,6 +1863,7 @@ ACTIONS["card-rerequest"] = function(b, cx, key)
 			cx:toast("error", "Couldn't re-request review on #" .. pr.number .. ": " .. reasonOf(err.message), pr.repo)
 		else
 			keepCache(b, cx, function() State.reRequested(s, key, logins) end)
+			if b.closed then return end
 			cx:toast("success", "Asked " .. Model.reviewerList(logins) .. " to review #" .. pr.number .. " again", pr.title)
 			refetchSoon(b, cx)
 		end
@@ -2056,6 +2068,7 @@ ACTIONS["card-update"] = function(b, cx, key)
 				s.acted[key] = true
 				State.branchUpdated(s, key)
 			end)
+			if b.closed then return end
 			cx:toast("success", "Updated #" .. pr.number .. " with " .. pr.baseBranch)
 			refetchSoon(b, cx)
 		end
@@ -2168,6 +2181,7 @@ ACTIONS["card-remove"] = function(b, cx, key)
 		if why then return cx:toast("error", "Couldn't remove #" .. pr.number .. ": " .. why, pr.repo) end
 	end
 	keepCache(b, cx, function() State.unadd(s, key) end)
+	if b.closed then return end
 	cx:toast("info", "Removed #" .. pr.number .. " from Review requests", pr.repo)
 	refetch(b, cx)
 end
