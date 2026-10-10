@@ -54,6 +54,7 @@ export type Block = {
 	watched: { [string]: boolean }, -- the PRs Tandem watches (lowercase "owner/repo#123"): the cache's flags until a read of Tandem succeeds, then that read
 	handoffs: number, -- hand-offs Tandem has taken this session: a read that began before one cannot name that PR
 	retired: { [string]: boolean }, -- write ids of stored caches a successful read of Tandem superseded whose own save failed (see `retire`)
+	unsaved: boolean, -- ownership restored onto an adopted cache that no write has stored yet (see `adoptShared`); `persist` clears it
 	root: string?, -- the repository root `cx.cwd` is in, found once (Tandem's calls name the project by it)
 	rootWaiters: { (string?) -> () }?, -- the callers waiting on that lookup while it runs
 	sched: Sched,
@@ -302,7 +303,10 @@ local function persist(b: Block): string?
 		value.writeId = WINDOW .. "#" .. writes
 		tern.kv.set(KV_CACHE, value)
 	end)
-	if ok then writeStatus(cache) end
+	if ok then
+		b.unsaved = false
+		writeStatus(cache)
+	end
 	return if ok then nil else tostring(err)
 end
 
@@ -847,12 +851,11 @@ local function announce(b: Block, cx: BlockCx, old: Sync.Cache?, fresh: { Model.
 end
 
 -- Takes another window's newer cache, so windows share one refresh. The ownership this block restores onto it is stored
--- at once, unless `hold`: a caller that stores the board itself right after (a successful read of Tandem) then writes
--- nothing here, so its own write is the only one and no intermediate cache is left for a later guard to join. Returns
--- whether ownership moved and was left unstored.
-local function adoptShared(b: Block, cx: BlockCx, hold: boolean?): boolean
+-- at once, unless `hold`: a read of Tandem then writes nothing here and marks the block `unsaved`, so the successful answer's
+-- own save is the only write and no intermediate cache is left for a later guard to join. An answer that is dropped as
+-- stale or fails closed writes nothing either; the mark waits for the next successful answer, or any other write.
+local function adoptShared(b: Block, cx: BlockCx, hold: boolean?)
 	local shared = sharedCache(b, true)
-	local unstored = false
 	if shared then
 		local now = os.time()
 		joinOwnership(b, shared)
@@ -868,10 +871,9 @@ local function adoptShared(b: Block, cx: BlockCx, hold: boolean?): boolean
 		reconcileFlight(b, cx)
 		if moved then
 			recount(b)
-			if hold then unstored = true else persist(b) end
+			if hold then b.unsaved = true else persist(b) end
 		end
 	end
-	return unstored
 end
 
 -- Puts the ownership this block holds onto its PRs now, so the card and the action guards are safe before any read or
@@ -1142,18 +1144,12 @@ local function loadTandem(b: Block, cx: BlockCx)
 		-- first, so what is stored next carries its stamp and snapshot and never this block's older ones.
 		local before = b.cache
 		local readable, superseded = storedNow()
-		local unstored = adoptShared(b, cx, true)
+		adoptShared(b, cx, true)
 		local adopted = b.cache ~= before
-		-- Adopting wrote nothing, so a successful answer's own save is the one write; an exit that applies no answer stores
-		-- what adoption restored, as a plain adoption would have.
-		local function settle()
-			if unstored then persist(b) end
-		end
 		joinShared(b)
 		-- A hand-off Tandem took while this read was out is newer than the read, which could not name that PR: drop it and read
 		-- again. The ownership it joined guards the card at once, and the older answer stores nothing.
 		if b.handoffs ~= epoch then
-			settle()
 			if applyOwnership(b, cx) or adopted then draw(b, cx) end
 			return loadTandem(b, cx)
 		end
@@ -1169,14 +1165,14 @@ local function loadTandem(b: Block, cx: BlockCx)
 		-- A clear needs the stored cache's identity, taken above: without it the superseded cache could not be told from a
 		-- later write, so the answer changes nothing and the next read decides again.
 		if cleared and not readable then
-			settle()
 			if adopted then draw(b, cx) end
 			return
 		end
 		if watched then b.watched = watched end
 		for _, pr in b.s.prs do pr.tandem = flags[pr.key] == true end
 		if not changed then
-			settle()
+			-- Nothing moved, so this answer's save is the one that stores what adoption restored (a failed read stores nothing).
+			if watched and b.unsaved then persist(b) end
 			if adopted then draw(b, cx) end
 			return
 		end
@@ -2652,7 +2648,7 @@ local block: BlockDef<Block> = {
 		local b: Block = {
 			s = s, cache = cache, fixture = fixture, generate = opts ~= nil and opts.generate, agent = nil, agentFlight = nil, botKeys = {},
 			github = Github.client(Fetch.runner, tern.json.decode), timers = {},
-			flights = { refresh = false, checks = false, probe = false, flake = false, tandem = false }, watched = watched, handoffs = 0, retired = {}, root = nil, rootWaiters = nil,
+			flights = { refresh = false, checks = false, probe = false, flake = false, tandem = false }, watched = watched, handoffs = 0, retired = {}, unsaved = false, root = nil, rootWaiters = nil,
 			sched = {
 				probedAt = now, probeChanged = false, focusedAt = if live then now else nil, checksAt = nil,
 				refreshTried = nil, lastModified = if cache then cache.lastModified else nil,

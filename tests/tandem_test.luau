@@ -190,8 +190,14 @@ local function stubTern(w: any): any
 		-- `w.kvIn` is what the plugin finds stored and `w.kv` what it wrote. With `w.shared`, one store serves both: a read sees
 		-- every earlier write, and values are copied in and out, as a store shared by two windows would.
 		kv = {
+			-- `w.failGets` fails that many reads and then recovers; `w.onGet` runs before a read and may store another window's write.
 			get = function(key: string): any
+				if w.onGet then w.onGet() end
 				if w.failGet then error("disk unreadable", 0) end
+				if (w.failGets or 0) > 0 then
+					w.failGets -= 1
+					error("disk unreadable", 0)
+				end
 				if w.shared then return copy(w.kv[key]) end
 				return if w.kvIn then w.kvIn[key] else nil
 			end,
@@ -2599,6 +2605,116 @@ local function sharedOwnership()
 		noFixer(w, b, "a hand-off stored after the clear")
 		assert(b.watched[TARGET] == true and State.prOf(b.s, TARGET).tandem == true, "the later write joins")
 		assert(#w.toasts == 0 and #handoffs(w) == 0 and same(w.kv["hub.cache"], later), "nothing was sent or stored")
+	end)
+
+	-- Only the answer's first read of the store fails; adoption's later read succeeds and restores TARGET. The answer
+	-- fails closed and stores nothing, so no write is even attempted, and the ownership adoption restored is stored by the
+	-- next answer, which clears TARGET and retires the cache the store held.
+	withWorld(function(w, Fetch, Block)
+		local b = agentBoard(w, Fetch, Block)
+		b.github = quietGithub(function(_, done) done(nil, { operation = "hub", message = "no answer" }) end)
+		holdCache(w, b)
+		claim(w, Block, b)
+		Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+		local answer = reads(w)[#reads(w)]
+		local theirs = storedCache({ WEB, API114 }, Cases.asOf + 60)
+		theirs.writeId = "other-window#1"
+		w.kv["hub.cache"] = theirs
+		local before = w.cacheSets or 0
+		w.failGets = 1
+		answer.done(out("WATCH"))
+		assert(w.failGets == 0, "only the first read of the store failed")
+		assert(b.cache.refreshedAt == theirs.refreshedAt, "the newer cache was adopted")
+		assert(State.prOf(b.s, TARGET).tandem == true and b.watched[TARGET] == true, "adoption restored TARGET and the answer cleared nothing")
+		assert((w.cacheSets or 0) == before, "no write was attempted")
+		assert(same(w.kv["hub.cache"], theirs) and next(b.retired) == nil, "nothing was stored or retired")
+		assert(b.s.error == nil or b.s.error.operation ~= "hub.cache", "no save was tried")
+		assert(b.unsaved == true, "the restored ownership waits for a successful answer")
+
+		Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+		reads(w)[#reads(w)].done(out("WATCH"))
+		local stored = w.kv["hub.cache"]
+		assert((w.cacheSets or 0) == before + 1 and stored.writeId ~= "other-window#1", "the next answer is the one write")
+		assert(not State.prOf(b.s, TARGET).tandem and b.watched[TARGET] == nil and not b.unsaved and next(b.retired) == nil)
+		for _, cached in stored.prs do
+			if cached.key == TARGET then assert(cached.tandem ~= true, "and it stores TARGET cleared") end
+		end
+	end)
+
+	-- Another window stores a cache with a PR this window has not heard of between this answer's adoption and its join:
+	-- at the adopted stamp or strictly newer. The answer is stale, so it stores nothing: the later write survives
+	-- untouched until the replacement read, whose own save keeps both flags and never lowers the stamp.
+	for _, bump in { 0, 60 } do
+		withWorld(function(w, Fetch, Block)
+			local what = if bump == 0 then "same stamp" else "newer stamp"
+			local OTHER = "acme/api#116"
+			local b = agentBoard(w, Fetch, Block)
+			b.github = quietGithub(function(_, done) done(nil, { operation = "hub", message = "no answer" }) end)
+			holdCache(w, b)
+			claim(w, Block, b)
+			Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+			local answer = reads(w)[#reads(w)]
+			local theirs = storedCache({ WEB, API114 }, Cases.asOf + 60)
+			theirs.writeId = "other-window#1"
+			w.kv["hub.cache"] = theirs
+			local later = storedCache({ WEB, API114, TARGET, OTHER }, Cases.asOf + 60 + bump)
+			later.writeId = "another-window#1"
+			w.onGet = function()
+				if b.cache.refreshedAt == theirs.refreshedAt then
+					w.onGet = nil
+					w.kv["hub.cache"] = later
+				end
+			end
+			local before, answered = w.cacheSets or 0, #reads(w)
+			answer.done(out("WATCH"))
+			assert(w.onGet == nil, what .. ": the other window wrote after the adoption")
+			assert((w.cacheSets or 0) == before and same(w.kv["hub.cache"], later), what .. ": the later write stands and nothing was written")
+			assert(b.watched[OTHER] == true and State.prOf(b.s, OTHER).tandem and b.watched[TARGET] == true, what .. ": both are owned in memory")
+			assert(#reads(w) == answered + 1 and b.flights.tandem and b.unsaved, what .. ": the replacement read is out and the restore waits")
+
+			w.decoded["BOTH"] = watchWith({ TARGET, OTHER })
+			reads(w)[#reads(w)].done(out("BOTH"))
+			local stored = w.kv["hub.cache"]
+			assert((w.cacheSets or 0) == before + 1 and stored.writeId ~= "another-window#1" and not b.unsaved, what .. ": the replacement answer is the one write")
+			assert((Model.epoch(stored.refreshedAt) :: number) >= (Model.epoch(later.refreshedAt) :: number), what .. ": the stamp never goes down")
+			local flagged = {}
+			for _, cached in stored.prs do
+				if cached.tandem == true then flagged[cached.key] = true end
+			end
+			assert(flagged[WEB] and flagged[API114] and flagged[TARGET] and flagged[OTHER], what .. ": every flag is stored")
+		end)
+	end
+
+	-- The answer confirms the ownership adoption restored, so nothing is visibly different and the answer's own save is
+	-- the one write that stores it: exactly one, none for a failed read before it, none for an unchanged answer after.
+	withWorld(function(w, Fetch, Block)
+		local b = agentBoard(w, Fetch, Block)
+		b.github = quietGithub(function(_, done) done(nil, { operation = "hub", message = "no answer" }) end)
+		holdCache(w, b)
+		claim(w, Block, b)
+		Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+		local answer = reads(w)[#reads(w)]
+		local theirs = storedCache({ WEB, API114 }, Cases.asOf + 60)
+		theirs.writeId = "other-window#1"
+		w.kv["hub.cache"] = theirs
+		local before = w.cacheSets or 0
+		answer.done(out("", 127, "tandem: not found"))
+		assert(b.cache.refreshedAt == theirs.refreshedAt and b.unsaved and (w.cacheSets or 0) == before, "a failed read stores nothing")
+		assert(same(w.kv["hub.cache"], theirs))
+
+		Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+		reads(w)[#reads(w)].done(out("CLAIM"))
+		local stored = w.kv["hub.cache"]
+		assert((w.cacheSets or 0) == before + 1 and stored.writeId ~= "other-window#1" and not b.unsaved, "one write")
+		assert(stored.refreshedAt == theirs.refreshedAt and b.watched[TARGET] == true, "on the newer stamp, keeping TARGET")
+		local owned = false
+		for _, cached in stored.prs do
+			if cached.key == TARGET then owned = cached.tandem == true end
+		end
+		assert(owned, "TARGET's flag is stored")
+		Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+		reads(w)[#reads(w)].done(out("CLAIM"))
+		assert((w.cacheSets or 0) == before + 1, "an unchanged answer writes nothing more")
 	end)
 
 	-- A batch is out when another window stores ownership of a PR whose fix this window is still setting up. The first
