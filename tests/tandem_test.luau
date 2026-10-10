@@ -3128,9 +3128,15 @@ local function sharedOwnership()
 			unsafeBoard(w, b, t3, sets, "unreadable action")
 			assert(State.prOf(b.s, MERGE_KEY).pending ~= nil and #w.toasts == 1, "the action's change stays on the board")
 			if headMoved then
-				for _, cached in w.kv["hub.cache"].prs do
+				-- Another window stores T3's data again with the PR on H2: a distinct write at T3's stamp, whose request began
+				-- after the edit's snapshot, so its head is the later word on it.
+				local h2 = copy(t3)
+				h2.writeId = "other-window#4"
+				h2.sinceAt = Cases.asOf + 90
+				for _, cached in h2.prs do
 					if cached.key == MERGE_KEY then cached.headOid = "moved-head" end
 				end
+				w.kv["hub.cache"] = h2
 			end
 
 			b.github = quietGithub(function() end)
