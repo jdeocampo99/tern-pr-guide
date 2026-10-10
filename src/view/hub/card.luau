@@ -16,16 +16,18 @@ local CHIP_CLASS: { [string]: string } = {
 	done = "gp-hc-chip-done", agent = "gp-hc-chip-agent", running = "gp-hc-chip-wait",
 }
 
+-- One chip pill; the Next up banner draws the same one.
+function M.chip(chip: State.Chip): Node
+	if chip.kind == "running" then
+		return el("span", { class = "gp-hc-chip gp-hc-chip-wait" }, { span("gp-hc-spin", ""), span("gp-hc-chip-text", chip.text) })
+	end
+	return span("gp-hc-chip " .. CHIP_CLASS[chip.kind], chip.text)
+end
+
 -- The chip line: one pill per job, then the first job's detail.
 local function chipLine(card: State.Card): Node
 	local out: { Node } = {}
-	for _, chip in card.chips do
-		if chip.kind == "running" then
-			table.insert(out, el("span", { class = "gp-hc-chip gp-hc-chip-wait" }, { span("gp-hc-spin", ""), span("gp-hc-chip-text", chip.text) }))
-		else
-			table.insert(out, span("gp-hc-chip " .. CHIP_CLASS[chip.kind], chip.text))
-		end
-	end
+	for _, chip in card.chips do table.insert(out, M.chip(chip)) end
 	-- Three or more chips leave no room for the detail to read, so it is dropped.
 	if card.detail and #card.chips < 3 then table.insert(out, span("gp-hc-why gp-hc-why-" .. (card.detailKind or "bad"), card.detail)) end
 	return el("div", { class = "gp-hc-chips", key = "chips" }, out)

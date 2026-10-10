@@ -84,6 +84,17 @@ return function()
 	local queue = Model.queue(Cases.prs, NOW)
 	assert(join(keysOf(queue)) == join(Cases.nextUp), "next up: " .. join(keysOf(queue)))
 	assert(#queue == 20)
+	local walked, after = {}, nil :: string?
+	for i = 1, #queue do
+		local up = Model.nextUp(Cases.prs, NOW, after)
+		assert(up and up.index == i and up.total == 20)
+		table.insert(walked, up.item.key)
+		after = up.item.key
+	end
+	assert(join(walked) == join(Cases.nextUp))
+	local wrapped = Model.nextUp(Cases.prs, NOW, queue[20].key)
+	assert(wrapped and wrapped.index == 1 and wrapped.item.key == queue[1].key)
+	assert(Model.nextUp({}, NOW, nil) == nil)
 	assert(queue[1].column == "needs_fixes" and queue[1].reason == "merge_failed" and queue[1].tab == "mine")
 	assert(queue[4].key == "acme/web#302" and queue[4].column == "to_review" and queue[4].reason == nil and queue[4].tab == "review")
 

@@ -27,7 +27,7 @@ local EMPTY: { [Model.Column]: string } = {
 local M = {}
 
 local function rootClass(s: State.State): string
-	return "gp-root gp-hub" .. (if s.narrow then " gp-hub-narrow" else "") .. (if s.keyed then "" else " gp-soft")
+	return "gp-root gp-hub" .. (if s.keyed then "" else " gp-soft")
 end
 
 local function tabs(s: State.State): Node
@@ -67,6 +67,20 @@ local function controls(s: State.State): Node
 	})
 end
 
+-- Next up: one quiet line in the header. Position while walking, count at rest; a narrow pane clips the repo and count.
+local function nextUp(s: State.State): Node?
+	local next, card = s.board.nextUp, State.nextCard(s)
+	if not next or not card then return nil end
+	local pr = card.pr
+	local kids: { Node } = { span("gp-hub-up-l", "Next up") }
+	if card.chips[1] then table.insert(kids, Card.chip(card.chips[1])) end
+	table.insert(kids, span("gp-hub-up-t", pr.title))
+	local count = if s.walking then next.index .. " of " .. next.total else next.total .. " left"
+	table.insert(kids, span("gp-hub-up-m", (string.match(pr.repo, "[^/]+$") :: string) .. " #" .. pr.number .. " · " .. count))
+	table.insert(kids, el("span", { class = "gp-btn gp-btn-sm gp-hub-up-go", key = "go", actions = { click = "hub-next" } }, { span("gp-hub-up-gol", "Go"), Ui.keys(".") }))
+	return el("div", { class = "gp-hub-up", key = "up", actions = { click = "hub-next" } }, kids)
+end
+
 local function header(s: State.State): Node
 	local searching = s.mode == "search"
 	local search = el("div", { class = "gp-sr-box gp-hub-search" .. (if searching then " gp-hub-search-on" else ""), key = "search", actions = { click = "hub-search" } }, {
@@ -84,7 +98,8 @@ local function header(s: State.State): Node
 		el("span", { class = "gp-hub-ctl-label" }, if s.agent then { span("gp-hub-ctl-dim", "Agent:"), span("gp-hub-ctl-strong", State.agentLabel(s)) } else { span("gp-hub-ctl-strong", State.agentLabel(s)) }),
 		Ui.icon("chev"),
 	}))
-	return el("div", { class = "gp-header gp-hub-head", key = "header" }, {
+	local up = nextUp(s)
+	local rows: { Node } = {
 		el("div", { class = "gp-hub-top", key = "top" }, {
 			el("span", { class = "gp-hub-title", key = "title", text = "Pull requests" }),
 			search,
@@ -92,7 +107,10 @@ local function header(s: State.State): Node
 			el("span", { class = "gp-hub-fresh-row", key = "fresh" }, fresh),
 		}),
 		el("div", { class = "gp-hub-tabrow", key = "tabs" }, { tabs(s), Ui.spacer(), controls(s) }),
-	})
+	}
+	-- Inside the sticky header, so the position stays in view while walking.
+	if up then table.insert(rows, up) end
+	return el("div", { class = "gp-header gp-hub-head", key = "header" }, rows)
 end
 
 -- Cards under the small repository heading each run of one repository gets when the board is sorted by repository.
@@ -246,7 +264,7 @@ function M.layer(s: State.State): Node?
 	if s.mode == "menu" and s.menu then
 		return el("div", {}, { el("div", { class = "gp-md-scrim", key = "scrim", actions = { click = "hub-menu-close" } }), Menus.view(s) })
 	elseif s.mode == "help" then
-		return el("div", {}, { el("div", { class = "gp-md-scrim", key = "scrim", actions = { click = "hub-help-close" } }), Help.view(s.narrow) })
+		return el("div", {}, { el("div", { class = "gp-md-scrim", key = "scrim", actions = { click = "hub-help-close" } }), Help.view() })
 	end
 	return nil
 end

@@ -431,4 +431,37 @@ return function()
 	assert(plan.kind == "refuse" and plan.text == "Couldn't open #412 of acme/api" and plan.sub == "PR Guide only downloads repos on github.com.")
 	plan = State.openPlan("acme/api", 412, false, nil, nil, "")
 	assert(plan.kind == "refuse" and plan.sub == "No folder to look for a checkout in.")
+
+	-- Next up: opening never moves the selection; `.` visits the fixture's keys in order across both tabs.
+	local walk = fresh()
+	assert(walk.selected == nil and not walk.walking)
+	assert(walk.board.nextUp and walk.board.nextUp.index == 1 and walk.board.nextUp.total == #Cases.nextUp)
+	assert(walk.board.nextUp.item.key == Cases.nextUp[1])
+	local visited, tabs = {}, {}
+	for _ = 1, #Cases.nextUp do
+		assert(State.walk(walk))
+		table.insert(visited, walk.selected :: string)
+		table.insert(tabs, walk.tab)
+		assert(walk.walking and State.selectedCard(walk) ~= nil)
+		local up = walk.board.nextUp :: Model.NextUp
+		assert(up.index == (#visited % #Cases.nextUp) + 1, "banner position")
+	end
+	assert(join(visited) == join(Cases.nextUp), join(visited))
+	assert(table.find(tabs, "mine") and table.find(tabs, "review"))
+	assert(State.walk(walk) and walk.selected == Cases.nextUp[1], "wraps")
+	State.move(walk, "down")
+	assert(not walk.walking and walk.board.nextUp and walk.board.nextUp.index == 1, "moving ends the walk")
+
+	-- Walking reveals an item the search hides, and the banner builds the item's card.
+	local hidden = fresh()
+	State.setSearch(hidden, "zzz-no-match")
+	assert(State.walk(hidden) and hidden.search.text == "" and hidden.selected == Cases.nextUp[1])
+	local nextCard = State.nextCard(hidden)
+	assert(nextCard and nextCard.pr.key == Cases.nextUp[2] and #nextCard.chips > 0)
+
+	-- Nothing needs the viewer: no banner and `.` does nothing.
+	local quiet = fresh()
+	quiet.prs = {}
+	State.project(quiet)
+	assert(quiet.board.nextUp == nil and State.nextCard(quiet) == nil and not State.walk(quiet))
 end

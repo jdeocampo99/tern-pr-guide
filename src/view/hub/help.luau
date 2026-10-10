@@ -12,6 +12,7 @@ local GROUPS: { Group } = {
 		{ "h j k l", "Move between cards", "← ↑ ↓ →" },
 		{ "⏎", "Open the card" },
 		{ "⇧⏎", "Open with the AI guide started" },
+		{ ".", "Next pull request that needs you" },
 		{ "T", "Switch tab" },
 		{ "I", "Show or hide Inactive" },
 		{ "R", "Show or hide Recently opened" },
@@ -42,7 +43,7 @@ local GROUPS: { Group } = {
 
 local M = {}
 
-function M.view(narrow: boolean): Node
+function M.view(): Node
 	local cols: { Node } = {}
 	for _, group in GROUPS do
 		local rows: { Node } = { span("gp-panel-h", group.title) }
@@ -54,8 +55,8 @@ function M.view(narrow: boolean): Node
 		end
 		table.insert(cols, el("div", { class = "gp-keycol" }, rows))
 	end
-	local body = el("div", { class = "gp-hh" .. (if narrow then " gp-hh-narrow" else ""), key = "body" }, cols)
-	return { k = "overlay", p = { key = "help", role = if narrow then "gp.hubhelpn" else "gp.hubhelp", aria = "All shortcuts", anchor = { node = Paths.titleLabel, side = "below" }, size = "lg" }, c = { body } } :: any
+	local body = el("div", { class = "gp-hh", key = "body" }, cols)
+	return { k = "overlay", p = { key = "help", role = "gp.hubhelp", aria = "All shortcuts", anchor = { node = Paths.titleLabel, side = "below" }, size = "lg" }, c = { body } } :: any
 end
 
 return M

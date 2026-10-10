@@ -358,6 +358,20 @@ function M.queue(prs: { HubPR }, now: number): { NextItem }
 	return out
 end
 
--- nextUp (#9), flake (#13) and resolveMergeMethod (#10) arrive with their issues; their types are declared above.
+-- The item after `after` in the queue; the first when `after` is nil or no longer queued; wraps; nil when
+-- nothing needs the viewer. `index` is its place in the queue and `total` the queue's length.
+function M.nextUp(prs: { HubPR }, now: number, after: string?): NextUp?
+	local list = M.queue(prs, now)
+	if #list == 0 then return nil end
+	local index = 1
+	if after then
+		for i, item in list do
+			if item.key == after then index = i % #list + 1 end
+		end
+	end
+	return { item = list[index], index = index, total = #list }
+end
+
+-- flake (#13) and resolveMergeMethod (#10) arrive with their issues; their types are declared above.
 
 return M
