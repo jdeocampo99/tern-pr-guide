@@ -209,7 +209,7 @@ local function readLocal(): Sync.Local
 	return { added = added, tandem = {} }
 end
 
--- The tiny record the window's status segment reads every 15 s, so it never decodes the whole cache.
+-- The tiny record the window's status segment reads every 2 s, so it never decodes the whole cache.
 local function writeStatus(cache: Sync.Cache)
 	local counts = cache.counts
 	pcall(tern.kv.set, KV_STATUS, {

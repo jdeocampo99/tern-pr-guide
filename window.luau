@@ -48,6 +48,7 @@ end })
 -- What the segment shows, set by the watcher below. The formatter reads only this: Tern disables a
 -- status hook that takes more than a few milliseconds, so it never touches kv or decodes anything.
 local current: Links.Seen? = nil
+local observed: Links.Observed? = nil -- the flashAt last seen and when: a flash runs 10 s from then
 local watching = false
 local startWatch: () -> ()
 
@@ -80,18 +81,19 @@ tern.on("focus", function(ev: FocusEvent, cx: WindowCx)
 end)
 
 -- Blocks can't redraw the status line, so the window reads the tiny `hub.status` record the hub writes
--- every 15 s (sooner when a flash is about to end) and redraws the line when what it shows has changed.
+-- and looks at it every 2 s (a block can't message the window, so a flash shows within about 2 s), redrawing the line when what it shows has changed.
 -- One chain runs per module load. `window_start` doesn't fire again when the plugin reloads in a running
 -- window, so the watcher also starts from the module load, the first focus and the first status draw.
 local function watch()
  local now = os.time()
  local ok, raw = pcall(tern.kv.get, "hub.status")
- local latest = if ok then Links.statusOf(raw, now) else nil
+ local latest: Links.Seen? = nil
+ latest, observed = Links.watch(if ok then raw else nil, now, observed)
  if Links.statusChanged(current, latest) then
   current = latest
   tern.chrome.refresh()
  end
- tern.timer(math.ceil(Links.watchDelay(if latest then latest.flashAt else nil, now) * 1000), watch)
+ tern.timer(math.ceil(Links.watchDelay(if observed then observed.at else nil, now) * 1000), watch)
 end
 
 startWatch = function()

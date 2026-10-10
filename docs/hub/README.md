@@ -755,8 +755,8 @@ The hub has its own `ACTIONS` table, sent by clicks (`event`) and by `Keys.hubAc
 `window.luau` registers `tern.chrome.status(function(pane) ... end)` (`tern.d.luau:1939`). It returns one `StatusSegment` (`:955-964`) such as "PRs · 2 to review · 10 need fixes", with `command = "plugin.prguide.review"` and `tone = "error"` while flashing.
 
 - **The formatter is O(1).** Tern disables a status hook that takes more than about 4 ms (decoding the 42-PR `hub.cache` there did, and the segment never showed). The formatter reads one module-local `Seen` record (`current` in `window.luau`) and touches no kv. The hub block writes the tiny `hub.status` key beside `hub.cache` on every cache write, and the window's timer reads that key, never the cache.
-- **The block can't refresh chrome.** `tern.chrome.refresh` is window only (`:1943`). `window_start` (`:1909`) starts a one-shot window timer that re-arms itself every 15 s, re-reads `hub.status`, sets `current`, and calls `tern.chrome.refresh()` when `refreshedAt` or `counts` changed, and once when `flashAt` plus 10 s passes so the flash ends. It never calls it from the formatter (that raises, `:1942`).
-- **The segment is hidden** (the formatter returns nil) while `hub.status` is missing or malformed (`Links.statusOf`).
+- **The block can't refresh chrome.** `tern.chrome.refresh` is window only (`:1943`). `window_start` (`:1909`) starts a one-shot window timer that re-arms itself every 2 s (Tern has no block-to-window message, and a `kv.get` is cheap), re-reads `hub.status`, sets `current`, and calls `tern.chrome.refresh()` when `refreshedAt` or `counts` changed. The flash runs 10 s from when the window first sees a new `flashAt` (`Links.watch`), and the window refreshes once more when it ends. The watcher starts from `window_start`, the module load, the first focus and the first status draw, behind one guard. It never calls it from the formatter (that raises, `:1942`).
+- **The segment is hidden** (the formatter returns nil) while `hub.status` is missing or malformed (`Links.watch`).
 
 ### Timers and visibility
 

@@ -141,7 +141,7 @@ end
 -- The status segment ----------------------------------------------------------------------------------
 
 M.FLASH_SECONDS = 10
-M.WATCH_SECONDS = 15
+M.WATCH_SECONDS = 2
 
 -- "PRs · 2 to review · 10 need fixes": a part with a zero count is left out, and with both zero it is "PRs".
 function M.statusText(toReview: number, needFixes: number): string
@@ -151,28 +151,42 @@ function M.statusText(toReview: number, needFixes: number): string
  return text
 end
 
--- Whether the segment is flashing red: the Needs fixes count rose at `flashAt`, less than 10 s ago.
-function M.flashing(flashAt: number?, now: number): boolean
- return flashAt ~= nil and now - flashAt < M.FLASH_SECONDS
+-- Whether the segment is flashing red: `since` is when the window first saw the current `flashAt` (not
+-- `flashAt` itself: the window looks every few seconds, so a flash timed from `flashAt` could already be over).
+function M.flashing(since: number?, now: number): boolean
+ return since ~= nil and now - since < M.FLASH_SECONDS
 end
 
--- Seconds until the window next looks at the cache: every 15 s, but sooner when a flash ends first.
-function M.watchDelay(flashAt: number?, now: number): number
- if flashAt ~= nil then
-  local left = flashAt + M.FLASH_SECONDS - now
+-- Seconds until the window next looks at the status: every WATCH_SECONDS, but sooner when a flash ends first.
+function M.watchDelay(since: number?, now: number): number
+ if since ~= nil then
+  local left = since + M.FLASH_SECONDS - now
   if left > 0 and left < M.WATCH_SECONDS then return left end
  end
  return M.WATCH_SECONDS
 end
 
+-- The `flashAt` the window last saw, and when it first saw it. Kept in the window's module state.
+export type Observed = { flashAt: number, at: number }
+
 -- The tiny `hub.status` record the hub writes beside `hub.cache`: { refreshedAt, counts = { toReview, needFixes, flashAt? } }.
--- Reads `raw` (whatever kv held) into what the segment shows; nil for anything malformed.
-function M.statusOf(raw: any, now: number): Seen?
- if type(raw) ~= "table" or type(raw.refreshedAt) ~= "string" or type(raw.counts) ~= "table" then return nil end
+-- Reads `raw` (whatever kv held) into what the segment shows, plus the updated `observed`; nil for anything
+-- malformed. A `flashAt` different from the observed one starts a flash now.
+function M.watch(raw: any, now: number, observed: Observed?): (Seen?, Observed?)
+ if type(raw) ~= "table" or type(raw.refreshedAt) ~= "string" or type(raw.counts) ~= "table" then return nil, observed end
  local counts = raw.counts
- if type(counts.toReview) ~= "number" or type(counts.needFixes) ~= "number" then return nil end
+ if type(counts.toReview) ~= "number" or type(counts.needFixes) ~= "number" then return nil, observed end
  local flashAt = if type(counts.flashAt) == "number" then counts.flashAt else nil
- return { refreshedAt = raw.refreshedAt, toReview = counts.toReview, needFixes = counts.needFixes, flashing = M.flashing(flashAt, now), flashAt = flashAt }
+ if flashAt == nil then
+  observed = nil
+ elseif observed == nil or observed.flashAt ~= flashAt then
+  observed = { flashAt = flashAt, at = now }
+ end
+ local seen: Seen = {
+  refreshedAt = raw.refreshedAt, toReview = counts.toReview, needFixes = counts.needFixes,
+  flashing = M.flashing(if observed then observed.at else nil, now), flashAt = flashAt,
+ }
+ return seen, observed
 end
 
 -- What the chrome last drew from, so the window knows when to redraw it.
