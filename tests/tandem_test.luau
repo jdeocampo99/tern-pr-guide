@@ -3186,7 +3186,13 @@ local function sharedOwnership()
 		assert(next(b.retired) == nil and not b.flights.tandem and #reads(w) == asked, "nothing retired and no replacement read")
 		assert(#w.toasts == toasts and #w.started == 0 and #handoffs(w) == 0 and gh(w) == nil, "no effect")
 
+		-- The recovery refresh's GitHub request stays out. One that answers at once (as this board's did above) re-arms the
+		-- schedule, whose adoption reads the store, takes T3 and stores TARGET restored onto it before the Tandem answer
+		-- comes: that is a second write. Here the answer is the one that adopts T3 whole, then clears and stores once.
+		b.github = quietGithub(function() end)
 		Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+		assert(b.flights.refresh and b.flights.tandem and #reads(w) == asked + 1, "the recovery read of Tandem is out, with GitHub's request")
+		assert((w.cacheSets or 0) == sets and same(w.kv["hub.cache"], t3), "nothing is stored before the answer")
 		reads(w)[#reads(w)].done(out("WATCH"))
 		wholeT3(w, b, t3, sets, "watch answer after the unreadable one", false)
 		assert(#w.started == 0 and #handoffs(w) == 0, "nothing else went on")
