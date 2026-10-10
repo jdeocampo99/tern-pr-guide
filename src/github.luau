@@ -31,7 +31,7 @@ export type Probe = { changed: boolean, lastModified: string?, pollSeconds: numb
 export type ChecksUpdate = { byId: { [string]: { headOid: string, checks: Checks } }, rateLimit: RateLimit }
 export type Command = { argv: { string }, stdin: string? }
 -- What a repo declares and what its last merges show. `checkedAt` is "" here: the block stamps it, because this module reads no clock.
-export type Detected = { declared: MergeMethod?, learned: MergeMethod?, viewerDefault: "squash" | "merge" | "rebase", checkedAt: string }
+export type Detected = { declared: MergeMethod?, learned: MergeMethod?, viewerDefault: "squash" | "merge" | "rebase", autoMergeAllowed: boolean, checkedAt: string }
 
 -- One Actions run, as the runs API lists it: the workflow's name, the commit, and how it ended.
 export type RunRow = { id: number, workflow: string, sha: string, conclusion: string }
@@ -126,6 +126,7 @@ query MergeDetect($owner: String!, $name: String!) {
   rateLimit { cost remaining limit resetAt }
   repository(owner: $owner, name: $name) {
     viewerDefaultMergeMethod
+    autoMergeAllowed
     mergeQueue { id }
     aviator: object(expression: "HEAD:.aviator/config.yml") { __typename }
     pullRequests(states: MERGED, first: 8, orderBy: { field: UPDATED_AT, direction: DESC }) {
@@ -711,6 +712,19 @@ M.commands = {
 		if method.kind == "label" then return { argv = prArgv("edit", pr, "--remove-label", method.label), stdin = nil } end
 		error("commands.cancelMerge: " .. method.kind .. " has nothing to cancel", 0)
 	end,
+	-- Merge when ready: the merge happens by itself once the PR is approved and green. GitHub's own methods and the
+	-- queue use `--auto`; off a queue it needs the repo's method flag too, since `--auto` alone fails there. A comment
+	-- or a label is the repo's own command, sent early.
+	autoMerge = function(pr: HubPR, method: MergeMethod): Command
+		if method.kind == "squash" or method.kind == "merge" or method.kind == "rebase" then
+			return { argv = prArgv("merge", pr, "--auto", MERGE_FLAGS[method.kind]), stdin = nil }
+		end
+		return M.commands.merge(pr, method)
+	end,
+	-- Asks reviewers (comma-separated logins) to look again.
+	requestReview = function(pr: HubPR, login: string): Command
+		return { argv = prArgv("edit", pr, "--add-reviewer", login), stdin = nil }
+	end,
 	-- Closes with no comment; GitHub can reopen it.
 	close = function(pr: HubPR): Command
 		return { argv = prArgv("close", pr), stdin = nil }
@@ -869,7 +883,8 @@ function M.parseDetect(raw: any): Detected?
 	end
 	return {
 		declared = declared, learned = learned,
-		viewerDefault = ENUM_METHODS[str(repo.viewerDefaultMergeMethod) or ""] or "squash", checkedAt = "",
+		viewerDefault = ENUM_METHODS[str(repo.viewerDefaultMergeMethod) or ""] or "squash",
+		autoMergeAllowed = repo.autoMergeAllowed == true, checkedAt = "",
 	}
 end
 

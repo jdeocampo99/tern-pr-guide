@@ -192,6 +192,15 @@ local function build(spec: Spec, patch: Spec?): any
 	end
 	local role = merged.role or "mine"
 	local key = merged.repo .. "#" .. merged.n
+	-- Reviews written without a commit were made on the head as it is now.
+	local latest: { any } = {}
+	for _, row in (reviews.latest :: any) do
+		local copy = {}
+		for k, v in row do copy[k] = v end
+		if copy.oid == "head" then copy.oid = "head" .. merged.n end
+		table.insert(latest, copy)
+	end
+	reviews.latest = latest
 	return {
 		key = key, id = "PR_" .. key, repo = merged.repo, number = merged.n,
 		url = "https://github.com/" .. merged.repo .. "/pull/" .. merged.n, title = TITLES[merged.n] or ("Case " .. merged.n),

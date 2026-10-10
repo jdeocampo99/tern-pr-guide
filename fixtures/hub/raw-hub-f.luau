@@ -306,7 +306,7 @@ return {
 								state = "COMMENTED",
 								submittedAt = "2026-10-08T00:00:00Z",
 								commit = {
-									oid = "head",
+									oid = "head106",
 								},
 							},
 						},
@@ -518,7 +518,7 @@ return {
 								state = "APPROVED",
 								submittedAt = "2026-10-08T00:00:00Z",
 								commit = {
-									oid = "head",
+									oid = "head108",
 								},
 							},
 						},
@@ -588,7 +588,7 @@ return {
 								state = "APPROVED",
 								submittedAt = "2026-10-08T00:00:00Z",
 								commit = {
-									oid = "head",
+									oid = "head109",
 								},
 							},
 						},
@@ -1010,7 +1010,7 @@ return {
 								state = "APPROVED",
 								submittedAt = "2026-10-08T00:00:00Z",
 								commit = {
-									oid = "head",
+									oid = "head118",
 								},
 							},
 						},
@@ -1077,7 +1077,7 @@ return {
 								state = "COMMENTED",
 								submittedAt = "2026-10-08T00:00:00Z",
 								commit = {
-									oid = "head",
+									oid = "head119",
 								},
 							},
 						},

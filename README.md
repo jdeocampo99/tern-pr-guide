@@ -194,7 +194,7 @@ Anywhere in Tern: `⌥⌘R` opens the PR hub and `⌥⇧⌘R` opens it with AI g
 
 ### PR hub keys
 
-**New PR hub sample block** opens the PR hub on recorded sample data (`fixture=cases`).
+**New PR hub sample block** opens the PR hub on recorded sample data (`fixture=cases`; `fixture=rereview` shows Merge when ready and Re-request review).
 
 | Move | | The selected card | | The board | |
 |---|---|---|---|---|---|
@@ -204,13 +204,14 @@ Anywhere in Tern: `⌥⌘R` opens the PR hub and `⌥⇧⌘R` opens it with AI g
 | `I` | show or hide Inactive | `⇧⏎` | open with the AI guide started |
 | `R` | show or hide Recently opened (Review requests) | `⇧A` | summarize feedback | `S` | sort |
 | | | `C` | copy link | `⇧M` | agent model |
-| | | `M` | merge (a GitHub merge asks first: `⌘⏎` confirms, `Esc` cancels), or cancel a merge in flight | `N` | add a pull request by link |
+| | | `M` | merge (a GitHub merge asks first: `⌘⏎` confirms, `Esc` cancels), Merge when ready (In review cards), or cancel a merge in flight | `N` | add a pull request by link |
 | | | `Space` | select the card for Merge selected or Close stale (also `⌘`-click or `⇧`-click) | `⇧X` | select every stale pull request that isn't a draft |
 | | | `M` `X` | with a selection: merge it (Ready) or close it (Inactive), after one confirm | `⌘⏎` | confirm a question |
 | | | | | `Esc` | clear the selection, cancel or close |
 | | | `U` | update branch (Ready cards that are behind main) | `?` | all shortcuts |
 | | | `,` | merge method (also the `▾` on Merge) | `⌘R` | refresh (the sample board steps through its recorded refreshes) |
 | | | `⇧R` | re-run failed checks (behind the `▾` on Fix checks; first when the card says "Likely flaky") | | |
+| | | `Q` | re-request review (when a reviewer is waiting on a re-review) | | |
 | | | `X` | remove from Review requests (pull requests you added) | | |
 
 **Fixes page.** `⏎` on a Needs fixes card opens the pull request at what needs fixing, in the guided
@@ -262,6 +263,18 @@ A merge that fails (removed from the merge queue, an Aviator or bot reply, or a 
 the merge was asked for) moves the pull request to Needs fixes as **Merge failed**, first in line, with
 the reason on the card. A new commit on the branch, or asking for the merge again, clears it.
 **Copy link** copies the title and link as plain text.
+
+**Merge when ready** sits behind the `▾` on In review cards (`M`). It sets GitHub's auto-merge
+(`gh pr merge --auto` plus the repository's method flag, such as `--squash`; the merge queue needs only
+`--auto`), or posts the repository's merge command early for a comment method, and the card then reads
+"Merges when ready". `M` cancels it. It is hidden where the repository's "Allow auto-merge" setting is off
+(read from GitHub once per session with the merge-method check, 1 point), and until that is known. A merge
+command that is only a learned suggestion is asked on a Ready card first.
+
+**Re-request review.** When a reviewer's latest review asked for changes and you pushed since, the pull
+request stays in In review, and the card reads "Waiting on @maria-k to re-review" with **Re-request
+review** (`Q`) as its action. It asks every such reviewer again (`gh pr edit --add-reviewer`), and the
+action goes away once they are asked.
 
 **Add a pull request by link:** `N` (from either tab) opens the field at the top of To review.
 Paste a `github.com/owner/repo/pull/123` link or type `owner/repo#123`. `⏎` adds it to Review

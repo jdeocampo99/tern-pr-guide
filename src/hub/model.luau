@@ -162,16 +162,60 @@ function M.threadCounts(pr: HubPR, author: string, bot: boolean): boolean
 	return true
 end
 
+-- A person's changes-requested review that the head has moved past: the author pushed since, so the next move
+-- is the reviewer's. A review with no commit recorded is never stale.
+local function movedPast(pr: HubPR, review: Review): boolean
+	return review.verdict == "changes_requested" and not review.bot and review.author ~= pr.author
+		and review.oid ~= "" and review.oid ~= pr.headOid
+end
+
 local function personFeedback(pr: HubPR): boolean
 	local reviews = pr.reviews
 	for _, review in reviews.latest do
-		if not review.bot and review.author ~= pr.author and review.verdict == "changes_requested" then return true end
+		if not review.bot and review.author ~= pr.author and review.verdict == "changes_requested" and not movedPast(pr, review) then
+			return true
+		end
 	end
 	if not reviews.threadsKnown then return false end
 	for _, thread in reviews.threads do
 		if M.threadCounts(pr, thread.author, thread.bot) then return true end
 	end
 	return false
+end
+
+-- Re-request review. The reviewers whose latest review asked for changes and who haven't looked since the head moved:
+-- `waiting` names all of them, `ask` the ones not yet asked again (a pending request is in `reviews.requested`).
+-- Only the viewer's own, live PRs have one; a reviewer who approved or commented after the push isn't waiting.
+export type ReReview = { waiting: { string }, ask: { string } }
+function M.awaitingReReview(pr: HubPR): ReReview?
+	if pr.role ~= "mine" or pr.draft then return nil end
+	local waiting: { string } = {}
+	local ask: { string } = {}
+	for _, review in pr.reviews.latest do
+		if movedPast(pr, review) then
+			table.insert(waiting, review.author)
+			if not table.find(pr.reviews.requested, review.author) then table.insert(ask, review.author) end
+		end
+	end
+	if #waiting == 0 then return nil end
+	return { waiting = waiting, ask = ask }
+end
+
+-- "@maria-k", "@maria-k and @devon", "@maria-k and 2 others": who a card waits on.
+function M.reviewerList(logins: { string }): string
+	if #logins == 1 then return "@" .. logins[1] end
+	if #logins == 2 then return "@" .. logins[1] .. " and @" .. logins[2] end
+	return "@" .. logins[1] .. " and " .. (#logins - 1) .. " others"
+end
+
+-- Merge when ready. Whether an In review card offers it: a GitHub method or a queue needs the repo's "Allow
+-- auto-merge" setting (`allowed`, nil until detection has read it, which hides the entry); a comment or label method
+-- posts the repo's own command early, unless that command is only a suggestion nobody confirmed (`resolution.ask`).
+function M.canMergeWhenReady(resolution: MergeResolution?, allowed: boolean?): boolean
+	local method = if resolution then resolution.method else nil
+	local kind = if method then method.kind else "squash"
+	if kind == "comment" or kind == "label" then return resolution ~= nil and not resolution.ask end
+	return allowed == true
 end
 
 function M.reasons(pr: HubPR, now: number): { Reason }
