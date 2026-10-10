@@ -208,6 +208,27 @@ end
 -- into it. Letters act only on the board and in menus: while the filter is typed they are text.
 function M.hubAction(s: HubState.State, key: Key): Action?
 	local mode = HubState.mode(s)
+	if mode == "review-fix" then
+		local page = HubState.reviewPage(s)
+		if not page then return if key.name == "escape" then act("review-fix-close") else nil end
+		if page.busy then return nil end
+		if page.ask then
+			if key.name == "enter" and (key.meta or key.ctrl) and not key.alt then return act("review-fix-discard-confirm") end
+			if key.name == "escape" then return act("review-fix-discard-cancel") end
+			return nil
+		end
+		if key.ctrl or key.meta or key.alt then return nil end
+		if key.name == "escape" then return act("review-fix-close") end
+		if key.name == "enter" then return act("review-fix-reviewed") end
+		if string.match(key.name, "^%a$") and (s.search.text ~= "" or s.link.text ~= "") then return nil end
+		if key.name == "down" or key.name == "j" then return act("review-fix-move", 1) end
+		if key.name == "up" or key.name == "k" then return act("review-fix-move", -1) end
+		local label = cardKeyLabel(key)
+		if label == "B" then return act("review-fix-original") end
+		if label == "D" then return act("review-fix-discard") end
+		if label == "P" then return act("review-fix-push") end
+		return nil
+	end
 	if mode == "search" then
 		if key.name == "enter" then return act("hub-search-done") end
 		if key.name == "escape" then return act("hub-search-clear") end

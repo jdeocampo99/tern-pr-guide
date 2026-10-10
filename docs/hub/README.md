@@ -233,12 +233,13 @@ Every issue builds against these types and signatures. An issue that needs a cha
 | `src/github.luau` | `model`, `fixes`. No `tern.*` at load; parsers take already decoded tables (`tern.json.decode` runs in the caller). |
 | `src/hub/sync.luau` | `model` |
 | `src/hub/agent-fix.luau` | `model`, `fixes` |
+| `src/hub/review-fix.luau` | `agent-fix`, `fixes` (pure commit excerpts and effect plans) |
 | `src/hub/summary.luau` | `model`, `fixes` |
 | `window.luau` | `src/links.luau` |
-| `src/hub/state.luau` | `model`, `sync`, `fixes`, `agent-fix`, `summary`, `src/text-field.luau`, `src/links.luau` (pure: link parsing and the `#prguide-open=` link). Never `fetch`, `github` or `block`. |
+| `src/hub/state.luau` | `model`, `sync`, `fixes`, `agent-fix`, `review-fix`, `summary`, `src/text-field.luau`, `src/links.luau` (pure: link parsing and the `#prguide-open=` link). Never `fetch`, `github` or `block`. |
 | `src/keys.luau` | `src/hub/state.luau`, plus what it requires today minus `picker` |
 | `src/view/hub/*.luau` | `state`, `model`, `fixes`, `src/view/ui.luau`, `src/text.luau`. Never `sync` or `github`. |
-| `src/fetch.luau` | `model` and `fixes` for types, `github` for the `Runner` type, `src/links.luau`, `src/hub/sync.luau` (the recent store), plus what it requires today minus `picker` |
+| `src/fetch.luau` | `model` and `fixes` for types, `github` for the `Runner` type, `review-fix` for validated command plans, `src/links.luau`, `src/hub/sync.luau` (the recent store), plus what it requires today minus `picker` |
 | `src/hub/block.luau` | everything above; it is the only module that wires them |
 | `tools/conflicts` | nothing (a standalone script) |
 
@@ -622,6 +623,50 @@ function M.step(run: Run, event: Event): Outcome
 | `write <id>` | reads the replacement from stdin; `{ "id", "lines" }` |
 | `check` | `{ "remaining": number }`; exit 1 when above 0 |
 
+### `src/hub/review-fix.luau` (pure; issue #16)
+
+```luau
+export type Line = { tag: AgentFix.LineTag, text: string, label: string?, number: number }
+export type Hunk = { id: string, path: string, start: number, by: "rule" | "agent", lines: { Line }, ours: { string }, theirs: { string } }
+export type Review = { hunks: { Hunk }, verified: boolean, error: string? }
+export type Original = { path: string, start: number, base: { string }, ours: { string }, theirs: { string } }
+export type Command = { argv: { string }, cwd: string }
+export type Request = {
+	kind: string, key: string, selectedKey: string?, routeKey: string?, repo: string, number: number,
+	headOid: string, fix: AgentFix.Fix, reviewed: { [string]: boolean }, verified: boolean,
+	completion: ("push" | "discard")?,
+}
+export type Plan = {
+	kind: "push" | "discard", request: Request, command: Command?, returnLease: boolean,
+	remoteHeadOid: string, next: "refresh" | "needs_fixes",
+}
+export type Result = { clear: boolean, remoteHeadOid: string, card: "fix_ready" | "needs_fixes" | "refresh" }
+function M.allReviewed(fix: AgentFix.Fix, reviewed: { [string]: boolean }): boolean
+function M.build(fix: AgentFix.Fix, files: { [string]: string }, details: Fixes.FixDetails?, originals: { [string]: Original }?): Review
+function M.lines(hunk: Hunk, before: boolean): { Line }
+function M.readCommands(fix: AgentFix.Fix): ({ Command }?, string?)
+function M.plan(action: "push" | "discard", request: Request, confirmed: boolean?, remoteRepo: string?): (Plan?, string?)
+function M.result(plan: Plan, pushed: boolean, returned: boolean): Result
+```
+
+`build` locates each recorded resolution plus bounded context exactly once in the immutable commit's
+file. Missing, changed or ambiguous resolutions lock Push. Context at the conflict tool's 240-character
+preview cap is matched as a prefix; all other context and every resolution line must match exactly.
+Displayed context comes from the commit in full. It never shows unrelated commit changes.
+The retained journal's full original sides are authoritative because #15's `show` caps side previews.
+Agent-write lines copied exactly from those sides are tagged ours/theirs; lines common to both are
+base. Lines with no side match remain agent-written. #12's `FixDetails` is reused only when path,
+start and both sides agree exactly. This avoids reading a newer conflict after a refresh. `theirs`
+displays as main, `ours` as Your branch, `agent` as Agent, and `base` has no ownership badge. Every
+line keeps its exact text. Duplicate or missing ids lock the all-reviewed gate; zero hunks pass.
+
+`plan` runs no effects. A refused P produces no process plan. A permitted P contains one plain
+`git -C <worktree> push https://github.com/<head repo>.git <commit>:refs/heads/<branch>` command.
+Confirmed D contains no process or remote write and requests the retained engine's lease return.
+`result` permits clearing state only after return succeeds, and for Push only after push succeeds too.
+The supplied remote head stays unchanged on Discard. `completion = "push"` produces a return-only
+retry; `completion = "discard"` requires confirmation again and forbids Push.
+
 ### `src/hub/summary.luau` (pure; read-only Summarize)
 
 ```luau
@@ -634,14 +679,14 @@ function M.onlyComments(details: FixDetails): boolean    -- the only reason is c
 ### `src/hub/state.luau` (interaction state and the prepared board)
 
 ```luau
-export type Mode = "board" | "search" | "link" | "menu" | "confirm" | "help" | "fixes" | "reply"   -- "fixes": the fixes page is open (`s.route`); "reply": a reply is being typed
+export type Mode = "board" | "search" | "link" | "menu" | "confirm" | "help" | "fixes" | "reply" | "review-fix"
 export type MenuId = "repositories" | "sort" | "agent" | "merge" | "actions"
 export type CardAction = { act: string, value: string?, label: string, key: string?, confirm: boolean }
 
 export type AgentFixState =
 	{ kind: "no_clone", slug: string }
 	| { kind: "running", run: AgentFix.Run }
-	| { kind: "ready", fix: AgentFix.Fix, reviewed: { [string]: boolean } }    -- `reviewed` holds reviewedConflictIds
+	| { kind: "ready", fix: AgentFix.Fix, reviewed: { [string]: boolean }, review: ReviewFix.Review?, completion: ("push" | "discard")? }    -- `reviewed` holds reviewedConflictIds; completion retains cleanup ownership
 	| { kind: "pushing", fix: AgentFix.Fix }
 	| { kind: "failed", reason: string, worktree: string? }
 -- A ready fix is "reviewed" once `reviewed` holds every hunk id: State.reviewed(fix, reviewed): boolean.
@@ -734,6 +779,23 @@ function M.fixItems(s: State, step: Fixes.Step?): { string } / M.fixMain(s): Car
 function M.fixSelect(s, index) / M.fixMove(s, delta) / M.fixFocus(s, "steps" | "panel") / M.fixPress(s): string? / M.fixToggleBots(s)
 function M.beginReply(s): boolean / M.cancelReply(s) / M.setDetails(s, details)
 
+-- #16 extends Route.kind to "fixes" | "review-fix" and adds original: boolean?, ask: boolean?.
+-- All existing fixes/reply fields remain. ReviewPage is the prepared view data:
+export type ReviewPage = {
+	pr: HubPR, fix: AgentFix.Fix, review: ReviewFix.Review?, reviewed: { [string]: boolean },
+	current: ReviewFix.Hunk?, lines: { ReviewFix.Line },
+	count: number, all: boolean, cur: number, original: boolean, ask: boolean,
+	busy: boolean, loading: boolean, error: string?, progress: string?, completion: ("push" | "discard")?,
+}
+function M.openReviewFix(s: State, key: string): boolean
+function M.reviewPage(s: State): ReviewPage?
+function M.reviewSelect(s: State, index: number)
+function M.reviewToggle(s: State, index: number?)
+function M.reviewOriginal(s: State)
+function M.reviewAsk(s: State, ask: boolean)
+function M.reviewRequest(s: State): ReviewFix.Request?
+-- closeFixes also closes Review fix, preserving the selected card.
+
 -- Card actions (#7). All pure; the block runs the effects.
 function M.mergeMethodFor(s: State, pr: HubPR): "squash" | "merge" | "rebase"   -- the repo's resolved method when it is a GitHub one, else squash (viewerDefaultMergeMethod arrives with #10's detection)
 function M.mergeStep(s: State, pr: HubPR): "confirm" | "ask" | "run"   -- M on a card: a GitHub method asks first, a learned command asks once, a chosen or declared comment, label or queue runs at once
@@ -795,6 +857,27 @@ The hub has its own `ACTIONS` table, sent by clicks (`event`) and by `Keys.hubAc
 ### `src/fetch.luau` (additions)
 
 `src/fetch.luau` keeps local git, treehouse, `omp` and Tandem CLI calls, the recent store (`recentPrs`, `rememberPr`, and `migrateRecent`, which the hub runs on first load), and one new export: `M.runner: Github.Runner`, which resolves `gh` and the shell's PATH the way `run` does (`:69-121`). The fixes page adds `M.readFixes(repo, pr, paths, done)` (fetches the PR's refs, runs `git merge-tree`, then `git show` and `git log` per conflicted file and `git show` per annotated path; returns text as `FixRead`) and `M.readySavedCopy(slug)` (PR Guide's saved copy, only when already set up). The agent engine, Fix bot comments and the Tandem hand-off add their own functions here, each in the `(value?, err?)` style above.
+
+Issue #16's settled boundary signatures:
+
+```luau
+export type AgentFixRead = { files: { [string]: string }, diff: string, originals: { [string]: ReviewFix.Original }? }
+function M.readAgentFix(fix: AgentFix.Fix, done: (AgentFixRead?, string?) -> ())
+function M.pushAgentFix(plan: ReviewFix.Plan, canPush: () -> boolean, done: (boolean?, string?) -> ())
+function M.returnAgentFix(path: string, done: (boolean?, string?) -> ()) -- existing signature, unchanged
+```
+
+`readAgentFix` executes read-only diff/show/git-dir plans, only while the exact engine holds the
+worktree. It reads full original sides from the private conflict journal and validates the journal's
+identity against `fix.headOid`; a clean merge needs no journal.
+`pushAgentFix` validates the gate again, reads head refs and the actual head repository through the
+runner, and checks `git ls-remote` against `fix.headOid`. Fork branches use their head repository.
+`canPush` revalidates the selected PR, route, fix, ticks and flight before each process begins.
+The refspec names the reviewed commit directly and uses neither force flag. A remote already at
+`fix.commit` reconciles a lost successful response without a second push. A different remote head
+refuses. Ordinary Git fast-forward protection remains in force if the head races the preflight.
+Only successful `returnAgentFix`, with `held() == nil` and `busy() == false`, clears the active slot.
+No read, route entry or agent completion pushes automatically.
 
 ## How this maps onto Tern
 
@@ -990,6 +1073,7 @@ Every PR passes these before review:
 - **Shared files.** No two issues edit the same shared file at once. The files are `src/hub/block.luau`, `src/hub/state.luau`, `src/hub/model.luau`, `src/github.luau`, `src/fetch.luau`, `src/keys.luau`, `src/view/hub/`, `guide.css`, `AGENTS.md` and `tests/run.luau`. The order below is the serialization: a later issue builds on the earlier one's merged contract, and changes a contract here first. The one allowed overlap is #3 and #5, which each append lines to `tests/run.luau` and `AGENTS.md`; the second to merge rebases onto the first.
 - **Issue #15 ownership exception.** Its `Touches only` list omits shared verification files that its Done when criteria require. #15 registers `agent_fix_test` in `tests/run.luau`, extends `tools/luau-fixtures` to generate and check `fixtures/hub/agent/*.luau` from every JSON in that directory, and records these decisions here. `hub.clones` is read and written by `src/fetch.luau` so clone lookup stays at the boundary. The public `AgentFixRun` contract signatures stay unchanged.
 - **Issue #18 acceptance exception and settled details.** Its acceptance criteria also permit the README Keys table, registration of `agent_state_test` in `tests/run.luau`, and this paragraph. A on a running card means Stop; A attempting a different fix while a run, lookup or lease return is active says exactly "One fix at a time". Existing feedback-only Summarize and flaky-check priorities remain until their owning issues change them. Clone repo selects a parent folder and clones to `parent/repo-name`; Choose folder selects an existing clone, remembers it through Fetch, then revalidates through `Fetch.findAgentClone`. With no host folder picker in the documented block API, Block uses `Fetch.runner` with macOS `osascript`; cancellation returns to No local clone without an error toast. Open worktree uses the same runner to open the failed worktree in Finder. `HubPR` omits the head branch name, so Block reads `headRefName`, `baseRefName` and `headRefOid` with a read-only `gh pr view` through Fetch.runner and checks them against the card before starting. `fixture=agent-cards` shows all lifecycle states without lookup, dialogs or processes; ⌘R advances the running card by one #15 transcript event, A stops it, then A on another card starts a new recorded run. A ready fixture remains in place. #16 owns all Review, Discard and Push actions; this issue displays the ready commit and complete path only. UI checklist screenshots and execution evidence are owned by the parent integration round.
+- **Issue #16 acceptance exception and settled decisions.** In addition to its primary file lane, #16 edits only `guide.css` for the new view, `src/view/hub/help.luau` and `README.md` for keys and behavior, `tests/run.luau` for registration, and this spec for contracts and scope. The hand-written `fixtures/hub/review-fix.luau` is not generated. `fixture=review-fix` supplies two files, three unique hunks, every provenance tag, and a take-both rule; fixture Push/Discard simulate outcomes with no processes or network. Enter and double-click use the existing `hub-open` action to open Review fix from a Fix ready card, retaining #18's tested empty primary action slot. Needs fixes still opens the existing fixes page. The mockup's dropped rows and Other changes fold are omitted because acceptance requires only conflict resolutions; original sides appear in one horizontally scrolling excerpt with ownership badges, using the existing flexbox code rows. No new motion is added; the page omits `gp-soft` and suppresses inherited button transforms/transitions. Original snapshots remain available on B if commit verification fails. Commit verification is conservative: changed or non-unique context locks Push. Ready state retains its reviewed ids, verified excerpt and completion marker on any push/return failure; P retries cleanup after push success, and D asks again after a failed discard return. `AgentFlight` and its exact engine stay held until return is proved successful. The fake-runner acceptance lives in the pure planner and injected runner/lease simulation in `review_fix_test`, while Fetch executes the validated plan. Tests, reload, screenshots, light/dark wide/split checks and the live push in `GH_HUB_SMOKE_REPO` are deferred to the parent as instructed; this implementation run performs none of them.
 - **Order:**
   1. **v0.** #2 (rules, fixtures, test runner) → #3 (GitHub data) and #5 (board, built against `fixture=cases`) in parallel → #4 (sync) → #6, #7, #8 in that order.
   2. **v1.** #9 → #10 → #12 → #11 → #13 → #14. #10 comes before #11 and #14, and #12 before #13 and every later consumer of the details contract.
