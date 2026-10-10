@@ -1208,4 +1208,3 @@
 .sf-overlay[data-role='gp.hubmenu'], .sf-overlay[data-role='gp.hubmenu'] .sf-ov-card { width: 260px; }
 /* the key panel is wider than Tern's lg overlay: three columns that wrap to fewer in a narrower pane */
 .sf-overlay[data-role='gp.hubhelp'], .sf-overlay[data-role='gp.hubhelp'] .sf-ov-card { width: 940px; max-width: 100%; }
-.sf-overlay[data-role='gp.hubhelpn'] { width: 400px; }
