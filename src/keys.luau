@@ -163,6 +163,13 @@ local function hubBoardKey(s: HubState.State, key: Key): Action?
 	if name == "escape" then return act("hub-escape") end
 	if name == "enter" then return act(if key.shift then "hub-open-generate" else "hub-open") end
 	local label = cardKeyLabel(key)
+	if name == "space" then return act("hub-mark") end
+	if label == "⇧X" and s.tab == "mine" then return act("hub-mark-stale") end
+	-- With a selection, M merges it and X closes it.
+	if next(s.marked) ~= nil then
+		if label == "M" then return act("hub-batch-merge") end
+		if label == "X" then return act("hub-batch-close") end
+	end
 	if name == "left" or name == "h" then return act("hub-move", "left") end
 	if name == "right" or name == "l" then return act("hub-move", "right") end
 	if name == "down" or name == "j" then return act("hub-move", "down") end

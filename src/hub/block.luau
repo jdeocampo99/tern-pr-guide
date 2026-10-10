@@ -609,6 +609,7 @@ ACTIONS["hub-fold"] = function(b, cx, name)
 end
 ACTIONS["hub-escape"] = function(b, cx)
 	local s = b.s
+	if State.clearMarks(s) then return end
 	if s.search.text ~= "" then
 		State.setSearch(s, "")
 	else
@@ -800,28 +801,37 @@ end
 
 -- Merges with the repo's method. GitHub's merge happens now and the PR leaves the board; a queue, comment or
 -- label hands the merge to the repo's tool, so the card shows it pending until a refresh brings the result.
-local function runMerge(b: Block, cx: BlockCx, pr: Model.HubPR)
+-- With `done`, the caller owns the toast and the refresh (a batch): it hears nil when the PR merged or was handed to
+-- its repo's tool, or the reason it didn't.
+local function runMerge(b: Block, cx: BlockCx, pr: Model.HubPR, done: ((err: string?) -> ())?)
 	local s = b.s
-	if b.fixture then return cx:toast("info", "The sample board doesn't merge", pr.key) end
 	local method = methodOf(b, pr)
 	State.setBusy(s, pr.key, MERGE_BUSY[method.kind] or "Merging…")
 	b.github.run(Github.commands.merge(pr, method), function(_, err)
 		if b.closed then return end
 		if err then
 			State.setBusy(s, pr.key, nil)
-			cx:toast("error", "Couldn't merge #" .. pr.number .. ": " .. reasonOf(err.message), pr.repo)
+			if done then
+				done(reasonOf(err.message))
+			else
+				cx:toast("error", "Couldn't merge #" .. pr.number .. ": " .. reasonOf(err.message), pr.repo)
+			end
 		elseif method.kind == "squash" or method.kind == "merge" or method.kind == "rebase" then
 			s.acted[pr.key] = true
 			State.dropPr(s, pr.key)
 			keepCache(b)
-			toastDone(cx, pr, method)
-			refetchSoon(b, cx)
+			if done then done(nil) else
+				toastDone(cx, pr, method)
+				refetchSoon(b, cx)
+			end
 		else
 			State.setPending(s, pr.key, { method = method.kind, at = isoNow() })
 			State.setBusy(s, pr.key, nil)
 			keepCache(b)
-			toastDone(cx, pr, method)
-			refetchSoon(b, cx)
+			if done then done(nil) else
+				toastDone(cx, pr, method)
+				refetchSoon(b, cx)
+			end
 		end
 		draw(b, cx)
 	end)
@@ -842,7 +852,8 @@ ACTIONS["card-merge"] = function(b, cx, key)
 	end
 	if State.mergeStep(s, pr) == "run" then
 		State.select(s, key)
-		return runMerge(b, cx, pr)
+		if b.fixture then return cx:toast("info", "The sample board doesn't merge", pr.key) end
+		return runMerge(b, cx, pr, nil)
 	end
 	State.askMerge(s, key)
 end
@@ -916,6 +927,113 @@ ACTIONS["hub-method-cancel"] = function(b)
 	State.cancelMethodEdit(b.s)
 end
 
+-- Select several -------------------------------------------------------------------------------------------
+
+-- Space on the selected card, or a ⌘/⇧-click on `value`: selects it for Merge selected or Close stale.
+ACTIONS["hub-mark"] = function(b, cx, value)
+	local s = b.s
+	local key = if value ~= "" then value else s.selected
+	if not key then return end
+	local ok, why = State.toggleMark(s, key)
+	if ok then return end
+	local card = State.card(s, key)
+	if card then cx:toast("info", "Can't select #" .. card.pr.number .. ": " .. (why or "it isn't selectable"), card.pr.title) end
+end
+
+-- ⇧X and the Inactive fold's Close stale: selects every stale pull request that isn't a draft.
+ACTIONS["hub-mark-stale"] = function(b, cx)
+	if State.markStale(b.s) == 0 then cx:toast("info", "No stale pull requests to close", "Drafts are selected one by one with Space") end
+end
+
+ACTIONS["hub-marks-clear"] = function(b)
+	State.clearMarks(b.s)
+end
+
+-- A repo whose merge method isn't known yet is looked up first: GitHub's merge is never the guess.
+ACTIONS["hub-batch-merge"] = function(b, cx)
+	local s = b.s
+	if s.mode ~= "board" or State.selection(s) == nil then return end
+	if not b.fixture then
+		local waiting = false
+		for _, card in State.markedCards(s) do
+			if not s.merges[card.pr.repo] then
+				waiting = true
+				detectRepo(b, cx, card.pr.repo)
+			end
+		end
+		if waiting then return cx:toast("info", "Checking how these repositories merge…", "Try again in a moment") end
+	end
+	State.askBatch(s, "ready")
+end
+ACTIONS["hub-batch-close"] = function(b)
+	local s = b.s
+	if s.mode == "board" then State.askBatch(s, "inactive") end
+end
+
+local function refList(prs: { Model.HubPR }): string
+	local out: { string } = {}
+	for _, pr in prs do table.insert(out, "#" .. pr.number) end
+	return table.concat(out, ", ")
+end
+
+-- Runs the confirmed selection one pull request at a time, in column order. A failure stops the rest, which stay
+-- selected; one toast names what went through and what didn't.
+local function runBatch(b: Block, cx: BlockCx, keys: { string }, merge: boolean)
+	local s = b.s
+	if b.fixture then return cx:toast("info", if merge then "The sample board doesn't merge" else "The sample board doesn't close pull requests") end
+	local queue: { Model.HubPR } = {}
+	for _, key in keys do
+		local card = State.card(s, key)
+		if card and not s.busy[key] then table.insert(queue, card.pr) end
+	end
+	if #queue == 0 then return end
+	local finished: { Model.HubPR } = {}
+	local handed = false -- some went to a repo's tool (comment, label, queue) rather than merging at once
+	local step: (index: number) -> ()
+	local function finish(failed: Model.HubPR?, reason: string?)
+		keepCache(b)
+		local rest: { Model.HubPR } = {}
+		for i = #finished + 1, #queue do table.insert(rest, queue[i]) end
+		local done = if merge then (if handed then "Asked to merge " else "Merged ") else "Closed "
+		if failed and reason then
+			local text = (if #finished > 0 then done .. refList(finished) .. ". " else "") .. "Couldn't " .. (if merge then "merge" else "close") .. " #" .. failed.number .. ": " .. reason
+			cx:toast("error", text, "Not " .. (if merge then "merged" else "closed") .. ": " .. refList(rest) .. ". Still selected.")
+		else
+			local n = #finished
+			local noun = if n == 1 then "pull request" else "pull requests"
+			cx:toast("success", done .. n .. " " .. noun, nil)
+		end
+		refetchSoon(b, cx)
+		draw(b, cx)
+	end
+	step = function(index: number)
+		local pr = queue[index]
+		if not pr then return finish(nil, nil) end
+		local function after(err: string?)
+			if err then return finish(pr, err) end
+			table.insert(finished, pr)
+			s.marked[pr.key] = nil
+			step(index + 1)
+		end
+		if merge then
+			local kind = methodOf(b, pr).kind
+			if kind ~= "squash" and kind ~= "merge" and kind ~= "rebase" then handed = true end
+			runMerge(b, cx, pr, after)
+			return
+		end
+		State.setBusy(s, pr.key, "Closing…")
+		b.github.run(Github.commands.close(pr), function(_, err)
+			if b.closed then return end
+			State.setBusy(s, pr.key, nil)
+			if err then return after(reasonOf(err.message)) end
+			s.acted[pr.key] = true
+			State.dropPr(s, pr.key)
+			after(nil)
+		end)
+	end
+	step(1)
+end
+
 -- Esc on the learned-method question declines it for good: the repo is not asked again.
 ACTIONS["hub-confirm-cancel"] = function(b, cx)
 	local s = b.s
@@ -933,12 +1051,18 @@ ACTIONS["hub-confirm"] = function(b, cx)
 	local confirm = s.confirm
 	local card = if confirm and (confirm.kind == "merge" or confirm.kind == "learned") then State.card(s, confirm.keys[1]) else nil
 	local learned = confirm ~= nil and confirm.kind == "learned"
+	if confirm and (confirm.kind == "batch-merge" or confirm.kind == "batch-close") then
+		local keys = confirm.keys
+		State.cancelConfirm(s)
+		return runBatch(b, cx, keys, confirm.kind == "batch-merge")
+	end
 	State.cancelConfirm(s)
 	if not card then return end
 	local resolved = s.merges[card.pr.repo]
 	-- Saying yes to the suggestion makes it the viewer's own setting.
 	if learned and resolved then setUserMethod(b, cx, card.pr.repo, resolved.method) end
-	runMerge(b, cx, card.pr)
+	if b.fixture then return cx:toast("info", "The sample board doesn't merge", card.pr.key) end
+	runMerge(b, cx, card.pr, nil)
 end
 
 -- Update branch (U): a Ready card that is behind main. Its checks run again, so the card waits on them.
@@ -1256,7 +1380,18 @@ local function loadAgent(b: Block, cx: BlockCx)
 	end)
 end
 
+-- Whether a click held `name` (shift, ctrl, alt or meta): Tern lists the held modifiers in `ev.mods`.
+local function held(ev: UiEvent, name: string): boolean
+	local mods: any = ev.mods
+	if type(mods) ~= "table" then return false end
+	return table.find(mods, name) ~= nil or mods[name] == true
+end
+
 local function actionOf(ev: UiEvent): Keys.Action?
+	-- ⌘-click and ⇧-click on a card select it for Merge selected or Close stale instead of moving the selection.
+	if ev.ev == "action" and ev.act == "hub-select" and (held(ev, "meta") or held(ev, "shift")) then
+		return { act = "hub-mark", value = ev.value }
+	end
 	if ev.ev == "action" then return { act = ev.act, value = ev.value } end
 	return nil
 end

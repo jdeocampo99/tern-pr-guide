@@ -9,6 +9,7 @@ local Link = require("./link")
 local Menus = require("./menus")
 local Model = require("../../hub/model")
 local Paths = require("./paths")
+local Selection = require("./selection")
 local State = require("../../hub/state")
 local Ui = require("../ui")
 
@@ -147,6 +148,7 @@ end
 
 local function columns(s: State.State): Node
 	local out: { Node } = {}
+	local selection = State.selection(s)
 	for _, entry in s.board.columns do
 		local kids: { Node } = {
 			el("div", { class = "gp-hub-colhead", key = "head" }, {
@@ -155,6 +157,7 @@ local function columns(s: State.State): Node
 			}),
 		}
 		if entry.column == "to_review" then table.insert(kids, Link.view(s)) end
+		if entry.column == "ready" and selection and selection.group == "ready" then table.insert(kids, Selection.view(selection)) end
 		if #entry.cards == 0 then
 			table.insert(kids, span("gp-hub-empty", emptyText(entry.column)))
 		else
@@ -169,8 +172,9 @@ local function fold(s: State.State, motion: Ui.Motion): Node?
 	local list = s.board.inactive
 	if #list == 0 then return nil end
 	local open = s.board.open.inactive
-	local kids: { Node } = {
-		el("div", { class = "gp-hub-foldhead", key = "head", actions = { click = "hub-fold=inactive" } }, {
+	-- The header's toggle and its Close stale button are siblings, so a click on one never reaches the other.
+	local head: { Node } = {
+		el("span", { class = "gp-hub-foldtoggle", key = "toggle", actions = { click = "hub-fold=inactive" } }, {
 			Ui.caret(open),
 			span("gp-panel-h", "Inactive"),
 			span("gp-hub-colcount", tostring(#list)),
@@ -179,9 +183,19 @@ local function fold(s: State.State, motion: Ui.Motion): Node?
 			Ui.keys("I"),
 		}),
 	}
+	if State.staleCount(s) > 0 then
+		table.insert(head, el("span", { class = "gp-btn gp-btn-sm gp-hub-closestale", key = "stale", actions = { click = "hub-mark-stale" } }, {
+			span("gp-hub-closestale-l", "Close stale"), Ui.keys("⇧X"),
+		}))
+	end
+	local kids: { Node } = { el("div", { class = "gp-hub-foldhead", key = "head" }, head) }
 	if open then
 		local enter = Ui.entering(motion, "fold:inactive", "gp-enter-panel")
-		table.insert(kids, el("div", { class = "gp-hub-foldrows " .. enter, key = "rows" }, cards(s, list)))
+		local rows: { Node } = {}
+		local selection = State.selection(s)
+		if selection and selection.group == "inactive" then table.insert(rows, Selection.view(selection)) end
+		for _, node in cards(s, list) do table.insert(rows, node) end
+		table.insert(kids, el("div", { class = "gp-hub-foldrows " .. enter, key = "rows" }, rows))
 	end
 	return el("div", { class = "gp-hub-fold", key = "fold" }, kids)
 end

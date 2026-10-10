@@ -387,6 +387,60 @@ function M.resolveMergeMethod(evidence: MergeEvidence): MergeResolution
 	return { method = { kind = evidence.viewerDefault } :: MergeMethod, source = "viewer", ask = false }
 end
 
+-- Selecting several -------------------------------------------------------------------------------------
+
+export type Group = "ready" | "inactive"
+export type ConfirmList = { shown: { HubPR }, more: number }
+
+-- A confirm lists at most this many titles.
+M.CONFIRM_TITLES = 5
+
+-- Which group a card may be selected in, or why it may not. Ready cards qualify only when they can merge
+-- now: not behind main, nothing queued or in flight. Inactive rows (drafts too) always qualify.
+function M.selectGroup(pr: HubPR, now: number): (Group?, string?)
+	local column = M.classify(pr, now)
+	if column == "inactive" then return "inactive", nil end
+	if column ~= "ready" then return nil, "only Ready and Inactive pull requests can be selected" end
+	if pr.behind then return nil, "it is behind " .. pr.baseBranch end
+	if pr.pending then return nil, "a merge is already waiting" end
+	if not M.mergeable(pr) then return nil, "it can't merge yet" end
+	return "ready", nil
+end
+
+-- Stale: Inactive for lack of activity and not a draft. Close stale selects exactly these.
+function M.stale(pr: HubPR, now: number): boolean
+	return pr.role == "mine" and not pr.draft and not active(pr, now)
+end
+
+-- The titles a confirm shows (the first CONFIRM_TITLES) and how many more there are.
+function M.confirmList(prs: { HubPR }): ConfirmList
+	local shown: { HubPR } = {}
+	for i = 1, math.min(#prs, M.CONFIRM_TITLES) do shown[i] = prs[i] end
+	return { shown = shown, more = #prs - #shown }
+end
+
+local GITHUB_LINES: { [string]: string } = {
+	squash = "Squash and merge", merge = "Create a merge commit", rebase = "Rebase and merge",
+}
+
+-- How one method merges, as a confirm says it.
+function M.methodLine(method: MergeMethod): string
+	if method.kind == "comment" then return "Comments " .. method.command end
+	if method.kind == "label" then return "Adds the " .. method.label .. " label" end
+	if method.kind == "queue" then return "Adds to the merge queue" end
+	return GITHUB_LINES[method.kind]
+end
+
+-- One line per distinct method, in order of first use ("Squash and merge", or several lines when they differ).
+function M.methodLines(methods: { MergeMethod }): { string }
+	local out: { string } = {}
+	for _, method in methods do
+		local line = M.methodLine(method)
+		if not table.find(out, line) then table.insert(out, line) end
+	end
+	return out
+end
+
 -- flake (#13) arrives with its issue; its types are declared above.
 
 return M

@@ -205,8 +205,9 @@ Anywhere in Tern: `⌥⌘R` opens the PR hub and `⌥⇧⌘R` opens it with AI g
 | `R` | show or hide Recently opened (Review requests) | `⇧A` | summarize feedback | `S` | sort |
 | | | `C` | copy link | `⇧M` | agent model |
 | | | `M` | merge (a GitHub merge asks first: `⌘⏎` confirms, `Esc` cancels), or cancel a merge in flight | `N` | add a pull request by link |
-| | | | | `⌘⏎` | confirm a question |
-| | | | | `Esc` | clear, cancel or close |
+| | | `Space` | select the card for Merge selected or Close stale (also `⌘`-click or `⇧`-click) | `⇧X` | select every stale pull request that isn't a draft |
+| | | `M` `X` | with a selection: merge it (Ready) or close it (Inactive), after one confirm | `⌘⏎` | confirm a question |
+| | | | | `Esc` | clear the selection, cancel or close |
 | | | `U` | update branch (Ready cards that are behind main) | `?` | all shortcuts |
 | | | `,` | merge method (also the `▾` on Merge) | `⌘R` | refresh (the sample board steps through its recorded refreshes) |
 | | | `X` | remove from Review requests (pull requests you added) | | |

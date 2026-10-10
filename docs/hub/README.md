@@ -347,6 +347,10 @@ function M.placement(pr: HubPR, now: number): Placement
 function M.classify(pr: HubPR, now: number): Column     -- placement(pr, now).column
 function M.botFeedback(pr: HubPR): boolean              -- a bot's latest review or unresolved thread, for Fix bot comments
 function M.mergeable(pr: HubPR): boolean                -- ready, not behind, nothing pending: the cards Space may select
+function M.selectGroup(pr: HubPR, now: number): ("ready" | "inactive")?, string?   -- the group Space may select it in, or nil and why not; Inactive rows (drafts too) always qualify
+function M.stale(pr: HubPR, now: number): boolean       -- Inactive for 7+ days of silence and not a draft: what Close stale (⇧X) selects
+function M.confirmList(prs: { HubPR }): { shown: { HubPR }, more: number }   -- the first CONFIRM_TITLES (5), then the count left
+function M.methodLines(methods: { MergeMethod }): { string }                 -- one line per distinct method: "Squash and merge", "Comments /merge"
 function M.size(pr: HubPR): number                      -- additions + deletions
 export type Filter = { repositories: { [string]: boolean }?, search: string }   -- nil repositories = all
 function M.visible(pr: HubPR, filter: Filter): boolean  -- search matches "#n", title, author, repo, base branch
@@ -491,6 +495,7 @@ M.commands = {
 	merge = function(pr: HubPR, method: MergeMethod): Command end,   -- squash, merge, rebase: `gh pr merge <n> --repo <owner/repo> --squash|--merge|--rebase`; queue: `--auto`; comment: `gh pr comment <n> --repo <r> --body <command>`; label: `gh pr edit <n> --repo <r> --add-label <label>`
 	cancelMerge = function(pr: HubPR, method: MergeMethod): Command end,   -- queue: `gh pr merge … --disable-auto`; comment: `--body <cancel>`; label: `--remove-label`; raises for a GitHub merge and for a comment with no cancel
 	updateBranch = function(pr: HubPR): Command end,
+	close = function(pr: HubPR): Command end,   -- gh pr close <n> --repo <repo>, no comment
 	rerun = function(repo: string, runId: number): Command end,            -- gh run rerun <id> --failed
 	requestReview = function(pr: HubPR, login: string): Command end,
 	close = function(pr: HubPR): Command end,
@@ -1022,6 +1027,7 @@ All rows are approved by the user; ideas the user didn't pick were dropped. Each
 **Mocked in `index.html`:** Next up (1), Update branch (3, on #181), Merge several (8) and Close stale (9).
 - **Next up:** the tab-row control described in row 1.
 - **Selecting:** Space or ⌘/⇧-click selects; Esc clears. A selected card gets a blue wash, with a blue box in place of its gutter check.
+- **Decisions (#11).** `State.confirm.kind` also takes `"batch-merge"` and `"batch-close"` (`keys` = the marked cards in column order); `State.selection(s)` builds the bar and its confirm (`Selection`, `BatchConfirm`). Marks last while the card stays selectable, in this tab, matching the filter and (Inactive) shown. M and X act only while something is marked; Esc clears the marks first. A batch runs one PR at a time, each with `s.merges[repo]` as resolved (a learned, unconfirmed comment is used as shown in the confirm), stops at the first failure, leaves the rest marked, and ends in one toast. `⌘`/`⇧`-click arrives as `ev.mods` on the `hub-select` action and becomes `hub-mark`.
 - **The selection bar** sits at the top of Ready to merge (or inside Inactive): "2 selected · Merge 2 (M) · Clear (Esc)".
 - **The confirm** lists at most 5 titles plus "and N more", then one line on how they merge (for example "Comments /merge"), or "Closed pull requests can be reopened."
 - **Only mergeable cards can be selected:** a card that's behind main or already queued can't be.

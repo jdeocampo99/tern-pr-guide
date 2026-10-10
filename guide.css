@@ -1078,6 +1078,9 @@
 .gp-hc-bad, .gp-hc-bad:hover { background: var(--gp-danger-wash); border-color: var(--gp-danger-wash-line); }
 .gp-hc-info, .gp-hc-info:hover { background: var(--gp-blue-wash); border-color: var(--gp-blue-wash-line); }
 .gp-hc-done { border-color: var(--gp-success-wash-line); }
+.gp-hc-marked, .gp-hc-marked:hover { background: var(--gp-blue-wash); border-color: var(--gp-blue-wash-line); }
+.gp-hc-box { flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; border-radius: 4px; color: #fff; background: var(--gp-blue-fill); }
+.gp-hc-box .sf-icon, .gp-hc-box .ico { width: 10px; height: 10px; }
 .gp-hc-on, .gp-hc-on:hover { border-color: var(--gp-blue-line); box-shadow: 0 0 0 1px var(--gp-blue-line); }
 .gp-hc-tick { flex-shrink: 0; width: 14px; display: flex; color: var(--gp-added); }
 .gp-hc-tick .sf-icon, .gp-hc-tick .ico { width: 14px; height: 14px; }
@@ -1176,6 +1179,20 @@
 /* the Inactive fold under the board */
 .gp-hub-foldhead { display: flex; gap: 10px; align-items: center; padding: 8px 10px; border: 1px dashed var(--l3); border-radius: var(--r-ctl); cursor: pointer; transition: background-color 140ms ease; }
 .gp-hub-foldhead:hover { background: var(--l1); }
+.gp-hub-foldtoggle { flex: 1 1 auto; min-width: 0; display: flex; gap: 10px; align-items: center; cursor: pointer; }
+.gp-hub-closestale { flex-shrink: 0; display: inline-flex; gap: 8px; align-items: center; }
+/* the selection bar and its confirm: one blue box at the top of Ready to merge or the Inactive rows */
+.gp-sel { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; min-width: 0; padding: 8px 12px 8px 14px; border: 1px solid var(--gp-blue-wash-line); border-radius: var(--r-ctl); background: var(--gp-blue-wash); }
+.gp-sel-n, .gp-sel-q { font-family: var(--sans); font-size: 13px; font-weight: 600; color: var(--gp-blue-ink); }
+.gp-sel-acts { margin-left: auto; display: inline-flex; gap: 6px; align-items: center; flex-shrink: 0; }
+.gp-sel-list { flex: 1 1 100%; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.gp-sel-list > * { flex-shrink: 0; }
+.gp-sel-row { display: flex; gap: 8px; align-items: baseline; min-width: 0; }
+.gp-sel-ref { flex-shrink: 0; font-size: 12px; color: var(--t2); }
+.gp-sel-title { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--sans); font-size: 13px; color: var(--t1); }
+.gp-sel-more { font-family: var(--sans); font-size: 12.5px; color: var(--t2); }
+.gp-sel-hows { flex: 1 1 100%; min-width: 0; display: flex; flex-direction: column; }
+.gp-sel-how { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--sans); font-size: 12.5px; color: var(--t2); }
 .gp-hub-foldnote { font-family: var(--sans); font-size: 12.5px; color: var(--t3); }
 .gp-hub-foldrows { display: flex; flex-direction: column; gap: 8px; max-width: 760px; padding-top: 8px; }
 .gp-hub-foldrows > * { flex-shrink: 0; }

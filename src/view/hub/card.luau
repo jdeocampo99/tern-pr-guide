@@ -25,8 +25,9 @@ function M.chip(chip: State.Chip): Node
 end
 
 -- The chip line: one pill per job, then the first job's detail.
-local function chipLine(card: State.Card): Node
+local function chipLine(card: State.Card, box: Node?): Node
 	local out: { Node } = {}
+	if box then table.insert(out, box) end
 	for _, chip in card.chips do table.insert(out, M.chip(chip)) end
 	-- Three or more chips leave no room for the detail to read, so it is dropped.
 	if card.detail and #card.chips < 3 then table.insert(out, span("gp-hc-why gp-hc-why-" .. (card.detailKind or "bad"), card.detail)) end
@@ -113,10 +114,13 @@ function M.view(card: State.Card, now: number): Node
 
 	local kids: { Node } = {}
 	local body: { Node } = {}
+	-- A selected card shows a blue box where the gutter check sits (Ready), or at the start of the chip line (Inactive).
+	local box = el("span", { class = "gp-hc-box", key = "box" }, { Ui.icon("check") })
 	if card.column == "ready" or card.column == "approved" then
-		table.insert(body, el("div", { class = "gp-hc-titlerow", key = "titlerow" }, { el("span", { class = "gp-hc-tick", key = "tick" }, { Ui.icon("check") }), span("gp-hc-title", pr.title) }))
+		local gutter = if card.marked then box else el("span", { class = "gp-hc-tick", key = "tick" }, { Ui.icon("check") })
+		table.insert(body, el("div", { class = "gp-hc-titlerow", key = "titlerow" }, { gutter, span("gp-hc-title", pr.title) }))
 	else
-		table.insert(body, chipLine(card))
+		table.insert(body, chipLine(card, if card.marked then box else nil))
 		table.insert(body, span("gp-hc-title", pr.title))
 	end
 	local summary = card.summary
@@ -126,6 +130,7 @@ function M.view(card: State.Card, now: number): Node
 	table.insert(kids, el("div", { class = "gp-hc-body", key = "body" }, body))
 
 	local class = "gp-hc gp-hc-" .. toneOf(card)
+	if card.marked then class ..= " gp-hc-marked" end
 	if card.selected then class ..= " gp-hc-on" end
 	if main and not card.busy then class ..= " gp-hc-act" end
 	if card.asking or card.busy then class ..= " gp-hc-pinned" end
