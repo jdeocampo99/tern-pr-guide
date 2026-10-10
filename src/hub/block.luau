@@ -461,6 +461,13 @@ local function carryOn(b: Block, cx: BlockCx, flight: AgentFlight): boolean
 	return false
 end
 
+-- `carryOn` for the current flight, if any: called wherever a board is installed whole, so setup that belongs to a PR the
+-- new board marks as Tandem's ends at once.
+local function reconcileFlight(b: Block, cx: BlockCx)
+	local flight = b.agentFlight
+	if flight then carryOn(b, cx, flight) end
+end
+
 local function settleAgent(b: Block, cx: BlockCx, flight: AgentFlight, outcome: AgentFix.Outcome)
 	if b.agentFlight ~= flight or flight.settled then return end
 	if outcome.kind == "running" then
@@ -1124,6 +1131,7 @@ startRefresh = function(b: Block, cx: BlockCx)
 			b.cache = cache
 			b.sched.probeChanged, b.sched.focusedAt = false, nil
 			State.replace(b.s, cache.prs, now, cache.refreshedAt)
+			reconcileFlight(b, cx)
 			local why = persist(b)
 			if why then b.s.error = { operation = KV_CACHE, message = "the cache couldn't be saved: " .. why } end
 			showAdded(b, cx)
@@ -1602,8 +1610,9 @@ end
 local function runMerge(b: Block, cx: BlockCx, pr: Model.HubPR, done: ((err: string?) -> ())?)
 	local s = b.s
 	-- One owner per branch: nothing new merges a PR Tandem watches (a merge already pending is only cancelled).
+	-- A batch holds the PRs it captured: the board may have dropped one Tandem took, so the durable set is asked too.
 	local owned = State.prOf(s, pr.key)
-	if owned and owned.tandem then
+	if (owned and owned.tandem) or b.watched[string.lower(pr.repo) .. "#" .. pr.number] then
 		if done then return done(TANDEM_OWNS) end
 		return cx:toast("error", "Couldn't merge #" .. pr.number .. ": " .. TANDEM_OWNS, pr.repo)
 	end

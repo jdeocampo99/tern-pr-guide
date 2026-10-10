@@ -2114,6 +2114,96 @@ local function watchedMerge()
 	end)
 end
 
+-- A batch holds the pull requests it captured. While the first merge is out, Tandem takes the second and the board
+-- loses it (the open-PR limit); the durable set still owns it, so its merge sends nothing and the batch stops there.
+local function queuedMerge()
+	local FIRST, SECOND = "acme/api#109", "acme/api#116"
+	withWorld(function(w, Fetch, Block)
+		local b = live(w, Block)
+		reads(w)[1].done(out("WATCH"))
+		w.runs = {}
+		b.github = { refresh = function() end, run = function(command: any, done: any) table.insert(w.runs, { command = command, done = done }) end }
+		b.s.confirm = { kind = "batch-merge", keys = { FIRST, SECOND } } :: any
+		assert(not State.prOf(b.s, SECOND).tandem)
+		Block.event(b, { ev = "action", act = "hub-confirm", value = "" } :: any, w.cx)
+		assert(#w.runs == 1 and b.s.busy[FIRST] ~= nil and b.s.busy[SECOND] == nil, "the first merge is out")
+
+		b.watched[SECOND] = true
+		State.dropPr(b.s, SECOND)
+		assert(State.prOf(b.s, SECOND) == nil)
+		w.toasts = {}
+		w.runs[1].done(nil, nil)
+		assert(#w.runs == 1 and b.s.busy[SECOND] == nil, "nothing is sent for the second")
+		assert(#w.toasts == 1 and w.toasts[1].kind == "error", "the batch reports it")
+		assert(string.find(w.toasts[1].title, "Merged #109. Couldn't merge #116: Tandem watches this pull request", 1, true), w.toasts[1].title)
+	end)
+end
+
+-- A fix still being set up for a PR whose ownership arrives in a whole board (another window's newer cache adopted on
+-- focus, or this window's own GitHub answer) ends as stopped at once, before the clone lookup or the read of Tandem
+-- answers, and neither answer starts anything. A running engine and a fix for another PR are left alone.
+local function wholeBoard()
+	local OTHER = "acme/api#116"
+	local function opened(w: any, Fetch: any, Block: any, engine: boolean): any
+		local b = agentBoard(w, Fetch, Block)
+		b.github = quietGithub(function(_, done) w.answer = done end)
+		Block.event(b, { ev = "action", act = "card-agent", value = TARGET } :: any, w.cx)
+		if engine then
+			w.clones[1].done("/clone", nil)
+			gh(w).done(out("REFS"))
+			assert(#w.started == 1 and b.agentFlight.engine ~= nil)
+		else
+			assert(#w.clones == 1 and b.agentFlight ~= nil and b.agentFlight.engine == nil)
+		end
+		Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+		assert(w.answer ~= nil and b.flights.refresh and b.flights.tandem and #reads(w) == 2, "the read of Tandem is out")
+		return b
+	end
+	local function arrive(w: any, Block: any, b: any, how: string, owned: { string })
+		w.kvIn = { ["hub.cache"] = storedCache(owned, Cases.asOf + 60) }
+		if how == "focus" then
+			Block.event(b, { ev = "action", act = "hub-focused", value = "" } :: any, w.cx)
+		else
+			w.answer({ viewer = "jubbydev", prs = copy(Cases.prs), rateLimit = nil, calls = {}, truncated = false }, nil)
+		end
+	end
+
+	for _, how in { "focus", "refresh" } do
+		withWorld(function(w, Fetch, Block)
+			local b = opened(w, Fetch, Block, false)
+			arrive(w, Block, b, how, { WEB, API114, TARGET })
+			assert(State.prOf(b.s, TARGET).tandem == true and b.watched[TARGET] == true, how)
+			noFixer(w, b, how .. ": stopped before any answer")
+			assert(#reads(w) == 2 and b.flights.tandem and #w.clones == 1, how .. ": both answers are still out")
+			w.clones[1].done("/clone", nil)
+			assert(gh(w) == nil, how .. ": the late lookup reads no refs")
+			noFixer(w, b, how .. ": after the lookup")
+			reads(w)[2].done(out("WATCH"))
+			noFixer(w, b, how .. ": after the read of Tandem")
+			frozen(b)
+			assert(#w.toasts == 0 and card(b.s, TARGET).chips[1].text == "Waiting on Tandem", how)
+		end)
+
+		-- A running engine is Stop's.
+		withWorld(function(w, Fetch, Block)
+			local b = opened(w, Fetch, Block, true)
+			arrive(w, Block, b, how, { WEB, API114, TARGET })
+			assert(State.prOf(b.s, TARGET).tandem == true)
+			assert(#w.started == 1 and b.agentFlight ~= nil and b.s.agents[TARGET].kind == "running" and w.stops == 0, how .. ": the engine stays")
+		end)
+
+		-- Ownership of another PR leaves this setup going.
+		withWorld(function(w, Fetch, Block)
+			local b = opened(w, Fetch, Block, false)
+			arrive(w, Block, b, how, { WEB, API114, OTHER })
+			assert(State.prOf(b.s, OTHER).tandem == true and not State.prOf(b.s, TARGET).tandem)
+			assert(b.agentFlight ~= nil and b.s.agents[TARGET].kind == "running" and #w.clones == 1, how .. ": an unrelated fix stays")
+			w.clones[1].done("/clone", nil)
+			assert(gh(w) ~= nil, how .. ": and goes on")
+		end)
+	end
+end
+
 local function fixture()
 	withWorld(function(w, Fetch, Block)
 		local cx: any = { cwd = REPO_ROOT }
@@ -2170,5 +2260,7 @@ return function()
 	retainedLease()
 	preWorktreeLease()
 	watchedMerge()
+	queuedMerge()
+	wholeBoard()
 	fixture()
 end
