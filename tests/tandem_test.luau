@@ -199,18 +199,29 @@ local function stubTern(w: any): any
 	}
 end
 
+-- Block's clock is frozen at `w.now` for the whole scenario (an hour after the recorded boards' `asOf`, so the stamps
+-- the scenarios store, up to `asOf + 120`, are all older than a refresh and no result depends on the machine's date). A
+-- scenario moves it by setting `w.now`. The real `os` comes back even when the scenario errors.
 local function withWorld(run: (w: any, Fetch: any, Block: any) -> ())
 	local Block: any = require("../src/hub/block")
 	local Fetch: any = require("../src/fetch")
 	local blockEnv: any, fetchEnv: any = getfenv(Block.init), getfenv(Fetch.tandemWatch)
 	local hostBlock, hostFetch, hostRunner, hostFind = blockEnv.tern, fetchEnv.tern, Fetch.runner, Fetch.findRepo
+	local hostOs = rawget(blockEnv, "os")
+	local realOs = os
 	local hostClone, hostStart = Fetch.findAgentClone, Fetch.startAgentFix
 	local w: any = {
 		decoded = {}, encoded = {}, timers = {}, calls = {}, toasts = {}, renders = 0, throws = false, Block = Block,
-		finds = {}, holdRoot = false, rootFails = false, findThrows = false, kv = {},
+		finds = {}, holdRoot = false, rootFails = false, findThrows = false, kv = {}, now = Cases.asOf + 3600,
 	}
 	local stub = stubTern(w)
 	blockEnv.tern, fetchEnv.tern = stub, stub
+	blockEnv.os = setmetatable({
+		time = function(t: any?): number
+			if t then return realOs.time(t) end
+			return w.now
+		end,
+	}, { __index = realOs })
 	-- Finding the repository root is a recorded call too: answered at once with REPO_ROOT unless a scenario holds
 	-- it (settled by hand through `finds[n].done`) or makes it fail or throw.
 	Fetch.findRepo = function(dir: string, done: (any, string?) -> ())
@@ -226,6 +237,7 @@ local function withWorld(run: (w: any, Fetch: any, Block: any) -> ())
 	end
 	local ok, err = pcall(run, w, Fetch, Block)
 	blockEnv.tern, fetchEnv.tern, Fetch.runner, Fetch.findRepo = hostBlock, hostFetch, hostRunner, hostFind
+	blockEnv.os = hostOs
 	Fetch.findAgentClone, Fetch.startAgentFix = hostClone, hostStart
 	if not ok then error(err, 0) end
 end
@@ -2302,6 +2314,82 @@ local function sharedOwnership()
 		pressPush(w, b)
 		assert(#w.pushes == 1 and w.pushes[1].canPush() == true)
 		assert(b.watched[TARGET] == nil and not State.prOf(b.s, TARGET).tandem)
+	end)
+
+	-- A successful read of Tandem that omits A clears it while B's fix is still being set up. B's reconciliation does not
+	-- replay the shared cache the answer supersedes, so A stays cleared in the model and in what is stored, and B's setup
+	-- goes on from the next step. When the same answer names B, B ends as stopped and A is still cleared.
+	for _, names in { "none", "target" } do
+		withWorld(function(w, Fetch, Block)
+			local b = agentBoard(w, Fetch, Block)
+			holdCache(w, b)
+			Block.event(b, { ev = "action", act = "card-agent", value = TARGET } :: any, w.cx)
+			assert(b.agentFlight ~= nil and b.agentFlight.engine == nil and #w.clones == 1)
+			assert(State.prOf(b.s, WEB).tandem == true and b.watched[WEB] == true)
+			Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+			local later = if names == "target" then watchWith({ TARGET }) else copy(RawWatch)
+			local rows = {}
+			for _, row in later.rows do
+				if row.number ~= 104 then table.insert(rows, row) end
+			end
+			later.rows = rows
+			w.decoded["CLEARS"] = later
+			reads(w)[2].done(out("CLEARS"))
+			assert(not State.prOf(b.s, WEB).tandem and b.watched[WEB] == nil, names .. ": A is cleared")
+			assert(card(b.s, WEB).column == "needs_fixes" and card(b.s, WEB).main.label == "Fix with agent", names)
+			assert(State.prOf(b.s, API114).tandem == true, names .. ": the PRs it still names stay")
+			for _, saved in { b.cache, w.kv["hub.cache"] } do
+				for _, cached in saved.prs do
+					if cached.key == WEB then assert(not cached.tandem, names .. ": A is stored cleared") end
+					if cached.key == API114 then assert(cached.tandem == true, names) end
+				end
+			end
+			assert(b.cache.counts.needFixes == needFixesOf(b) and w.kv["hub.status"].counts.needFixes == needFixesOf(b), names)
+			if names == "target" then
+				noFixer(w, b, "named by the answer")
+				w.clones[1].done("/clone", nil)
+				assert(gh(w) == nil and #w.toasts == 0, "the late lookup reads no refs")
+			else
+				assert(b.agentFlight ~= nil and b.s.agents[TARGET].kind == "running" and #w.started == 0, "B's setup is untouched")
+				w.clones[1].done("/clone", nil)
+				assert(gh(w) ~= nil and b.agentFlight ~= nil, "and goes on")
+			end
+			assert(not State.prOf(b.s, WEB).tandem and b.watched[WEB] == nil and #w.started == 0 and w.stops == 0, names .. ": A is not restored")
+			assert(w.kv["hub.cache"] ~= nil and #handoffs(w) == 0)
+		end)
+	end
+
+	-- B's setup is waiting on its repository lookup when window C stores ownership of an unrelated PR. The lookup's answer
+	-- joins it, and the card is drawn then, before the read of Tandem that began earlier returns. That read is stale (the
+	-- join moved the hand-offs it read before), so it is dropped, and its replacement read fails; the card stays
+	-- flagged, B's fix goes on, and nothing is sent.
+	withWorld(function(w, Fetch, Block)
+		local OTHER = "acme/api#116"
+		local b = agentBoard(w, Fetch, Block)
+		holdCache(w, b)
+		w.holdRoot = true
+		Block.event(b, { ev = "action", act = "card-agent", value = TARGET } :: any, w.cx)
+		local held = w.finds[#w.finds]
+		assert(b.agentFlight ~= nil and b.agentFlight.engine == nil and held ~= nil)
+		Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+		assert(#reads(w) == 2 and b.flights.tandem, "a read that began before is out")
+		storeOwned(w, { WEB, API114, OTHER }, Cases.asOf)
+		assert(not State.prOf(b.s, OTHER).tandem and b.watched[OTHER] == nil)
+		local drawn = w.renders
+		held.done({ root = REPO_ROOT }, nil)
+		assert(State.prOf(b.s, OTHER).tandem == true and b.watched[OTHER] == true, "the lookup joined it")
+		assert(w.renders > drawn, "and drew it at once")
+		assert(card(b.s, OTHER).chips[1].text == "Waiting on Tandem" and not offers(card(b.s, OTHER), "card-agent"))
+		assert(b.agentFlight ~= nil and b.s.agents[TARGET].kind == "running" and #w.clones == 1, "B goes on")
+
+		local watches = #reads(w)
+		reads(w)[2].done(out("WATCH"))
+		assert(#reads(w) == watches + 1 and b.flights.tandem, "the stale answer asks again")
+		reads(w)[watches + 1].done(out("nope"))
+		assert(not b.flights.tandem and b.s.error == nil and #w.toasts == 0)
+		assert(State.prOf(b.s, OTHER).tandem == true and b.watched[OTHER] == true, "a failed read clears nothing")
+		assert(b.agentFlight ~= nil and b.s.agents[TARGET].kind == "running" and #w.started == 0 and w.stops == 0)
+		assert(gh(w) == nil and #handoffs(w) == 0, "nothing is sent")
 	end)
 end
 

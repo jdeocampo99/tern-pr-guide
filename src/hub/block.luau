@@ -500,13 +500,19 @@ end
 
 -- True while the fix may go on. One owner per branch: a fix still being set up for a PR Tandem has taken (no engine
 -- yet, so no worktree is held) ends as stopped, as Stop would end it, and never starts. A running engine is Stop's.
--- Ownership another window stored since the last callback joins first, so every continuation of the setup sees it.
-local function carryOn(b: Block, cx: BlockCx, flight: AgentFlight): boolean
+-- Ownership another window stored since the last callback joins first, so every continuation of the setup sees it, and
+-- a PR that move flagged is drawn here even when this fix goes on. `superseded` is a successful read of Tandem that has
+-- just decided ownership: the stored cache is older than that answer, so it joins nothing and cannot restore a flag the
+-- answer cleared.
+local function carryOn(b: Block, cx: BlockCx, flight: AgentFlight, superseded: boolean?): boolean
 	if not currentFlight(b, flight) then return false end
 	if flight.engine or flight.starting then return true end
-	joinOwned(b)
+	local moved = not superseded and joinOwned(b)
 	local pr = State.prOf(b.s, flight.key)
-	if not pr or not pr.tandem then return true end
+	if not pr or not pr.tandem then
+		if moved then draw(b, cx) end
+		return true
+	end
 	flight.stopping = true
 	if flight.cancel then flight.cancel() end
 	flight.settled = true
@@ -1123,7 +1129,7 @@ local function loadTandem(b: Block, cx: BlockCx)
 			return
 		end
 		local flight = b.agentFlight
-		if flight then carryOn(b, cx, flight) end
+		if flight then carryOn(b, cx, flight, true) end
 		State.project(b.s)
 		recount(b)
 		persist(b)
