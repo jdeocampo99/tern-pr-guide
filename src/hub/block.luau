@@ -88,6 +88,12 @@ local function revealSelected(b: Block, cx: BlockCx)
 	if recent then frameLater(cx, { { "reveal", Paths.recentRow(State.recentKey(recent)), "nearest" } }) end
 end
 
+-- Scrolls the selection bar, or the confirm that replaced it, into view: it can sit far below the cursor.
+local function revealSelection(b: Block, cx: BlockCx)
+	local selection = State.selection(b.s)
+	if selection then frameLater(cx, { { "reveal", Paths.selection(selection.group), "nearest" } }) end
+end
+
 -- Reads `name=value` block arguments.
 local function options(args: { string }): ({ generate: boolean, fixture: string? }?, string?)
 	local out: { generate: boolean, fixture: string? } = { generate = false, fixture = nil }
@@ -935,14 +941,18 @@ ACTIONS["hub-mark"] = function(b, cx, value)
 	local key = if value ~= "" then value else s.selected
 	if not key then return end
 	local ok, why = State.toggleMark(s, key)
-	if ok then return end
+	if ok then return revealSelection(b, cx) end
 	local card = State.card(s, key)
 	if card then cx:toast("info", "Can't select #" .. card.pr.number .. ": " .. (why or "it isn't selectable"), card.pr.title) end
 end
 
 -- ⇧X and the Inactive fold's Close stale: selects every stale pull request that isn't a draft.
 ACTIONS["hub-mark-stale"] = function(b, cx)
-	if State.markStale(b.s) == 0 then cx:toast("info", "No stale pull requests to close", "Drafts are selected one by one with Space") end
+	if State.markStale(b.s) == 0 then
+		cx:toast("info", "No stale pull requests to close", "Drafts are selected one by one with Space")
+	else
+		revealSelection(b, cx)
+	end
 end
 
 ACTIONS["hub-marks-clear"] = function(b)
@@ -963,11 +973,11 @@ ACTIONS["hub-batch-merge"] = function(b, cx)
 		end
 		if waiting then return cx:toast("info", "Checking how these repositories merge…", "Try again in a moment") end
 	end
-	State.askBatch(s, "ready")
+	if State.askBatch(s, "ready") then revealSelection(b, cx) end
 end
-ACTIONS["hub-batch-close"] = function(b)
+ACTIONS["hub-batch-close"] = function(b, cx)
 	local s = b.s
-	if s.mode == "board" then State.askBatch(s, "inactive") end
+	if s.mode == "board" and State.askBatch(s, "inactive") then revealSelection(b, cx) end
 end
 
 local function refList(prs: { Model.HubPR }): string
