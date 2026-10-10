@@ -167,6 +167,309 @@ local function botEngine(mode: "ready" | "stop" | "unsandboxed" | "tracked" | "e
 	assert(#calls == #entries, "missing bot pipeline calls")
 end
 
+-- The real src/hub/block.luau and the real Fetch.summarizeFeedback, driven through their own callbacks. Block
+-- reads `tern` from its module environment, so the stub is written there (`getfenv`), not into a global.
+-- Every process, GitHub and engine effect is a recorded call that a scenario settles by hand and in the order
+-- it chooses, so a guard between an effect and its result is proved by the state left when it is removed.
+local REFS = "REFS_JSON"
+
+local function blockPaths()
+	local Block: any = require("../src/hub/block")
+	local Fetch: any = require("../src/fetch")
+	local env: any = getfenv(Block.init)
+	local kept: { [string]: any } = {}
+	for _, name in { "runner", "startAgentFix", "findRepo", "findAgentClone", "pushAgentFix", "returnAgentFix" } do kept[name] = Fetch[name] end
+	local hostTern = env.tern
+	env.tern = {
+		json = {
+			decode = function(text: string): any
+				if text == REFS then return { headRefName = "topic", baseRefName = "main", headRefOid = HEAD } end
+				error("invalid json", 0)
+			end,
+		},
+		timer = function(): any return { cancel = function() end } end,
+		getenv = function(): string? return nil end,
+		kv = { get = function(): any return nil end, set = function() end },
+	}
+	local function restore()
+		env.tern = hostTern
+		for name, value in kept do Fetch[name] = value end
+	end
+
+	-- A live board (fixture=summary, then made a live one) whose every effect lands in `w`.
+	local function world(provide: ((details: any, n: number) -> (any?, any?))?): any
+		local w: any = { calls = {}, started = {}, toasts = {}, renders = 0, reads = 0, stops = 0, pushes = 0, fail = false, throws = false }
+		local cx: any = { cwd = "/reader" }
+		function cx:render()
+			if w.fail then error("window gone", 0) end
+			w.renders += 1
+		end
+		function cx:toast(kind: string, title: string, detail: string?)
+			table.insert(w.toasts, { kind = kind, title = title, detail = detail })
+		end
+		function cx:frame() end
+		function cx:open() end
+		Fetch.runner = function(argv: { string }, opts: any, done: (any) -> ())
+			table.insert(w.calls, { argv = table.clone(argv), opts = opts, done = done })
+			if w.throws then error("spawn failed", 0) end
+		end
+		Fetch.findRepo = function(_dir: string, done: (any, string?) -> ()) done({ root = "/reader" }, nil) end
+		Fetch.findAgentClone = function(_near: any, _dir: string, _slug: string, _ask: any, done: (string?, string?) -> ()) done("/clone", nil) end
+		Fetch.startAgentFix = function(request: any, agent: any, _now: number, changed: (any) -> (), done: (any, string?) -> ()): any
+			table.insert(w.started, { request = request, agent = agent, changed = changed, done = done })
+			return {
+				stop = function() w.stops += 1 end,
+				release = function(finished: (boolean?, string?) -> ()) finished(true, nil) end,
+				begin = function() end,
+				held = function(): any return { path = WORKTREE, id = "lease", holder = "prguide" } end,
+				busy = function(): boolean return false end,
+			}
+		end
+		Fetch.pushAgentFix = function() w.pushes += 1; error("push", 0) end
+		Fetch.returnAgentFix = function() w.pushes += 1; error("return", 0) end
+		local b: any = Block.init(cx, { "fixture=summary" }, nil)
+		b.fixture = nil
+		b.agent = { command = "/omp", path = "/omp", model = "provider/model", effort = "high", models = {}, lenses = {}, lens = "" }
+		b.github = {
+			details = function(pr: any, done: (any?, any?) -> ())
+				w.reads += 1
+				local details: any = nil
+				for _, source in Fixture.details do
+					if source.key == pr.key then details = copy(source) end
+				end
+				if provide then return done(provide(details, w.reads)) end
+				done(details, nil)
+			end,
+		}
+		-- The block's own PRs are the fixture's tables: take copies, as `fresh` does, before a scenario edits one.
+		b.s.prs = copy(Fixture.prs)
+		for _, source in Fixture.details do State.setDetails(b.s, copy(source)) end
+		w.b, w.cx = b, cx
+		return w
+	end
+	local function settle(call: any, out: { status: number?, stdout: string?, stderr: string?, timed_out: boolean? })
+		call.done({ status = out.status or 0, stdout = out.stdout or "", stderr = out.stderr or "", timed_out = out.timed_out or false })
+	end
+	local function press(w: any, name: string, shift: boolean?)
+		Block.key(w.b, { name = name, shift = shift } :: any, w.cx)
+	end
+	local function errorToast(w: any): string
+		assert(#w.toasts == 1 and w.toasts[1].kind == "error", "one error toast")
+		return w.toasts[1].title
+	end
+	local function hasText(text: string, part: string)
+		assert(string.find(text, part, 1, true), text)
+	end
+
+	local d = Fixture.details
+	local function scenarios()
+		-- Summarize: nothing runs until a key is pressed, then one read-only omp call over the feedback.
+		local comments = d.comments.key
+		local w = world()
+		State.select(w.b.s, comments)
+		assert(#w.calls == 0 and w.reads == 0 and w.renders == 0 and #w.started == 0, "selecting a card runs nothing")
+		press(w, "a")
+		assert(w.b.s.busy[comments] == State.SUMMARIZING and w.renders == 1 and w.reads == 1 and #w.calls == 1)
+		local call = w.calls[1]
+		local live = Summary.current(copy(d.comments), State.prOf(w.b.s, comments) :: any)
+		equal(call.argv, Summary.argv("/omp", "provider/model", "high", Summary.prompt(live)))
+		assert(call.opts.cwd == nil and call.opts.stdin == nil, "no worktree or input file")
+		for _, word in call.argv do
+			assert(word ~= "git" and word ~= "treehouse" and word ~= "get" and word ~= "write" and word ~= "push", word)
+		end
+		assert(w.b.s.agents[comments] == nil and w.b.agentFlight == nil and #w.started == 0)
+		press(w, "a")
+		assert(#w.calls == 1 and w.reads == 1 and w.renders == 1, "a press while summarizing starts nothing")
+		settle(call, { stdout = Fixture.transcripts.comments.stdout })
+		assert(w.reads == 2, "the feedback is read again before the answer is installed")
+		assert(w.b.s.busy[comments] == nil and #w.toasts == 0 and w.renders == 2)
+		assert(w.b.s.summaries[comments].verdict == "Reply to @maria-k" and card(w.b.s, comments).detail == "Reply to @maria-k")
+		settle(call, { stdout = Fixture.transcripts.comments.stdout })
+		assert(w.reads == 2 and w.renders == 2 and #w.toasts == 0, "a duplicate callback settles nothing")
+		assert(#w.started == 0 and w.pushes == 0)
+
+		-- ⇧A on three commenters, one a bot, reads comments and no code.
+		local three = world()
+		State.select(three.b.s, d.three.key)
+		press(three, "a", true)
+		assert(#three.calls == 1)
+		local sent = three.calls[1].argv[#three.calls[1].argv]
+		for _, text in { "maria-k", "devon", "review-bot[bot]", "Guard the empty value." } do hasText(sent, text) end
+		for _, text in { "SOURCE_PATH_SENTINEL", "DIFF_HUNK_SENTINEL", "FILE_CONTENT_SENTINEL", "CHECK_CONTENT_SENTINEL" } do
+			assert(not string.find(sent, text, 1, true), text)
+		end
+		settle(three.calls[1], { stdout = Fixture.transcripts.three.stdout })
+		assert(card(three.b.s, d.three.key).detail == "Reply to @maria-k" and #three.toasts == 0 and #three.started == 0)
+
+		-- A comment edited while the model ran changes no metadata the board reads: only the second read sees it.
+		local edited = world(function(details: any, n: number): (any?, any?)
+			if n >= 2 then details.threads[1].body = "Edited after the model started." end
+			return details, nil
+		end)
+		State.select(edited.b.s, comments)
+		press(edited, "a")
+		settle(edited.calls[1], { stdout = Fixture.transcripts.comments.stdout })
+		assert(edited.reads == 2 and edited.b.s.busy[comments] == nil and edited.b.s.summaries[comments] == nil and edited.renders == 2)
+		hasText(errorToast(edited), "Couldn't summarize feedback")
+		assert(edited.b.s.details[comments].threads[1].body == "Edited after the model started.", "the fresh read is kept")
+		press(edited, "a")
+		assert(#edited.calls == 2)
+		hasText(edited.calls[2].argv[#edited.calls[2].argv], "Edited after the model started.")
+
+		-- The second read failing leaves no summary and no busy state.
+		local unread = world(function(details: any, n: number): (any?, any?)
+			if n >= 2 then return nil, { operation = "details", message = "HTTP 502" } end
+			return details, nil
+		end)
+		State.select(unread.b.s, comments)
+		press(unread, "a")
+		settle(unread.calls[1], { stdout = Fixture.transcripts.comments.stdout })
+		assert(unread.reads == 2 and unread.b.s.busy[comments] == nil and unread.b.s.summaries[comments] == nil and unread.renders == 2)
+		hasText(errorToast(unread), "HTTP 502")
+
+		-- The first read failing never reaches the model.
+		local first = world(function(): (any?, any?) return nil, { operation = "details", message = "HTTP 404" } end)
+		State.select(first.b.s, comments)
+		press(first, "a")
+		assert(#first.calls == 0 and first.reads == 1 and first.b.s.busy[comments] == nil and first.renders == 2)
+		hasText(errorToast(first), "HTTP 404")
+
+		-- Timeout and error exit: one toast, busy cleared, one draw, and a late duplicate callback does nothing.
+		for name, reply in { timeout = { status = -1, timed_out = true }, failed = { status = 1, stderr = "omp exited" } } do
+			local ended = world()
+			State.select(ended.b.s, comments)
+			press(ended, "a")
+			settle(ended.calls[1], reply)
+			assert(ended.reads == 1 and ended.b.s.busy[comments] == nil and ended.b.s.summaries[comments] == nil and ended.renders == 2, name)
+			hasText(errorToast(ended), if name == "timeout" then "timed out" else "omp exited")
+			settle(ended.calls[1], reply)
+			settle(ended.calls[1], { stdout = Fixture.transcripts.comments.stdout })
+			assert(#ended.toasts == 1 and ended.renders == 2 and ended.reads == 1 and ended.b.s.summaries[comments] == nil, name)
+		end
+		local thrown = world()
+		State.select(thrown.b.s, comments)
+		thrown.throws = true
+		press(thrown, "a")
+		assert(#thrown.calls == 1 and thrown.b.s.busy[comments] == nil and thrown.renders == 2)
+		hasText(errorToast(thrown), "spawn failed")
+
+		-- A closed block takes no answer: no toast, no draw, no second read, no summary.
+		local closed = world()
+		State.select(closed.b.s, comments)
+		press(closed, "a")
+		closed.b.closed = true
+		settle(closed.calls[1], { stdout = Fixture.transcripts.comments.stdout })
+		assert(closed.reads == 1 and #closed.toasts == 0 and closed.renders == 1 and closed.b.s.summaries[comments] == nil)
+
+		-- Fix bot comments: the feedback is read before the refs, and must still be what the board has when
+		-- the refs arrive. Nothing starts an engine before that, and nothing here can push.
+		local bot = d.bot.key
+		local fix: any = {
+			worktree = WORKTREE, branch = "topic", base = "main", headOid = HEAD, commit = COMMIT,
+			hunks = AgentFix.botHunks(Fixture.botDiff), summary = "Guard the empty value.", usedAgent = true,
+		}
+		local function begin(provide: any?): (any, any)
+			local started = world(provide)
+			State.select(started.b.s, bot)
+			assert(started.b.s.agents[bot] == nil and #started.calls == 0)
+			press(started, "a")
+			assert(started.reads == 1 and #started.calls == 1 and #started.started == 0, "the refs are read before an engine starts")
+			assert(started.b.s.agents[bot].kind == "running")
+			assert(table.concat(started.calls[1].argv, " ") == "gh pr view 1904 --repo acme/web --json headRefName,baseRefName,headRefOid")
+			return started, started.calls[1]
+		end
+		local function refused(wb: any)
+			local agent = wb.b.s.agents[bot]
+			assert(#wb.started == 0 and agent.kind == "failed" and agent.reason == "Feedback changed; refresh the board", agent.kind)
+			assert(wb.b.agentFlight == nil and wb.pushes == 0)
+		end
+
+		local ok, refs = begin()
+		settle(refs, { stdout = REFS })
+		assert(#ok.started == 1)
+		local request = ok.started[1].request
+		assert(request.key == bot and request.branch == "topic" and request.base == "main" and request.headOid == HEAD)
+		assert(request.input.kind == "bot" and string.find(AgentFix.botPrompt(request.input.details, request.input.authors), "Guard the empty value.", 1, true))
+		assert(ok.b.s.agents[bot].kind == "running")
+		local drawn = ok.renders
+		ok.started[1].done(fix, nil)
+		local ready = ok.b.s.agents[bot]
+		assert(ready.kind == "ready" and ok.renders == drawn + 1)
+		ok.started[1].done(fix, nil)
+		ok.started[1].changed({ kind = "ready", fix = fix })
+		assert(ok.b.s.agents[bot] == ready and ok.renders == drawn + 1 and #ok.toasts == 0, "one settle and one draw")
+		assert(ok.pushes == 0 and #ok.calls == 1, "nothing is pushed, and nothing runs beyond the refs read")
+		ok.b.s.now = Fixture.asOf
+		State.project(ok.b.s)
+		assert(card(ok.b.s, bot).column == "in_review", "the card stays In review")
+
+		-- Only the board's signature moved while the refs were out: same prompt, different signature.
+		local signed, signedRefs = begin()
+		local signedPr = State.prOf(signed.b.s, bot) :: any
+		local _, signedPrompt = State.botFeedback(signed.b.s, bot)
+		local signedBefore = State.feedbackSignature(signedPr)
+		signedPr.lastActivityAt = "2026-10-10T12:00:00Z"
+		assert(State.feedbackSignature(signedPr) ~= signedBefore)
+		local _, signedSame = State.botFeedback(signed.b.s, bot)
+		assert(signedSame == signedPrompt, "only the signature moved")
+		settle(signedRefs, { stdout = REFS })
+		refused(signed)
+
+		-- Only the prompt moved: a comment edit changes no metadata, so the signature is the same.
+		local worded, wordedRefs = begin()
+		local wordedPr = State.prOf(worded.b.s, bot) :: any
+		local _, wordedBefore = State.botFeedback(worded.b.s, bot)
+		local wordedSignature = State.feedbackSignature(wordedPr)
+		local rewritten = copy(worded.b.s.details[bot])
+		rewritten.threads[1].body = "Changed while the refs were out."
+		State.setDetails(worded.b.s, rewritten)
+		assert(State.feedbackSignature(wordedPr) == wordedSignature, "only the prompt moved")
+		local _, wordedAfter = State.botFeedback(worded.b.s, bot)
+		assert(wordedAfter ~= wordedBefore)
+		settle(wordedRefs, { stdout = REFS })
+		refused(worded)
+
+		-- A timed-out refs read fails the card once; its late reply and a failed first read settle nothing more.
+		local slow, slowRefs = begin()
+		local slowDrawn = slow.renders
+		settle(slowRefs, { status = -1, timed_out = true })
+		local slowAgent = slow.b.s.agents[bot]
+		assert(#slow.started == 0 and slowAgent.kind == "failed" and slowAgent.reason == "Reading PR refs timed out")
+		assert(slow.renders == slowDrawn + 1 and slow.b.agentFlight == nil)
+		settle(slowRefs, { stdout = REFS })
+		assert(#slow.started == 0 and slow.renders == slowDrawn + 1 and slow.b.s.agents[bot] == slowAgent)
+		local unread2 = world(function(): (any?, any?) return nil, { operation = "details", message = "HTTP 404" } end)
+		State.select(unread2.b.s, bot)
+		press(unread2, "a")
+		assert(#unread2.calls == 0 and #unread2.started == 0 and unread2.b.s.agents[bot].kind == "failed")
+		assert(unread2.b.s.agents[bot].reason == "HTTP 404" and unread2.b.agentFlight == nil)
+
+		-- A render that fails closes the block: the engine is stopped once, and late callbacks do nothing.
+		local gone, goneRefs = begin()
+		settle(goneRefs, { stdout = REFS })
+		assert(#gone.started == 1)
+		gone.fail = true
+		gone.started[1].changed({ kind = "running", run = AgentFix.start(bot, Fixture.asOf) })
+		assert(gone.b.closed and gone.stops == 1 and gone.b.s.agents[bot] == nil, "a failed render stops the engine once")
+		local goneDrawn = gone.renders
+		gone.started[1].done(nil, "stopped")
+		gone.started[1].done(nil, "stopped")
+		gone.started[1].changed({ kind = "stopped" })
+		assert(gone.stops == 1 and gone.renders == goneDrawn and #gone.toasts == 0 and gone.b.s.agents[bot] == nil)
+
+		-- A on each card goes to the action the board shows, through the block's own key handler.
+		for _, case in { { d.comments.key, "card-summarize" }, { d.three.key, "card-agent" }, { d.bot.key, "card-agent" } } do
+			local routed = world()
+			State.select(routed.b.s, case[1])
+			local action = Keys.hubAction(routed.b.s, { name = "a" } :: any)
+			assert(action and action.act == case[2] and action.value == case[1], case[1])
+		end
+	end
+	local ran, err = pcall(scenarios)
+	restore()
+	if not ran then error(err, 0) end
+end
+
 return function()
 	local d = Fixture.details
 	local prompt = Summary.prompt(d.three)
@@ -483,4 +786,5 @@ return function()
 	botEngine("exists")
 	botEngine("failed")
 	botEngine("unclean")
+	blockPaths()
 end
