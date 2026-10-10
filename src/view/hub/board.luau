@@ -209,6 +209,22 @@ local function recentFold(s: State.State, motion: Ui.Motion): Node?
 	return el("div", { class = "gp-hub-fold", key = "recent" }, kids)
 end
 
+-- Next up: one quiet line above the board. Position while walking, count at rest; split view drops the repo and count.
+local function nextUp(s: State.State): Node?
+	local next, card = s.board.nextUp, State.nextCard(s)
+	if not next or not card then return nil end
+	local pr = card.pr
+	local kids: { Node } = { span("gp-hub-up-l", "Next up") }
+	if card.chips[1] then table.insert(kids, Card.chip(card.chips[1])) end
+	table.insert(kids, span("gp-hub-up-t", pr.title))
+	if not s.narrow then
+		local count = if s.walking then next.index .. " of " .. next.total else next.total .. " left"
+		table.insert(kids, span("gp-hub-up-m", (string.match(pr.repo, "[^/]+$") :: string) .. " #" .. pr.number .. " · " .. count))
+	end
+	table.insert(kids, el("span", { class = "gp-btn gp-btn-sm gp-hub-up-go", key = "go", actions = { click = "hub-next" } }, { span("gp-hub-up-gol", "Go"), Ui.keys(".") }))
+	return el("div", { class = "gp-hub-up", key = "up", actions = { click = "hub-next" } }, kids)
+end
+
 local function body(s: State.State, motion: Ui.Motion): Node
 	local kids: { Node } = {}
 	if s.error then
@@ -221,6 +237,8 @@ local function body(s: State.State, motion: Ui.Motion): Node
 		local column = el("div", { class = "gp-hub-col gp-hub-col-act gp-hub-col-info", key = Paths.columnKey("to_review") }, { Link.view(s), note })
 		table.insert(kids, el("div", { class = "gp-hub-board", key = "board" }, { column }))
 	end
+	local up = nextUp(s)
+	if up then table.insert(kids, up) end
 	if s.board.empty and s.loading then
 		message("Loading pull requests…")
 	else

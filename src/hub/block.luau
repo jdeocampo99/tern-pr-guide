@@ -508,6 +508,9 @@ ACTIONS["hub-tab"] = function(b, cx, id)
 		State.switchTab(b.s)
 	end
 end
+ACTIONS["hub-next"] = function(b, cx)
+	if State.walk(b.s) then revealSelected(b, cx) end
+end
 ACTIONS["hub-fold"] = function(b, cx, name)
 	State.toggleFold(b.s, name)
 end

@@ -362,6 +362,11 @@ local function recentMatches(opened: Opened, needle: string): boolean
 	return false
 end
 
+-- Rebuilds the Next up banner's data: the item after the selection while walking, else the first.
+local function refreshNext(s: State)
+	s.board.nextUp = Model.nextUp(s.prs, s.now, if s.walking then s.selected else nil)
+end
+
 -- Recomputes `s.board` from `s.prs` and the inputs. Keeps the selection only while its card is on the board.
 function M.project(s: State)
 	local filter: Model.Filter = { repositories = s.repositories, search = s.search.text }
@@ -447,6 +452,8 @@ function M.project(s: State)
 		empty = total == 0 and #inactive == 0 and #recent == 0,
 	}
 	if s.selected and not present[s.selected] then s.selected = nil end
+	if not s.selected then s.walking = false end
+	refreshNext(s)
 end
 
 function M.mode(s: State): Mode
@@ -499,7 +506,9 @@ function M.select(s: State, key: string?)
 	if s.confirm and (key == nil or s.confirm.keys[1] ~= key) then M.cancelConfirm(s) end
 	if s.mode == "link" and key ~= nil then s.mode = "board" end
 	s.selected = key
+	s.walking = false
 	refreshSelection(s)
+	refreshNext(s)
 end
 
 -- Moves the selection one step: "down" and "up" within a column (down from the last card enters the open
@@ -619,6 +628,41 @@ end
 function M.toggleFold(s: State, name: string)
 	s.folded[name] = not s.folded[name]
 	M.project(s)
+end
+
+-- The card the Next up banner shows: the next item as a board card, whichever tab it sits on.
+function M.nextCard(s: State): Card?
+	local next = s.board.nextUp
+	if not next then return nil end
+	for _, pr in s.prs do
+		if pr.key == next.item.key then return toCard(pr, Model.placement(pr, s.now), s) end
+	end
+	return nil
+end
+
+-- Selects the next item in the queue (`.` and the banner's Go), switching tabs when needed and clearing the
+-- search or repository filter only if it hides the item. Walking then reads "n of N". Returns whether it moved.
+function M.walk(s: State): boolean
+	local next = s.board.nextUp
+	if not next then return false end
+	for _, pr in s.prs do
+		if pr.key == next.item.key then
+			local placement = Model.placement(pr, s.now)
+			s.tab = placement.tab
+			if not Model.visible(pr, { repositories = s.repositories, search = s.search.text }) then
+				s.search = Fields.create("")
+				s.repositories = nil
+			end
+			if placement.column == "inactive" then s.folded.inactive = false end
+			s.mode, s.menu = "board", nil
+			M.project(s)
+			M.select(s, pr.key)
+			s.walking = true
+			refreshNext(s)
+			return true
+		end
+	end
+	return false
 end
 
 function M.openHelp(s: State)

@@ -139,6 +139,7 @@ local function hubBoardKey(s: HubState.State, key: Key): Action?
 	if name == "right" or name == "l" then return act("hub-move", "right") end
 	if name == "down" or name == "j" then return act("hub-move", "down") end
 	if name == "up" or name == "k" then return act("hub-move", "up") end
+	if name == "." or key.text == "." then return act("hub-next") end
 	if label == "T" then return act("hub-tab") end
 	if label == "I" then return act("hub-fold", "inactive") end
 	if label == "R" and s.tab == "review" then return act("hub-fold", "recent") end

@@ -12,6 +12,7 @@ local GROUPS: { Group } = {
 		{ "h j k l", "Move between cards", "← ↑ ↓ →" },
 		{ "⏎", "Open the card" },
 		{ "⇧⏎", "Open with the AI guide started" },
+		{ ".", "Go to the next pull request that needs you" },
 		{ "T", "Switch tab" },
 		{ "I", "Show or hide Inactive" },
 		{ "R", "Show or hide Recently opened" },

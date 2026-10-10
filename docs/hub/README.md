@@ -353,7 +353,7 @@ function M.order(prs: { HubPR }, column: Column, sort: Sort, now: number): { Hub
 export type NextItem = { key: string, tab: Tab, column: Column, reason: Reason? }
 export type NextUp = { item: NextItem, index: number, total: number }
 function M.queue(prs: { HubPR }, now: number): { NextItem }    -- everything that needs the viewer, both tabs, most urgent first
-function M.nextUp(prs: { HubPR }, now: number, after: string?): NextUp?  -- the item after `after`; the first when nil; wraps; nil when none
+function M.nextUp(prs: { HubPR }, now: number, after: string?): NextUp?  -- the item after `after`; the first when nil or no longer queued; wraps; nil when none. `index` is the returned item's place (the banner's "n of N")
 
 -- Flakes. Evidence is fetched by github.luau; the verdict is a rule.
 export type FlakeEvidence = {
@@ -682,6 +682,8 @@ function M.branchUpdated(s: State, key: string)          -- behind = false and c
 function M.linkTarget(s: State): LinkTarget              -- "empty" | "invalid" | "new" | "board": what the add field's text names (github.com links and owner/repo#123 only)
 function M.openLink(s: State) / M.closeLink(s: State, clear: boolean)   -- N: Review requests with mode "link"
 function M.show(s: State, key: string): boolean          -- selects a PR, clearing a search or filter that hides it
+function M.walk(s: State): boolean                       -- `.` and the banner: selects BoardData.nextUp's item, switching tab, clearing a search or filter only if it hides it; sets `walking`. Any other selection clears `walking`
+function M.nextCard(s: State): Card?                      -- the banner's item as a Card (its chip), whichever tab it sits on
 function M.withAdded(added, ref): (Added?, string?)      -- hub.added with `ref`, or why not (the 50 cap)
 function M.canonicalAdded(added, prs): (Added, boolean)  -- keys an added PR by the repo's own spelling
 function M.unadd(s: State, key: string)                  -- X

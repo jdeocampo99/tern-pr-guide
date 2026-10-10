@@ -199,6 +199,7 @@ Anywhere in Tern: `⌥⌘R` opens the PR hub and `⌥⇧⌘R` opens it with AI g
 | Move | | The selected card | | The board | |
 |---|---|---|---|---|---|
 | `h` `j` `k` `l` / arrows | move between cards | `⏎` / double-click | open | `/` | search |
+| `.` | next pull request that needs you, across both tabs | | | | |
 | `T` | switch tab | `A` | fix with agent, or summarize | `F` | filter by repository |
 | `I` | show or hide Inactive | `⇧⏎` | open with the AI guide started |
 | `R` | show or hide Recently opened (Review requests) | `⇧A` | summarize feedback | `S` | sort |
