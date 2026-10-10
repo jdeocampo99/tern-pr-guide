@@ -88,10 +88,17 @@ local function revealSelected(b: Block, cx: BlockCx)
 	if recent then frameLater(cx, { { "reveal", Paths.recentRow(State.recentKey(recent)), "nearest" } }) end
 end
 
--- Scrolls the selection bar, or the confirm that replaced it, into view: it can sit far below the cursor.
+-- Scrolls the selection bar's buttons, or the confirm's (its last row), to the middle of the view so the sticky
+-- hint bar can't cover them. It can sit far below the cursor, so the reveal runs again once the render that opened
+-- the Inactive fold or stacked the columns has surely landed; a repeat is harmless.
 local function revealSelection(b: Block, cx: BlockCx)
 	local selection = State.selection(b.s)
-	if selection then frameLater(cx, { { "reveal", Paths.selection(selection.group), "nearest" } }) end
+	if not selection then return end
+	local ops = { { "reveal", Paths.selection(selection.group) .. ".acts", "center" } }
+	frameLater(cx, ops)
+	tern.timer(80, function()
+		if not b.closed then pcall(function() cx:frame(ops) end) end
+	end)
 end
 
 -- Reads `name=value` block arguments.
