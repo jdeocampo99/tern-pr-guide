@@ -44,7 +44,8 @@ type AgentFlight = {
 -- made on, and the edit itself, which can be applied again to another board. `at` is a time (seconds) by which that head
 -- had been seen: a snapshot whose request began after it is the later word on the head (see `replayEdits`). `applied` is
 -- whether the edit is on the board now, and `present` whether its PR is still on the board after it (a dropped PR is not),
--- which is what a write must hold to represent the edit (see `persist`).
+-- which is what a write must hold to represent the edit (see `persist`). An edit made while its PR was absent from the board
+-- (a capped cache omitted it) is kept unapplied until the PR returns on that head. Replays stay in the order the edits were made.
 type Replay = { key: string, head: string, at: number, edit: () -> (), applied: boolean, present: boolean }
 
 -- The hub block's own state.
@@ -325,9 +326,20 @@ local function persist(b: Block): string?
 		b.held = id
 		-- A write represents an edit only when it is on the board and the stored PRs agree with the board about its PR (a PR
 		-- the size cap evicted, or one the board lacks, is not stored with the edit's effect): the rest stay for a later replay.
-		local kept = {}
-		for _, replay in b.replays do
-			if not (replay.applied and replay.present == (stored[replay.key] == true)) then table.insert(kept, replay) end
+		-- An edit the write holds that took its PR off the board (a close, a merge, a removal) was made after the older edits of
+		-- that PR and supersedes them, so those go too: the PR reopening on the same head must not bring a pending merge back.
+		-- A cap that omits a PR retires nothing: the board still holds that PR, so no held edit took it off.
+		local held: { [number]: boolean } = {}
+		local removedAt: { [string]: number } = {}
+		for i, replay in b.replays do
+			if replay.applied and replay.present == (stored[replay.key] == true) then
+				held[i] = true
+				if not replay.present then removedAt[replay.key] = i end
+			end
+		end
+		local kept: { Replay } = {}
+		for i, replay in b.replays do
+			if not held[i] and i > (removedAt[replay.key] or 0) then table.insert(kept, replay) end
 		end
 		b.replays = kept
 		b.seen[id] = true
@@ -908,13 +920,13 @@ local function announce(b: Block, cx: BlockCx, old: Sync.Cache?, fresh: { Model.
 end
 
 -- Applies the local edits no write has stored to the board's PRs again, each only while its PR is still there on the head
--- it was made on, and records which of them are on the board now (`applied`, `present`). `since` is for a complete adopted
--- board: the time its PR data was requested from GitHub. A PR on it at another head means the head advanced for good, so
--- that edit is dropped, and a refresh answer from before the advance cannot make it eligible again, but only when the
--- snapshot is provably the later one: its request began after the edit's head was seen. A snapshot stamped later can still
--- be a delayed request that carries an older head, so a stamp alone proves nothing, and a board with no `since` drops
--- nothing. An edit whose PR is absent or on another head, unproven, waits. A refresh answer only skips the edit, since its
--- snapshot may be the older one. Returns whether one applied.
+-- it was made on, and records which of them are on the board now (`applied`, `present`). `since` is for a complete board
+-- (an adopted cache, or this window's own refresh answer): the time its PR data was requested from GitHub. A PR on it at
+-- another head means the head advanced for good, so that edit is dropped, and a refresh answer from before the advance cannot
+-- make it eligible again, but only when the snapshot is provably the later one: its request began after the edit's head was
+-- seen. A snapshot stamped later can still be a delayed request that carries an older head, so a stamp alone proves nothing,
+-- and a board with no `since` drops nothing. An edit whose PR is absent or on another head, unproven, waits. Returns whether
+-- one applied.
 local function replayEdits(b: Block, since: number?): boolean
 	local replayed = false
 	local kept = {}
@@ -940,9 +952,10 @@ local function requestedAt(cache: Sync.Cache): number?
 	return if type(at) == "number" then at else nil
 end
 
--- Installs `shared`, a cache another window stored that `sharedCache` took, as this block's board; `adoptShared` says when it
--- may go on and why.
-local function installShared(b: Block, cx: BlockCx, shared: Sync.Cache, hold: boolean?): boolean
+-- Lays `shared`, a complete cache another window stored, onto this block as its board: its ownership joins, its PRs (flagged
+-- by every flag this block holds) become the board, and the local edits no write has stored are applied to it again. It reads
+-- no store and draws nothing. Returns whether a flag moved on a PR and whether an edit applied.
+local function layShared(b: Block, cx: BlockCx, shared: Sync.Cache): (boolean, boolean)
 	local now = os.time()
 	joinOwnership(b, shared)
 	local prs = flagged(b.watched, shared.prs)
@@ -955,7 +968,66 @@ local function installShared(b: Block, cx: BlockCx, shared: Sync.Cache, hold: bo
 	b.cache = shared
 	b.held = storedId(shared)
 	State.replace(b.s, prs, now, shared.refreshedAt)
-	local replayed = replayEdits(b, requestedAt(shared))
+	return moved, replayEdits(b, requestedAt(shared))
+end
+
+-- The last read before a write of the board's snapshot. A complete cache another window stored since this block last read the
+-- store (newer than the board's, or another at its stamp) is the board's newer base: it is laid on whole, `reapply` puts the
+-- caller's own results back on it (they are applied only where still valid), and the retained edits apply to it again, so the
+-- write never lays this block's older snapshot over it. One read, no retry, and nothing in here reads the store again or draws,
+-- so the caller writes at once. `answered` is a successful read of Tandem that has just decided ownership: the cache this block
+-- already holds joins nothing, so it cannot restore a flag the answer cleared. Returns whether the store could be read (when
+-- it could not, "no cache" is a guess and nothing may be written) and whether a cache was laid on or a flag moved on a PR, which
+-- a fix still being set up must be reconciled with (`persistWhole` does, after the write).
+local function reconcileStore(b: Block, cx: BlockCx, reapply: (() -> ())?, answered: boolean?): (boolean, boolean)
+	local shared, readable = sharedCache(b, false)
+	if not shared and not readable then return false, false end
+	local changed = false
+	if shared then
+		local mine = cachedAt(b)
+		if mine == nil or (Model.epoch(shared.refreshedAt) :: number) > mine or storedId(shared) ~= (b.held or "") then
+			local moved, replayed = layShared(b, cx, shared)
+			if reapply then reapply() end
+			if moved or replayed then
+				recount(b)
+				b.unsaved = true
+			end
+			changed = true
+		elseif not answered then
+			joinOwnership(b, shared)
+		end
+	end
+	if flagPrs(b) then
+		State.project(b.s)
+		recount(b)
+		changed = true
+	end
+	return true, changed
+end
+
+-- Every write of a board snapshot that follows a local change goes through here: `reconcileStore`, then `persist`, with
+-- nothing between the two that reads the store or draws. The caller has already joined ownership and reconciled the flight, so
+-- a redraw that closes the block comes before the write; ownership only the last read brought is reconciled after the write.
+-- Returns whether the write was safe to make (false: the store could not be read, nothing was written, and the caller decides
+-- what stands) and why the write failed, if it did. A refresh answer is not written here: its snapshot is stamped newer than
+-- any cache stored before it, and `Sync.merge` carries what only those hold.
+local function persistWhole(b: Block, cx: BlockCx, reapply: (() -> ())?, answered: boolean?): (boolean, string?)
+	if b.closed then return false, nil end
+	if not b.cache then return true, nil end
+	local readable, moved = reconcileStore(b, cx, reapply, answered)
+	if not readable then return false, nil end
+	local board = b.cache :: Sync.Cache
+	board.prs = b.s.prs
+	local why = persist(b)
+	local flight = b.agentFlight
+	if moved and flight then carryOn(b, cx, flight, answered) end
+	return true, why
+end
+
+-- Installs `shared`, a cache another window stored that `sharedCache` took, as this block's board; `adoptShared` says when it
+-- may go on and why.
+local function installShared(b: Block, cx: BlockCx, shared: Sync.Cache, hold: boolean?): boolean
+	local moved, replayed = layShared(b, cx, shared)
 	reconcileFlight(b, cx)
 	-- The redraw may have closed the block: nothing is stored or counted after that.
 	if b.closed then return false end
@@ -963,9 +1035,12 @@ local function installShared(b: Block, cx: BlockCx, shared: Sync.Cache, hold: bo
 		recount(b)
 		if hold then
 			b.unsaved = true
-		elseif persist(b) then
-			b.unsaved = true
-			return false
+		else
+			local safe, why = persistWhole(b, cx)
+			if why or not safe then
+				b.unsaved = true
+				return false
+			end
 		end
 	end
 	return true
@@ -1302,7 +1377,7 @@ local function loadTandem(b: Block, cx: BlockCx)
 		for _, pr in b.s.prs do pr.tandem = flags[pr.key] == true end
 		if not changed then
 			-- Nothing moved, so this answer's save is the one that stores what adoption restored (a failed read stores nothing).
-			if watched and b.unsaved then persist(b) end
+			if watched and b.unsaved then persistWhole(b, cx, nil, true) end
 			if adopted then draw(b, cx) end
 			return
 		end
@@ -1312,8 +1387,12 @@ local function loadTandem(b: Block, cx: BlockCx)
 		if b.closed then return end
 		State.project(b.s)
 		recount(b)
-		local why = persist(b)
-		if why then
+		-- The write reads the store once more first: a complete cache that landed since is the base it writes onto.
+		local safe, why = persistWhole(b, cx, nil, true)
+		if not safe then
+			-- The store could not be read, so nothing is written; the next successful answer stores the board.
+			b.unsaved = true
+		elseif why then
 			-- Memory state stands. Only this successful read may clear ownership, so the cache it superseded (the one stored
 			-- when the answer arrived) must not bring a cleared flag back at the same stamp.
 			if cleared and superseded then b.retired[superseded] = true end
@@ -1377,7 +1456,7 @@ startRefresh = function(b: Block, cx: BlockCx)
 			State.replace(b.s, cache.prs, now, cache.refreshedAt)
 			-- This answer may predate a local edit no write has stored (a close whose save failed): it lays that PR back, so the
 			-- still-valid retained edits apply again before the counts and the write, which then store their effects.
-			if replayEdits(b) then recount(b) end
+			if replayEdits(b, requested) then recount(b) end
 			reconcileFlight(b, cx)
 			-- The redraw may have closed the block: nothing is stored, read, queued or armed after that.
 			if b.closed then return end
@@ -1434,16 +1513,20 @@ onChecks = function(b, cx)
 			-- first (its stamp stays), and a PR whose head it moved is skipped below like any other moved head.
 			local safe = adoptShared(b, cx)
 			if b.closed then return end
-			local changed = false
-			for _, pr in b.s.prs do
-				local result = update.byId[pr.id]
-				-- A moved head means the next full refresh knows better.
-				if result and result.headOid == pr.headOid then
-					pr.checks = result.checks
-					changed = true
+			-- The results land on whichever board is written: they are applied again to a cache that lands before the write.
+			local function land(): boolean
+				local changed = false
+				for _, pr in b.s.prs do
+					local result = update.byId[pr.id]
+					-- A moved head means the next full refresh knows better.
+					if result and result.headOid == pr.headOid then
+						pr.checks = result.checks
+						changed = true
+					end
 				end
+				return changed
 			end
-			if changed then
+			if land() then
 				b.s.now = os.time()
 				-- A check result is no word on ownership: another window's flags at this stamp or later stay.
 				joinShared(b)
@@ -1451,8 +1534,16 @@ onChecks = function(b, cx)
 				-- The redraw may have closed the block: nothing is projected, stored or read after that.
 				if b.closed then return end
 				State.project(b.s)
-				-- Not stored when adopting a newer cache failed to save: the store may hold one this board has not seen.
-				local why = if safe then persist(b) else nil
+				-- Not stored when adopting a newer cache failed to save: the store may hold one this board has not seen. The write
+				-- reads the store once more first: a cache that landed since is the base, with these results applied to it again.
+				local why: string? = nil
+				if safe then
+					local _, reason = persistWhole(b, cx, function()
+						land()
+						State.project(b.s)
+					end)
+					why = reason
+				end
 				if why then b.s.error = { operation = KV_CACHE, message = "the cache couldn't be saved: " .. why } end
 				loadFlakes(b, cx)
 			end
@@ -1783,7 +1874,14 @@ local function keepCache(b: Block, cx: BlockCx, edit: (() -> ())?, key: string?,
 	if b.closed then return end
 	if edit then
 		local pr = if key then State.prOf(b.s, key) else nil
-		if not (pr and head and pr.headOid ~= head) then
+		local tracked = key ~= nil and head ~= nil and b.cache ~= nil and not b.fixture
+		if pr == nil and tracked then
+			-- The PR is absent (a capped cache omits it): the edit has nothing to land on, and is not applied to the absence. It
+			-- waits, unapplied, for the PR to return on this head. Its time is now, which no snapshot requested before it can pass.
+			table.insert(b.replays, {
+				key = key :: string, head = head :: string, at = os.time(), edit = edit, applied = false, present = true,
+			})
+		elseif not (pr and head and pr.headOid ~= head) then
 			edit()
 			if pr and head and b.cache and not b.fixture then
 				table.insert(b.replays, {
@@ -1793,35 +1891,30 @@ local function keepCache(b: Block, cx: BlockCx, edit: (() -> ())?, key: string?,
 			end
 		end
 	end
-	if b.cache then
-		-- The last read before the write. A cache another window stored since the first adoption (a pending merge, a flag) is
-		-- the board's newer base, so it is installed whole and the retained edits, this one included, are applied to it again:
-		-- the write then never lays this block's older snapshot over it. One read, no retry: nothing yields before the write.
-		-- An unreadable store writes nothing, as at the first read. A cache at this block's own stamp that this block already
-		-- holds only joins its ownership.
-		if b.fixture then
-			joinShared(b)
-		else
-			local shared, readable = sharedCache(b, false)
-			if shared then
-				local mine = cachedAt(b)
-				if mine == nil or (Model.epoch(shared.refreshedAt) :: number) > mine or storedId(shared) ~= (b.held or "") then
-					safe = installShared(b, cx, shared, true) and safe
-				else
-					joinOwnership(b, shared)
-				end
-			elseif not readable then
-				safe = false
-			end
-		end
+	if not b.cache then return end
+	if b.fixture then
+		joinShared(b)
+		applyOwnership(b, cx)
 		if b.closed then return end
+		b.cache.prs = b.s.prs
+		persist(b)
+		return
+	end
+	-- The write reads the store once more first (`persistWhole`): a cache another window stored since the first adoption (a
+	-- pending merge, a flag) is the board's newer base, so it is installed whole and the retained edits, this one included, are
+	-- applied to it again. Nothing reads the store or draws between that read and the write. An unreadable store writes nothing,
+	-- as at the first read, and so does a first adoption that failed to save: the edit stays on the board, but the store may
+	-- hold a cache newer than this board, and the write would lay this one over it. The last read still installs that cache.
+	if safe then
 		applyOwnership(b, cx)
 		-- So does applying ownership: a closed block writes nothing.
 		if b.closed then return end
-		b.cache.prs = b.s.prs
-		-- The edit stays on the board, but is not stored when adopting a newer cache failed to save: the store may now hold a
-		-- cache newer than this board, and the write would lay this one over it.
-		if safe then persist(b) end
+		persistWhole(b, cx)
+	else
+		reconcileStore(b, cx)
+		local board = b.cache
+		if board then board.prs = b.s.prs end
+		applyOwnership(b, cx)
 	end
 end
 

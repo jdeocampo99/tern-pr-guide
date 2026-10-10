@@ -3813,6 +3813,315 @@ local function replayedEdits()
 		assert(own and own.pending and State.prOf(b.s, KEY).pending ~= nil, "this window's edit is on it")
 		assert(#b.replays == 0 and not b.unsaved and b.cache.prs == b.s.prs, "the write holds it all")
 	end)
+
+	local function entry(cache: any, key: string): any
+		for _, cached in cache.prs do
+			if cached.key == key then return cached end
+		end
+		return nil
+	end
+	local function failOnce(w: any): () -> boolean
+		local failed = false
+		w.failWhen = function(key: string): boolean
+			if key ~= "hub.cache" or failed then return false end
+			failed = true
+			return true
+		end
+		return function(): boolean return failed end
+	end
+
+	-- A close or merge whose save failed keeps its edit on H1. A refresh this window requested after the edit's head was seen
+	-- brings KEY on H2: that answer is the later word on the head, so it drops the H1 edit as it installs. A delayed cache that
+	-- another window stores later with KEY back on H1 cannot apply or store the dropped edit.
+	for _, act in { "auto", "close" } do
+		withWorld(function(w, Fetch, Block)
+			local what = act .. " retained on H1, local refresh on H2, then a delayed H1 cache"
+			local b = board(w, Fetch, Block)
+			local run = if act == "auto" then auto(w, Block, b) else closeBatch(w, Block, b)
+			local failed = failOnce(w)
+			run.done(nil, nil)
+			w.failWhen = nil
+			assert(failed() and #b.replays == 1 and b.replays[1].at == Cases.asOf, what .. ": the save failed and the edit is retained")
+			local h1 = b.replays[1].head
+
+			local answer: any = nil
+			b.github = quietGithub(function(_, done) answer = done end)
+			Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+			assert(answer ~= nil and w.now > Cases.asOf, what .. ": the refresh is out, requested after the edit's snapshot")
+			local fresh = freshAnswer()
+			for _, cached in fresh.prs do
+				if cached.key == KEY then cached.headOid = "h2" end
+			end
+			answer(fresh, nil)
+			assert(State.prOf(b.s, KEY).headOid == "h2" and State.prOf(b.s, KEY).pending == nil, what .. ": H2 is on the board without the edit")
+			assert(#b.replays == 0, what .. ": the H1 edit is dropped as the answer installs")
+			assert(stored(w.kv["hub.cache"]).headOid == "h2" and stored(w.kv["hub.cache"]).pending == nil, what .. ": and the store has H2 alone")
+
+			local delayed = storedCache({ WEB, API114 }, w.now + 60)
+			delayed.writeId = "other-window#9"
+			delayed.sinceAt = Cases.asOf - 10
+			w.kv["hub.cache"] = delayed
+			Block.event(b, { ev = "action", act = "hub-focused", value = "" } :: any, w.cx)
+			assert(b.cache.refreshedAt == delayed.refreshedAt and State.prOf(b.s, KEY).headOid == h1, what .. ": the delayed cache is adopted")
+			assert(#b.replays == 0, what .. ": nothing is replayed")
+			assert(holds(b, KEY) and State.prOf(b.s, KEY).pending == nil, what .. ": the dropped edit is not applied to H1")
+			assert(same(w.kv["hub.cache"], delayed), what .. ": and nothing is stored")
+		end)
+	end
+
+	-- A merge command began on H1, and a capped cache that omits KEY was adopted before it answered. Its success has no PR to
+	-- land on: the edit is kept unapplied, not applied to the absence, and stored boards hold no trace of it. When a refresh
+	-- brings KEY back on H1 the exact edit, with the timestamp it was made with, applies and is stored.
+	withWorld(function(w, Fetch, Block)
+		local b = board(w, Fetch, Block)
+		local run = auto(w, Block, b)
+		local t0 = w.now
+		local h1 = State.prOf(b.s, KEY).headOid
+		local capped = theirs(w, nil)
+		local without: { any } = {}
+		for _, cached in capped.prs do
+			if cached.key ~= KEY then table.insert(without, cached) end
+		end
+		capped.prs = without
+		Block.event(b, { ev = "action", act = "hub-focused", value = "" } :: any, w.cx)
+		assert(not holds(b, KEY) and b.cache.refreshedAt == capped.refreshedAt, "the capped cache is adopted")
+
+		run.done(nil, nil)
+		assert(#b.replays == 1 and not b.replays[1].applied and b.replays[1].key == KEY and b.replays[1].head == h1, "the edit is kept unapplied on H1")
+		assert(not holds(b, KEY) and stored(w.kv["hub.cache"]) == nil, "nothing was applied to the absence, and the store lacks KEY")
+		assert(b.replays[1].at == w.now, "its time is the callback's: no earlier snapshot can drop it")
+
+		w.now += 120
+		local answer: any = nil
+		b.github = quietGithub(function(_, done) answer = done end)
+		Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+		assert(answer ~= nil, "the refresh is out")
+		answer(freshAnswer(), nil)
+		assert(holds(b, KEY) and State.prOf(b.s, KEY).headOid == h1, "KEY returns on H1")
+		assert(State.prOf(b.s, KEY).pending.at == iso(t0) and State.prOf(b.s, KEY).pending.method == "comment", "with the exact edit the command made")
+		assert(stored(w.kv["hub.cache"]).pending.at == iso(t0) and #b.replays == 0, "which the write stores and clears")
+	end)
+
+	-- The same absent PR returns on another head: that refresh was requested after the edit was made, so it is the later word
+	-- on the head, and the edit is dropped rather than applied to H2.
+	withWorld(function(w, Fetch, Block)
+		local b = board(w, Fetch, Block)
+		local run = auto(w, Block, b)
+		local capped = theirs(w, nil)
+		local without: { any } = {}
+		for _, cached in capped.prs do
+			if cached.key ~= KEY then table.insert(without, cached) end
+		end
+		capped.prs = without
+		Block.event(b, { ev = "action", act = "hub-focused", value = "" } :: any, w.cx)
+		run.done(nil, nil)
+		assert(#b.replays == 1 and not b.replays[1].applied, "the edit is kept unapplied")
+
+		w.now += 120
+		local answer: any = nil
+		b.github = quietGithub(function(_, done) answer = done end)
+		Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+		local fresh = freshAnswer()
+		for _, cached in fresh.prs do
+			if cached.key == KEY then cached.headOid = "h2" end
+		end
+		answer(fresh, nil)
+		assert(State.prOf(b.s, KEY).headOid == "h2" and State.prOf(b.s, KEY).pending == nil and #b.replays == 0, "H2 comes back without the H1 edit")
+	end)
+
+	-- A complete cache (T3) with a pending merge on KEY and a newer head on WEB lands after the first adoption and before the
+	-- last read of the write. Each path that writes a board snapshot reads the store last, installs T3 whole, applies its own
+	-- valid result to it again, and writes with nothing in between that reads the store or draws. T3's data, pending merge and
+	-- head survive in the one write, and T3's stamp is never lowered.
+	local function t3Cache(): any
+		local cache = storedCache({ WEB, API114 }, Cases.asOf + 60)
+		cache.writeId = "other-window#1"
+		cache.sinceAt = Cases.asOf + 30
+		for _, cached in cache.prs do
+			if cached.key == KEY then cached.pending = { method = "comment", at = iso(Cases.asOf + 50) } end
+			if cached.key == WEB then cached.headOid = "t3-head" end
+		end
+		return cache
+	end
+	local function whole(b: any, there: any, events: { string }, what: string)
+		assert(there.writeId ~= "other-window#1" and there.writeId == b.held, what .. ": it is this window's own write")
+		assert(Model.epoch(there.refreshedAt) == Cases.asOf + 60, what .. ": T3's stamp stands")
+		assert(entry(there, KEY).pending ~= nil and entry(there, KEY).pending.at == iso(Cases.asOf + 50), what .. ": T3's pending merge survives")
+		assert(entry(there, WEB).headOid == "t3-head" and State.prOf(b.s, WEB).headOid == "t3-head", what .. ": and its newer head")
+		assert(State.prOf(b.s, KEY).pending ~= nil and b.cache.refreshedAt == there.refreshedAt and not b.unsaved, what .. ": the board is T3's")
+		local last = 0
+		for i, event in events do
+			if event == "set" then last = i end
+		end
+		assert(last > 1 and events[last - 1] == "get", what .. ": the write follows the last read at once")
+	end
+
+	-- A checks result: T3 lands before the first or the last of the reads that follow the results.
+	for _, landAt in { 1, 2 } do
+		withWorld(function(w, Fetch, Block)
+			local what = "checks, T3 before read " .. landAt
+			local b = board(w, Fetch, Block)
+			local settle: any = nil
+			b.github = setmetatable({ checks = function(_, done) settle = done end }, { __index = function(): any return function() end end })
+			b.flights.refresh, b.flights.probe = true, true
+			w.timers = {}
+			Block.event(b, { ev = "action", act = "hub-focused", value = "" } :: any, w.cx)
+			runTimers(w)
+			assert(settle ~= nil and b.flights.checks, "the checks request is out")
+			local api, web = State.prOf(b.s, API114), State.prOf(b.s, WEB)
+			assert(api.checks.state == "pending", "API114's checks are running")
+			local PASS = { state = "passing", passing = 77, failing = 0, pending = 0 }
+			local events: { string } = {}
+			local landed, after = false, 0
+			w.onGet = function()
+				table.insert(events, "get")
+				if State.prOf(b.s, API114).checks.state == "passing" then
+					after += 1
+					if after == landAt then
+						landed = true
+						w.kv["hub.cache"] = t3Cache()
+					end
+				end
+			end
+			w.failWhen = function(key: string): boolean
+				if key == "hub.cache" then table.insert(events, "set") end
+				return false
+			end
+			local sets = w.cacheSets or 0
+			settle({ byId = {
+				[api.id] = { headOid = api.headOid, checks = PASS },
+				[web.id] = { headOid = web.headOid, checks = PASS },
+			} }, nil)
+			w.onGet, w.failWhen = nil, nil
+			assert(landed and (w.cacheSets or 0) == sets + 1, what .. ": T3 landed after the results, and one write followed")
+			local there = w.kv["hub.cache"]
+			whole(b, there, events, what)
+			assert(entry(there, API114).checks.passing == 77 and State.prOf(b.s, API114).checks.passing == 77, what .. ": the valid result is applied to T3")
+			assert(entry(there, WEB).checks.passing ~= 77 and State.prOf(b.s, WEB).checks.passing ~= 77, what .. ": the result for WEB's old head is not")
+		end)
+	end
+
+	-- A successful read of Tandem that adds a flag: T3 lands before the answer's join, or before its last read.
+	for _, landAt in { 3, 4 } do
+		withWorld(function(w, Fetch, Block)
+			local what = "watch answer, T3 before read " .. landAt
+			local b = board(w, Fetch, Block)
+			Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+			local answer = reads(w)[#reads(w)]
+			local events: { string } = {}
+			local gets, landed = 0, false
+			w.onGet = function()
+				table.insert(events, "get")
+				gets += 1
+				-- The answer reads the store to name the superseded cache, to adopt, to join, and last before the write.
+				if gets == landAt and not landed then
+					landed = true
+					w.kv["hub.cache"] = t3Cache()
+				end
+			end
+			w.failWhen = function(key: string): boolean
+				if key == "hub.cache" then table.insert(events, "set") end
+				return false
+			end
+			local sets = w.cacheSets or 0
+			answer.done(out("CLAIM"))
+			w.onGet, w.failWhen = nil, nil
+			assert(landed and (w.cacheSets or 0) == sets + 1, what .. ": T3 landed during the answer, and one write followed")
+			local there = w.kv["hub.cache"]
+			whole(b, there, events, what)
+			assert(entry(there, TARGET).tandem == true and State.prOf(b.s, TARGET).tandem == true and b.watched[TARGET] == true, what .. ": the answer's own flag is on T3")
+		end)
+	end
+
+	-- An action while a fix is still being set up: the flight's reconciliation reads the store too, so it comes before the last
+	-- read. Every read after the edit finds another, newer cache; the write is built on the last one read before it.
+	withWorld(function(w, Fetch, Block)
+		local b = board(w, Fetch, Block)
+		Block.event(b, { ev = "action", act = "card-agent", value = TARGET } :: any, w.cx)
+		assert(b.agentFlight ~= nil and #w.clones == 1, "a fix is being set up")
+		local run = auto(w, Block, b)
+		local t0 = w.now
+		local events: { string } = {}
+		local landed, atWrite, written = 0, -1, nil
+		w.onGet = function()
+			table.insert(events, "get")
+			local mine = State.prOf(b.s, KEY)
+			if mine and mine.pending ~= nil and landed < 4 then
+				landed += 1
+				local cache = storedCache({ WEB, API114 }, Cases.asOf + 60 + landed)
+				cache.writeId = "other-window#" .. landed
+				for _, cached in cache.prs do
+					if cached.key == API114 then cached.title = "Retitled by T" .. landed end
+				end
+				w.kv["hub.cache"] = cache
+			end
+		end
+		w.failWhen = function(key: string, value: any): boolean
+			if key == "hub.cache" then
+				table.insert(events, "set")
+				atWrite, written = landed, copy(value)
+			end
+			return false
+		end
+		run.done(nil, nil)
+		w.onGet, w.failWhen = nil, nil
+		assert(atWrite >= 1 and written ~= nil, "caches landed before the write")
+		assert(entry(written, API114).title == "Retitled by T" .. atWrite, "the write is built on the last cache read, not an earlier one")
+		assert(entry(written, KEY).pending ~= nil and entry(written, KEY).pending.at == iso(t0), "with this action's edit on it")
+		local last = 0
+		for i, event in events do
+			if event == "set" then last = i end
+		end
+		assert(last > 1 and events[last - 1] == "get", "the write follows the last read at once")
+		assert(b.agentFlight ~= nil, "the fix is still being set up: nobody owns TARGET")
+	end)
+
+	-- A pending merge retained after a failed save, and then a close of the same PR that succeeds and is stored. The close was made
+	-- after the merge and supersedes it, so the stored removal retires the older edit: the PR reopening on the same head has no
+	-- pending merge. When a capped cache only omits the PR, nothing took it off the board, and the older edit is kept.
+	for _, variant in { "a close", "a capped cache" } do
+		withWorld(function(w, Fetch, Block)
+			local b = board(w, Fetch, Block)
+			local run = auto(w, Block, b)
+			local t0 = w.now
+			local failed = failOnce(w)
+			run.done(nil, nil)
+			w.failWhen = nil
+			assert(failed() and #b.replays == 1 and b.replays[1].applied and State.prOf(b.s, KEY).pending ~= nil, variant .. ": the pending merge is retained")
+
+			if variant == "a close" then
+				closeBatch(w, Block, b).done(nil, nil)
+				assert(not holds(b, KEY) and stored(w.kv["hub.cache"]) == nil, variant .. ": the close is stored")
+				assert(#b.replays == 0, variant .. ": the stored removal retired the older edit as well as itself")
+			else
+				local capped = theirs(w, nil)
+				local without: { any } = {}
+				for _, cached in capped.prs do
+					if cached.key ~= KEY then table.insert(without, cached) end
+				end
+				capped.prs = without
+				Block.event(b, { ev = "action", act = "hub-focused", value = "" } :: any, w.cx)
+				Block.event(b, { ev = "action", act = "card-handoff", value = WEB } :: any, w.cx)
+				handoffs(w)[1].done(out("DONE"))
+				assert(not holds(b, KEY) and stored(w.kv["hub.cache"]) == nil and w.kv["hub.cache"].writeId == b.held, variant .. ": a write without the PR is stored")
+				assert(#b.replays == 1, variant .. ": the cap alone retires nothing")
+			end
+
+			w.now += 120
+			local answer: any = nil
+			b.github = quietGithub(function(_, done) answer = done end)
+			Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+			assert(answer ~= nil, variant .. ": the refresh is out")
+			answer(freshAnswer(), nil)
+			assert(holds(b, KEY), variant .. ": the PR returns on the same head")
+			if variant == "a close" then
+				assert(State.prOf(b.s, KEY).pending == nil and stored(w.kv["hub.cache"]).pending == nil, variant .. ": without the obsolete pending merge")
+			else
+				assert(State.prOf(b.s, KEY).pending.at == iso(t0) and stored(w.kv["hub.cache"]).pending.at == iso(t0), variant .. ": with the pending merge it still has")
+			end
+			assert(#b.replays == 0, variant .. ": and nothing is left to replay")
+		end)
+	end
 end
 
 return function()
