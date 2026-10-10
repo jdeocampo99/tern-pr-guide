@@ -1378,6 +1378,99 @@ local function sharedStore()
 		reads(w)[3].done(out("OLDER"))
 		assert(a.watched["acme/web#101"] == true and card(a.s, "acme/web#101").pr.tandem and not a.flights.tandem)
 	end)
+
+	-- Joined ownership guards the card before the read that is read again, or the refresh, answers. A fix still being
+	-- set up for the PR ends as stopped, the card drops Fix with agent and the merges, and the older cache is not stored.
+	withWorld(function(w, Fetch, Block)
+		w.shared = true
+		w.kv["hub.cache"] = storedCache({ WEB, API114 }, Cases.asOf)
+		local b = agentBoard(w, Fetch, Block)
+		w.holdRoot = true
+		Block.event(b, { ev = "action", act = "card-agent", value = TARGET } :: any, w.cx)
+		assert(b.agentFlight ~= nil and b.s.agents[TARGET].kind == "running")
+		local lookup = w.finds[#w.finds]
+		w.holdRoot = false
+		Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+		local out_ = #reads(w)
+		assert(b.flights.tandem and b.flights.refresh)
+
+		local theirs = storedCache({ WEB, API114, TARGET }, Cases.asOf + 60)
+		w.kv["hub.cache"] = theirs
+		reads(w)[out_].done(out("WATCH"))
+		-- Nothing has answered since: the replacement read and the refresh are both still out.
+		assert(#reads(w) == out_ + 1 and b.flights.tandem and b.flights.refresh and b.watched[TARGET] == true)
+		local mine = card(b.s, TARGET)
+		assert(mine.pr.tandem == true, "the flag is on the card")
+		for _, forbidden in { "card-agent", "card-merge", "card-auto", "card-update" } do assert(not offers(mine, forbidden), forbidden) end
+		noFixer(w, b, "a fix being set up")
+		assert(b.cache.prs == b.s.prs and same(w.kv["hub.cache"], theirs), "the older cache was not stored")
+		Block.event(b, { ev = "action", act = "card-agent", value = TARGET } :: any, w.cx)
+		Block.event(b, { ev = "action", act = "card-merge", value = TARGET } :: any, w.cx)
+		noFixer(w, b, "A on the card")
+		-- The late lookup starts nothing, and the read that began after the join is the one that applies.
+		lookup.done({ root = REPO_ROOT }, nil)
+		noFixer(w, b, "the late lookup")
+		assert(#w.clones == 0)
+		reads(w)[out_ + 1].done(out("WATCH"))
+		assert(not b.flights.tandem and State.prOf(b.s, TARGET).tandem == false, "a read that began after the join clears it")
+	end)
+
+	-- Windows A and B hold one cache. A reads Tandem, flags a PR and stores it without moving `refreshedAt`; B's own
+	-- hand-off of another PR then stores B's list, which must keep A's flag instead of restoring it to false.
+	withWorld(function(w, Fetch, Block)
+		w.shared = true
+		w.kv["hub.cache"] = storedCache({ WEB, API114 }, Cases.asOf)
+		local a = live(w, Block, true)
+		local cxA = w.cx
+		local other = live(w, Block, true)
+		local cxB = w.cx
+		reads(w)[1].done(out("WATCH"))
+		reads(w)[2].done(out("WATCH"))
+		a.github = quietGithub(function() end)
+		w.decoded["READ_K"] = watchWith({ KEY })
+		Block.event(a, { ev = "action", act = "hub-refresh", value = "" } :: any, cxA)
+		reads(w)[3].done(out("READ_K"))
+		assert(a.watched[KEY] == true and w.kv["hub.cache"].refreshedAt == other.cache.refreshedAt)
+		keeps(w.kv["hub.cache"], "A flagged it")
+		assert(other.watched[KEY] == nil and not State.prOf(other.s, KEY).tandem, "B has not seen it")
+
+		local HANDED = "acme/web#101"
+		Block.event(other, { ev = "action", act = "card-handoff", value = HANDED } :: any, cxB)
+		assert(#handoffs(w) == 1)
+		handoffs(w)[1].done(out("KEPT"))
+		assert(other.watched[HANDED] == true and other.watched[KEY] == true, "B's hand-off joined A's flag")
+		assert(State.prOf(other.s, KEY).tandem == true and State.prOf(other.s, HANDED).tandem == true)
+		keeps(w.kv["hub.cache"], "B's hand-off kept A's flag")
+		local both = 0
+		for _, saved in w.kv["hub.cache"].prs do
+			if saved.key == HANDED then assert(saved.tandem == true, "and its own"); both += 1 end
+		end
+		assert(both == 1)
+		assert(w.kv["hub.cache"].refreshedAt == a.cache.refreshedAt, "the stamp stays")
+	end)
+
+	-- The same for a checks update: it is no word on ownership, so another window's flag at the same stamp stays.
+	withWorld(function(w, Fetch, Block)
+		w.shared = true
+		w.kv["hub.cache"] = storedCache({ WEB, API114 }, Cases.asOf)
+		local b = live(w, Block, true)
+		reads(w)[1].done(out("WATCH"))
+		local settle: any = nil
+		b.github = setmetatable({ checks = function(_, done) settle = done end }, { __index = function(): any return function() end end })
+		b.flights.refresh, b.flights.probe = true, true
+		w.timers = {}
+		Block.event(b, { ev = "action", act = "hub-focused", value = "" } :: any, w.cx)
+		w.kv["hub.cache"] = storedCache({ WEB, API114, KEY }, Cases.asOf)
+		runTimers(w)
+		assert(settle ~= nil and b.flights.checks and b.watched[KEY] == nil)
+		local running = State.prOf(b.s, API114)
+		assert(running and running.checks.state == "pending")
+		settle({ byId = { [running.id] = { headOid = running.headOid, checks = { state = "passing", passing = 3, failing = 0, pending = 0 } } } }, nil)
+		assert(State.prOf(b.s, API114).checks.state == "passing", "the update applied")
+		assert(b.watched[KEY] == true and State.prOf(b.s, KEY).tandem == true)
+		keeps(w.kv["hub.cache"], "the checks write kept the flag")
+		keeps(b.cache, "the block's cache")
+	end)
 end
 
 -- A board whose TARGET holds a ready fix on the Review fix page, kept by a retained engine. The push and the lease
