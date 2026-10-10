@@ -5,6 +5,7 @@
 -- agent writing a guide. Each step starts the next from its callback; the first failure ends the
 -- chain with a message naming the step.
 local Agent = require("./agent")
+local AgentFix = require("./hub/agent-fix")
 local Fixes = require("./hub/fixes")
 local Github = require("./github")
 local GitOutput = require("./git-output")
@@ -794,13 +795,144 @@ end
 -- `Github.Runner` over `tern.process.run`: `argv[1]` is found on the shell's PATH like `run` does,
 -- and the result is always handed back, a failed spawn as status -1.
 function M.runner(argv: { string }, opts: { cwd: string?, stdin: string?, timeout_ms: number? }, done: (out: Github.Out) -> ())
+ local called = false
+ local function settle(out: Github.Out)
+  if called then return end
+  called = true
+  done(out)
+ end
  withShellPath(function(path)
   local resolved = table.clone(argv)
   resolved[1] = located(argv[1], path)
   local spawned, err = pcall(tern.process.run, resolved, { cwd = opts.cwd, stdin = opts.stdin, timeout_ms = opts.timeout_ms, env = { PATH = path } }, function(result: ProcessResult)
-   done({ status = result.status, stdout = result.stdout, stderr = result.stderr, timed_out = result.timed_out })
+   settle({ status = result.status, stdout = result.stdout, stderr = result.stderr, timed_out = result.timed_out })
   end)
-  if not spawned then done({ status = -1, stdout = "", stderr = Text.errorLine(err), timed_out = false }) end
+  if not spawned then settle({ status = -1, stdout = "", stderr = Text.errorLine(err), timed_out = false }) end
+ end)
+end
+
+-- Agent fixes: only this boundary reads Tandem's database, hub.clones, local journals and
+-- environment. The caller owns the folder question and card lifecycle. No UI effects here.
+local CLONES_KEY = "hub.clones"
+
+function M.agentClones(): { [string]: string }
+ local raw = kvGet(CLONES_KEY)
+ local clones = {}
+ if type(raw) == "table" then
+  for slug, path in raw do
+   if type(slug) == "string" and type(path) == "string" then clones[slug] = path end
+  end
+ end
+ return clones
+end
+
+function M.rememberAgentClone(slug: string, path: string): string?
+ local clones = M.agentClones()
+ clones[string.lower(slug)] = path
+ local ok, err = pcall(tern.kv.set, CLONES_KEY, clones)
+ return if ok then nil else "Couldn't save the clone folder: " .. Text.errorLine(err)
+end
+
+-- A read-only SELECT, with SQL quoting and no migration or write to Tandem's store.
+function M.tandemClone(slug: string, done: (string?) -> ())
+ local home = tern.getenv("TANDEM_HOME") or ((tern.getenv("HOME") or "") .. "/.tandem")
+ local database = home .. "/state.sqlite"
+ if not tern.fs.exists(database) then return done(nil) end
+ local quoted = string.gsub(string.lower(slug), "'", "''")
+ local sql = "SELECT path FROM repo_locations WHERE repo = '" .. quoted .. "' LIMIT 1;"
+ M.runner({ "sqlite3", "-readonly", "-json", database, sql }, { timeout_ms = 15_000 }, function(out)
+  if out.status ~= 0 then return done(nil) end
+  local ok, rows = pcall(tern.json.decode, out.stdout)
+  local path = if ok and type(rows) == "table" and type(rows[1]) == "table" then rows[1].path else nil
+  done(if type(path) == "string" and path ~= "" then path else nil)
+ end)
+end
+
+function M.findAgentClone(near: Repo?, dir: string, slug: string, ask: (string, (string?) -> ()) -> (), done: (string?, string?) -> ())
+ local function validate(path: string, name: string, callback: (boolean) -> ())
+  originOf(path, function(origin) callback(Links.sameRepo(origin, name)) end)
+ end
+ AgentFix.locateClone(slug, {
+  existing = function(name, callback)
+   M.checkoutFor(near, dir, name, function(repo)
+    if repo then return callback(repo.root) end
+    local ready = M.readySavedCopy(name)
+    callback(if ready then ready.root else nil)
+   end)
+  end,
+  tandem = M.tandemClone,
+  saved = function(name) return M.agentClones()[string.lower(name)] end,
+  validate = validate, ask = ask, remember = M.rememberAgentClone, runner = M.runner,
+ }, done)
+end
+
+local activeAgentFix: AgentFix.Engine? = nil
+
+export type AgentFixRequest = {
+ key: string, clone: string, checkout: string, branch: string, base: string, headOid: string,
+ number: number, regenerate: { [string]: { string } }?,
+}
+
+-- Start separately from clone lookup, so the glue can finish its folder question first.
+-- A ready fix keeps the single-run slot until returnAgentFix succeeds after Push or Discard.
+function M.startAgentFix(request: AgentFixRequest, agent: Agent.Agent, now: number, changed: (AgentFix.Outcome) -> (), done: (AgentFix.Fix?, string?) -> ()): AgentFix.Engine?
+ if activeAgentFix and activeAgentFix.busy() then done(nil, "An agent fix already holds a worktree"); return nil end
+ activeAgentFix = nil
+ local home = tern.getenv("HOME")
+ if not home then done(nil, "The home directory is unknown"); return nil end
+ if request.number < 1 or request.number % 1 ~= 0 or not string.match(request.headOid, "^%x+$") or string.sub(request.base, 1, 1) == "-" or request.base == "" then
+  done(nil, "Invalid PR refs"); return nil
+ end
+ local spec: AgentFix.Spec = {
+  key = request.key, clone = request.clone, checkout = request.checkout,
+  pool = tern.getenv("TANDEM_POOL_ROOT") or (home .. "/.tandem/pool"),
+  branch = request.branch, base = request.base, headOid = request.headOid, number = request.number,
+  tool = tern.plugin.dir .. "/tools/conflicts", omp = agent.command, model = agent.model,
+  effort = agent.effort, regenerate = request.regenerate,
+ }
+ local function samePath(a: string, b: string, callback: (boolean?, string?) -> ())
+  -- Physical paths protect /tmp versus /private/tmp and symlinked checkouts. Also reject
+  -- the source clone itself, which can differ from the currently viewed checkout.
+  M.runner({ "python3", "-c", "import os,sys; print('same' if os.path.realpath(sys.argv[1]) in [os.path.realpath(p) for p in sys.argv[2:]] else 'different')", a, b, spec.clone }, { timeout_ms = 15_000 }, function(out)
+   if out.status ~= 0 then return callback(nil, "Couldn't verify the acquired worktree path") end
+   local result = trimmed(out.stdout)
+   callback(if result == "different" then false elseif result == "same" then true else nil, nil)
+  end)
+ end
+ local function resolutions(path: string, callback: ({ { id: string, lines: { AgentFix.ResolvedLine } } }?, string?) -> ())
+  M.runner({ "git", "-C", path, "rev-parse", "--absolute-git-dir" }, { timeout_ms = GIT_MS }, function(out)
+   if out.status ~= 0 then return callback(nil, "Couldn't locate the conflict journal") end
+   local ok, rows = pcall(function()
+    local journal = tern.json.decode(tern.fs.read(trimmed(out.stdout) .. "/prguide-conflicts.json", 16 * 1024 * 1024))
+    local resolved = {}
+    for _, hunk in journal.hunks do
+     if hunk.resolved then table.insert(resolved, { id = hunk.id, lines = hunk.resolved.lines }) end
+    end
+    return resolved
+   end)
+   callback(if ok then rows else nil, if ok then nil else Text.errorLine(rows))
+  end)
+ end
+ local engine: AgentFix.Engine
+ engine = AgentFix.engine(spec, { runner = M.runner, decode = tern.json.decode, samePath = samePath, resolutions = resolutions }, now, changed, function(fix, err)
+  if not fix and not engine.busy() then activeAgentFix = nil end
+  done(fix, err)
+ end)
+ activeAgentFix = engine
+ engine.begin()
+ return engine
+end
+
+-- The later lifecycle calls this only after a successful Push or confirmed Discard. It runs
+-- no Git write and never pushes; both ownership guards always reach treehouse.
+function M.returnAgentFix(path: string, done: (boolean?, string?) -> ())
+ local engine = activeAgentFix
+ if not engine then return done(nil, "No agent fix holds a worktree") end
+ local lease = engine.held()
+ if not lease or lease.path ~= path then return done(nil, "The worktree does not belong to this agent fix") end
+ engine.release(function(ok, err)
+  if ok then activeAgentFix = nil end
+  done(ok, err)
  end)
 end
 

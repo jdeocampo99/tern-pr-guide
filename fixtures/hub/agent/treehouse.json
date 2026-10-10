@@ -1,0 +1,41 @@
+{
+  "asOf": 1791590400,
+  "get": {
+    "argv": [
+      "treehouse",
+      "--root",
+      "/pool",
+      "get",
+      "--lease",
+      "--lease-holder",
+      "prguide",
+      "--no-fetch",
+      "--json"
+    ],
+    "cwd": "/clone",
+    "reply": {
+      "path": "/pool/acme/web/wt-1",
+      "lease_id": "lease-15",
+      "lease_holder": "prguide",
+      "leased_at": "2026-10-10T00:00:00Z"
+    }
+  },
+  "return": {
+    "argv": [
+      "treehouse",
+      "--root",
+      "/pool",
+      "return",
+      "/pool/acme/web/wt-1",
+      "--if-lease-holder",
+      "prguide",
+      "--if-lease-id",
+      "lease-15"
+    ],
+    "cwd": "/clone",
+    "reply": {
+      "returned": true,
+      "path": "/pool/acme/web/wt-1"
+    }
+  }
+}
