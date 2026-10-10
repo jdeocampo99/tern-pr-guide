@@ -73,7 +73,7 @@ local function steps_()
 
 	-- Group order: requested, comments, checks, conflicts.
 	local mixed = Fixture.details.requested
-	local d = { key = mixed.key, headOid = "x", fetchedAt = "", reviews = {}, threads = Fixture.details.comment.threads, checks = Fixture.details.check.checks,
+	local d = { key = mixed.key, headOid = "x", fetchedAt = "", reviews = {}, threads = table.clone(Fixture.details.comment.threads), checks = Fixture.details.check.checks,
 		changedPaths = {}, conflicts = { { path = "a.txt", cause = nil, hunks = {} } }, conflictNote = nil, files = nil }
 	for _, thread in mixed.threads do table.insert(d.threads, thread) end
 	local order = {}
