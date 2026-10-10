@@ -3099,6 +3099,58 @@ local function sharedOwnership()
 		end)
 	end
 
+	-- The same failed adoption, and then the store cannot be read when the next cache-writing callback's adoption looks at it.
+	-- "No cache" there is a guess, not an answer: while the board's ownership is unstored, that adoption is unsafe, so nothing
+	-- is written (not the action's change, not a watch answer's clear). A later read that succeeds adopts T3 whole, and the
+	-- write that follows is T3's.
+	local function unsafeBoard(w: any, b: any, t3: any, sets: number, what: string)
+		assert((w.cacheSets or 0) == sets, what .. ": no write was attempted")
+		assert(same(w.kv["hub.cache"], t3) and w.kv["hub.cache"].writeId == "other-window#3", what .. ": T3 stands whole")
+		assert(b.cache.refreshedAt == t3.refreshedAt and b.unsaved, what .. ": the board is still T2's, its ownership unstored")
+		assert(State.prOf(b.s, API114).title ~= "Retitled by T3", what .. ": and it lacks T3's data")
+		assert(State.prOf(b.s, TARGET).tandem == true and b.watched[TARGET] == true, what .. ": TARGET stays owned")
+		assert(next(b.retired) == nil and w.failGets == 0, what .. ": nothing retired, and only the one read failed")
+		assert(#w.started == 0 and #handoffs(w) == 1, what .. ": no effect reached a branch")
+	end
+
+	withWorld(function(w, Fetch, Block)
+		local b, t3, sets = failedAdoption(w, Fetch, Block)
+		local run = mergeWhenReady(w, Block, b)
+		w.failGets = 1
+		run.done(nil, nil)
+		unsafeBoard(w, b, t3, sets, "unreadable action")
+		assert(State.prOf(b.s, MERGE_KEY).pending ~= nil and #w.toasts == 1, "the action's change stays on the board")
+
+		b.github = quietGithub(function() end)
+		Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+		reads(w)[#reads(w)].done(out("WATCH"))
+		wholeT3(w, b, t3, sets, "watch answer after an unreadable action", false)
+		assert(#w.started == 0 and #handoffs(w) == 1, "nothing else went on")
+	end)
+
+	withWorld(function(w, Fetch, Block)
+		local b, t3, sets = failedAdoption(w, Fetch, Block)
+		b.github = quietGithub(function() end)
+		Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+		local answer = reads(w)[#reads(w)]
+		local asked, toasts = #reads(w), #w.toasts
+		-- The answer reads the store twice before it decides: the identity it would retire, then the adoption. The second fails.
+		local gets = 0
+		w.onGet = function()
+			gets += 1
+			if gets == 2 then w.failGets = 1 end
+		end
+		answer.done(out("WATCH"))
+		w.onGet = nil
+		unsafeBoard(w, b, t3, sets, "unreadable watch answer")
+		assert(not b.flights.tandem and #reads(w) == asked and #w.toasts == toasts, "the answer is dropped: no clear, no replacement read")
+
+		local run = mergeWhenReady(w, Block, b)
+		run.done(nil, nil)
+		wholeT3(w, b, t3, sets, "action after an unreadable watch answer", true)
+		assert(State.prOf(b.s, MERGE_KEY).pending ~= nil and #w.started == 0 and #handoffs(w) == 1, "the action's change is on T3")
+	end)
+
 	-- A closed block's entry paths are dead ends. The busy draw of a hand-off raises (the window is gone): no root is looked
 	-- up and nothing is sent, shown or armed.
 	withWorld(function(w, Fetch, Block)

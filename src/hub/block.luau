@@ -232,9 +232,12 @@ local function kvGet(key: string): any
 	return if ok then value else nil
 end
 
--- The cache other windows (or an earlier run) stored, if it is a valid schema 1.
-local function readCache(): Sync.Cache?
-	return Sync.load(kvGet(KV_CACHE))
+-- The cache other windows (or an earlier run) stored, if it is a valid schema 1, and whether the store could be read at
+-- all (false: it threw, which is not the same as holding no valid cache).
+local function readCache(): (Sync.Cache?, boolean)
+	local ok, raw = pcall(tern.kv.get, KV_CACHE)
+	if not ok then return nil, false end
+	return Sync.load(raw), true
 end
 
 -- The `writeId` of a stored cache ("" when it has none, or the store holds no valid cache).
@@ -494,16 +497,17 @@ end
 -- The cache another window stored, if it is as new as this block's own (`strict`: newer). Adopting a cache takes the
 -- strictly newer one; joining its ownership also takes one stored at the same time, because a hand-off keeps the
 -- cache's own `refreshedAt`, so the window that took it leaves the same stamp this block holds.
-local function sharedCache(b: Block, strict: boolean): Sync.Cache?
-	local shared = readCache()
-	if not shared or b.retired[storedId(shared)] then return nil end
+-- The second result is false when the store could not be read: "no cache" is then a guess, not an answer.
+local function sharedCache(b: Block, strict: boolean): (Sync.Cache?, boolean)
+	local shared, readable = readCache()
+	if not shared or b.retired[storedId(shared)] then return nil, readable end
 	local theirs, mine = Model.epoch(shared.refreshedAt), cachedAt(b)
-	if not theirs then return nil end
-	if mine == nil or theirs > mine or (not strict and theirs == mine) then return shared end
+	if not theirs then return nil, true end
+	if mine == nil or theirs > mine or (not strict and theirs == mine) then return shared, true end
 	-- Ownership restored onto an adopted cache that no write has stored leaves the store's identity unreconciled: a distinct
 	-- cache at the same stamp may hold data this board lacks, so it is adopted whole (the store's own id decides, not its stamp).
-	if strict and b.unsaved and theirs == mine and storedId(shared) ~= b.held then return shared end
-	return nil
+	if strict and b.unsaved and theirs == mine and storedId(shared) ~= b.held then return shared, true end
+	return nil, true
 end
 
 -- The identity of the cache the store holds now, taken before a successful read of Tandem clears a flag. `readable` is false
@@ -891,9 +895,12 @@ end
 -- Returns whether the caller may go on to edit and store the board. It may not when the block closed, or when the save of
 -- the restored ownership failed: another window may have stored a newer cache meanwhile, and this block's snapshot is
 -- then older than the store. The ownership stays in memory (`unsaved`), and the next guard adopts the newer cache.
+-- It may not either while `unsaved` and the store cannot be read: the stored snapshot is not reconciled and might hold a
+-- distinct cache this board lacks, so nothing is written until a read succeeds and adopts it. Without `unsaved` an
+-- unreadable store changes nothing here.
 local function adoptShared(b: Block, cx: BlockCx, hold: boolean?): boolean
-	local shared = sharedCache(b, true)
-	if not shared then return true end
+	local shared, readable = sharedCache(b, true)
+	if not shared then return readable or not b.unsaved end
 	local now = os.time()
 	joinOwnership(b, shared)
 	local prs = flagged(b.watched, shared.prs)
@@ -1197,8 +1204,10 @@ local function loadTandem(b: Block, cx: BlockCx)
 		-- first, so what is stored next carries its stamp and snapshot and never this block's older ones.
 		local before = b.cache
 		local readable, superseded = storedNow()
-		adoptShared(b, cx, true)
-		if b.closed then return end
+		local safe = adoptShared(b, cx, true)
+		-- An unsafe snapshot (the store was unreadable while an adopted cache's ownership is unstored) takes no part: the answer
+		-- stores, clears and joins nothing, and the next read decides again.
+		if b.closed or not safe then return end
 		local adopted = b.cache ~= before
 		joinShared(b)
 		-- A write another window stored after this read began, flagging a PR the answer omits, is a hand-off even when this
