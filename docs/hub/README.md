@@ -80,7 +80,7 @@ Each PR appears exactly once.
 | Agent running | **Stop** (A) | |
 | Fix ready | **Review fix** (⏎) | **Discard fix** (D, with an inline confirm) |
 | Reviewed fix | **Push to branch** (P) | Discard fix (D) |
-| Fix failed | **Try again** (A) | Open worktree (O) |
+| Fix failed | **Try again** (A) | Open worktree (O), only while its lease is retained |
 | No local clone | **Clone repo** (A) | Choose folder… (O) |
 | In review | **Copy link** (C), or **Re-request review** (Q) while a reviewer waits on a re-review: copies "title url" as plain text (Tern's clipboard has no rich flavor; see the clipboard facts) | |
 | In review with a bot review | **Fix bot comments** (A); the card stays in In review | Copy link (C) |
@@ -107,6 +107,7 @@ This opens the PR at what needs fixing, in the guided review layout.
 
 - **The agent:** your own `omp`, with the model and effort from the `⇧M` menu, which guided reviews already use (`src/agent.luau`, kv key `model`).
 - **One PR at a time.** There is no "Fix all".
+- **Failed worktree ownership:** the block reconciles failure paths against `Engine.held()` during callbacks and after assigning the engine. A returned worktree has no Open worktree action. A failed lease return keeps the same engine handle; Try again retries its release before another run starts. Closing stops a running engine or retries a settled failed lease return, retaining the handle if return still fails. Fix ready worktrees are preserved.
 - **Where it works:** in a treehouse worktree, never in your checkout. It commits there and never pushes. The card goes running → **Fix ready** → **Review fix** (`review-fix.html`) → **Push to branch**.
 - **Review fix page (`review-fix.html`):**
   - The diff shows only the agent's resolution. Each line is tagged main, Your branch or Agent.
@@ -718,6 +719,14 @@ function M.project(s: State)                 -- recomputes s.board from s.prs an
 function M.mode(s: State): Mode
 function M.reviewed(fix: AgentFix.Fix, reviewed: { [string]: boolean }): boolean
 
+-- Transient ownership facts from Block; never stored in State and never contain an engine.
+export type AgentFlightFacts = {
+	settled: boolean, starting: boolean, releasing: boolean, busy: boolean, worktree: string?,
+}
+function M.agentFlight(s: State, key: string, facts: AgentFlightFacts): "wait" | "release" | "forget" | "ready"
+-- Reconciles a failed card's path with the held lease. Block retains the handle for
+-- wait/release/ready; only forget permits dropping it. starting guards synchronous callbacks.
+
 -- The fixes page (#12): a route over the board. `s.route = { kind = "fixes", key, cur, focus, item, loading, error, bots, resolved, replies, reply, busy }`.
 function M.openFixes(s: State, key: string): boolean / M.closeFixes(s)   -- Esc returns to the board with the card still selected
 function M.prOf(s: State, key: string): HubPR? / M.fixDetails(s) / M.fixSteps(s) / M.fixStep(s) / M.fixLeft(s)
@@ -980,6 +989,7 @@ Every PR passes these before review:
 - **Commits.** Each subject is the user-visible behavior as a plain sentence, with no type prefix (AGENTS.md, Commits).
 - **Shared files.** No two issues edit the same shared file at once. The files are `src/hub/block.luau`, `src/hub/state.luau`, `src/hub/model.luau`, `src/github.luau`, `src/fetch.luau`, `src/keys.luau`, `src/view/hub/`, `guide.css`, `AGENTS.md` and `tests/run.luau`. The order below is the serialization: a later issue builds on the earlier one's merged contract, and changes a contract here first. The one allowed overlap is #3 and #5, which each append lines to `tests/run.luau` and `AGENTS.md`; the second to merge rebases onto the first.
 - **Issue #15 ownership exception.** Its `Touches only` list omits shared verification files that its Done when criteria require. #15 registers `agent_fix_test` in `tests/run.luau`, extends `tools/luau-fixtures` to generate and check `fixtures/hub/agent/*.luau` from every JSON in that directory, and records these decisions here. `hub.clones` is read and written by `src/fetch.luau` so clone lookup stays at the boundary. The public `AgentFixRun` contract signatures stay unchanged.
+- **Issue #18 acceptance exception and settled details.** Its acceptance criteria also permit the README Keys table, registration of `agent_state_test` in `tests/run.luau`, and this paragraph. A on a running card means Stop; A attempting a different fix while a run, lookup or lease return is active says exactly "One fix at a time". Existing feedback-only Summarize and flaky-check priorities remain until their owning issues change them. Clone repo selects a parent folder and clones to `parent/repo-name`; Choose folder selects an existing clone, remembers it through Fetch, then revalidates through `Fetch.findAgentClone`. With no host folder picker in the documented block API, Block uses `Fetch.runner` with macOS `osascript`; cancellation returns to No local clone without an error toast. Open worktree uses the same runner to open the failed worktree in Finder. `HubPR` omits the head branch name, so Block reads `headRefName`, `baseRefName` and `headRefOid` with a read-only `gh pr view` through Fetch.runner and checks them against the card before starting. `fixture=agent-cards` shows all lifecycle states without lookup, dialogs or processes; ⌘R advances the running card by one #15 transcript event, A stops it, then A on another card starts a new recorded run. A ready fixture remains in place. #16 owns all Review, Discard and Push actions; this issue displays the ready commit and complete path only. UI checklist screenshots and execution evidence are owned by the parent integration round.
 - **Order:**
   1. **v0.** #2 (rules, fixtures, test runner) → #3 (GitHub data) and #5 (board, built against `fixture=cases`) in parallel → #4 (sync) → #6, #7, #8 in that order.
   2. **v1.** #9 → #10 → #12 → #11 → #13 → #14. #10 comes before #11 and #14, and #12 before #13 and every later consumer of the details contract.

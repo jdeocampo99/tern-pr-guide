@@ -3,6 +3,7 @@
 -- fixture), draws it, and turns clicks and keys into state changes plus the scrolling, focusing and toasts
 -- only a live window can do. Clicks (`event`) and keys (`key`) both run one ACTIONS table.
 local Agent = require("../agent")
+local AgentFix = require("./agent-fix")
 local Board = require("../view/hub/board")
 local Fetch = require("../fetch")
 local Fields = require("../text-field")
@@ -28,6 +29,13 @@ type Sched = {
 	lastModified: string?, -- the probe's validator
 }
 
+-- Only Block holds an engine or a pending folder callback. The token survives synchronous
+-- completion before Fetch.startAgentFix returns its handle.
+type AgentFlight = {
+	key: string, engine: AgentFix.Engine?, settled: boolean, stopping: boolean,
+	cancel: (() -> ())?, releasing: boolean, starting: boolean?, fixtureStep: number?,
+}
+
 -- The hub block's own state.
 export type Block = {
 	s: State,
@@ -35,6 +43,7 @@ export type Block = {
 	fixture: string?, -- `fixture=cases`: recorded data, no network, no timers
 	generate: boolean, -- ⏎ opens the PR with the AI guide started
 	agent: Agent.Agent?, -- the reader's own agent, once found (never with a fixture)
+	agentFlight: AgentFlight?, -- lookup, engine and retained lease; never serialized
 	github: Github.Client, timers: Timers,
 	flights: { refresh: boolean, checks: boolean, probe: boolean, flake: boolean }, -- one call of each kind at a time
 	sched: Sched,
@@ -50,12 +59,13 @@ export type Block = {
 
 type Handler = (b: Block, cx: BlockCx, value: string) -> ()
 
-local ARGS = "generate=true|false and fixture=<name> (cases, rereview)"
+local ARGS = "generate=true|false and fixture=<name> (cases, rereview, agent-cards)"
 
 -- Fixtures by name, loaded only when asked for. `cases` is the rules' recorded pull requests.
 local FIXTURES: { [string]: () -> any } = {
 	cases = function() return require("../../fixtures/hub/cases") end,
 	rereview = function() return require("../../fixtures/hub/rereview") end,
+	["agent-cards"] = function() return require("../../fixtures/hub/agent-cards") end,
 }
 
 -- The recently opened pull requests a fixture board shows, so the fold has rows without a kv store.
@@ -277,8 +287,64 @@ local function arm(b: Block, cx: BlockCx, name: "probe" | "refresh" | "checks" |
 	end)
 end
 
+local function forgetReturned(b: Block, flight: AgentFlight): string
+	local disposition
+	if b.fixture then
+		disposition = if flight.settled then "forget" else "wait"
+	else
+		local lease = if flight.engine then flight.engine.held() else nil
+		disposition = State.agentFlight(b.s, flight.key, {
+			settled = flight.settled, starting = flight.starting == true, releasing = flight.releasing,
+			busy = flight.engine ~= nil and flight.engine.busy(), worktree = if lease then lease.path else nil,
+		})
+	end
+	if disposition == "forget" and b.agentFlight == flight then b.agentFlight = nil end
+	return disposition
+end
+
+-- Retry and close return through the same retained engine. A callback alone is not
+-- proof of return: re-read held() before dropping the handle or allowing another run.
+local function returnAgentLease(b: Block, flight: AgentFlight, done: (boolean?, string?) -> ())
+	local engine = flight.engine
+	if not engine or flight.releasing then return end
+	flight.releasing = true
+	local called = false
+	local function returned(ok: boolean?, err: string?)
+		if called then return end
+		called = true
+		flight.releasing = false
+		local disposition = forgetReturned(b, flight)
+		if disposition == "release" then ok, err = nil, err or "The worktree lease could not be returned" end
+		done(ok, err)
+	end
+	local ok, err = pcall(engine.release, returned)
+	if not ok then returned(nil, tostring(err)) end
+end
+
+local function closeAgentFlight(b: Block, flight: AgentFlight)
+	local disposition = forgetReturned(b, flight)
+	if disposition == "ready" then return end
+	if not flight.settled then
+		flight.stopping = true
+		if flight.cancel then flight.cancel() end
+		-- stop waits for any worker, then returns its lease.
+		if flight.engine then flight.engine.stop() end
+	elseif disposition == "release" then
+		returnAgentLease(b, flight, function(ok, err)
+			if not ok then
+				local lease = (flight.engine :: AgentFix.Engine).held()
+				State.agentFailed(b.s, flight.key, err or "The worktree lease could not be returned", if lease then lease.path else nil)
+			end
+		end)
+	end
+end
+
 local function stop(b: Block)
+	if b.closed then return end
 	b.closed = true
+	local flight = b.agentFlight
+	State.closeAgent(b.s)
+	if flight then closeAgentFlight(b, flight) end
 	local timers = b.timers :: any
 	for _, name in { "probe", "refresh", "checks", "debounce", "ring" } do
 		local handle: TimerHandle? = timers[name]
@@ -291,6 +357,219 @@ end
 local function draw(b: Block, cx: BlockCx)
 	if b.closed then return end
 	if not pcall(function() cx:render() end) then stop(b) end
+end
+
+-- Folder selection is the smallest host bridge available. No shell interpolation, and all
+-- process effects use Fetch.runner. Cancel is an ordinary nil answer.
+local function agentFolder(b: Block, flight: AgentFlight, prompt: string, done: (string?, string?) -> ())
+	local replied = false
+	local function finish(path: string?, err: string?)
+		if replied then return end
+		replied = true
+		flight.cancel = nil
+		done(path, err)
+	end
+	flight.cancel = function() finish(nil, nil) end
+	local ok, err = pcall(Fetch.runner, {
+		"osascript", "-e", "on run argv\ntry\nreturn POSIX path of (choose folder with prompt (item 1 of argv))\non error number -128\nreturn \"\"\nend try\nend run", prompt,
+	}, { timeout_ms = 5 * 60_000 }, function(out)
+		if b.closed or flight.stopping then return finish(nil, nil) end
+		if out.status ~= 0 or out.timed_out then
+			return finish(nil, if out.timed_out then "Folder selection timed out" else reasonOf(out.stderr))
+		end
+		local path = string.gsub(out.stdout, "[\r\n]+$", "")
+		finish(if path == "" then nil else path, nil)
+	end)
+	if not ok then finish(nil, tostring(err)) end
+end
+
+local function currentFlight(b: Block, flight: AgentFlight): boolean
+	return not b.closed and b.agentFlight == flight and not flight.settled and not flight.stopping
+end
+
+local function settleAgent(b: Block, cx: BlockCx, flight: AgentFlight, outcome: AgentFix.Outcome)
+	if b.agentFlight ~= flight or flight.settled then return end
+	if outcome.kind == "running" then
+		if not b.closed and not flight.stopping then State.agentOutcome(b.s, flight.key, outcome); draw(b, cx) end
+		return
+	end
+	flight.settled = true
+	-- A ready callback is preserved even if closure was detected just before it arrived.
+	if outcome.kind == "ready" then
+		b.s.agents[flight.key] = { kind = "ready", fix = outcome.fix, reviewed = {} }
+		State.project(b.s)
+	elseif outcome.kind == "failed" and b.closed then
+		State.agentFailed(b.s, flight.key, outcome.reason, outcome.worktree)
+	elseif not b.closed then
+		State.agentOutcome(b.s, flight.key, outcome)
+	end
+	forgetReturned(b, flight)
+	if not b.closed then draw(b, cx) end
+end
+
+local function startAgentEngine(b: Block, cx: BlockCx, flight: AgentFlight, clone: string, checkout: string, pr: Model.HubPR)
+	if not currentFlight(b, flight) then return end
+	-- HubPR has baseBranch and headOid, but no head branch. Read and revalidate all three
+	-- together; never guess a branch from a local checkout or pass a stale head to the engine.
+	local replied = false
+	local function metadata(out: Github.Out)
+		if replied then return end
+		replied = true
+		if not currentFlight(b, flight) then return end
+		local ok, meta = pcall(tern.json.decode, out.stdout)
+		local latest = State.prOf(b.s, pr.key)
+		if out.status ~= 0 or out.timed_out or not ok or type(meta) ~= "table" then
+			settleAgent(b, cx, flight, { kind = "failed", reason = if out.timed_out then "Reading PR refs timed out" else reasonOf(out.stderr ~= "" and out.stderr or "No PR refs were returned") })
+			return forgetReturned(b, flight)
+		end
+		if not latest or latest.headOid ~= pr.headOid or latest.baseBranch ~= pr.baseBranch or meta.headRefOid ~= pr.headOid or meta.baseRefName ~= pr.baseBranch
+			or type(meta.headRefName) ~= "string" or meta.headRefName == "" then
+			settleAgent(b, cx, flight, { kind = "failed", reason = "PR refs changed or are missing; refresh the board" })
+			return forgetReturned(b, flight)
+		end
+		local doneCalled = false
+		local function completed(fix: AgentFix.Fix?, err: string?)
+			if doneCalled then return end
+			doneCalled = true
+			if err == "An agent fix already holds a worktree" and not flight.settled then
+				settleAgent(b, cx, flight, { kind = "stopped" })
+				if not b.closed then cx:toast("info", "One fix at a time") end
+			end
+			if not flight.settled then
+				settleAgent(b, cx, flight, if fix then { kind = "ready", fix = fix }
+					elseif err == "stopped" then { kind = "stopped" }
+					else { kind = "failed", reason = err or "The agent returned no result" })
+			end
+			-- During a synchronous callback the handle is assigned just after this returns.
+			if flight.engine then forgetReturned(b, flight) end
+		end
+		flight.starting = true
+		local started, engine = pcall(Fetch.startAgentFix, {
+			key = pr.key, clone = clone, checkout = checkout, branch = meta.headRefName,
+			base = pr.baseBranch, headOid = pr.headOid, number = pr.number,
+		}, b.agent :: Agent.Agent, b.s.now, function(outcome) settleAgent(b, cx, flight, outcome) end, completed)
+		if started then flight.engine = engine else completed(nil, tostring(engine)) end
+		flight.starting = false
+		if not flight.engine then
+			completed(nil, "The agent could not start")
+			forgetReturned(b, flight)
+		else
+			-- Reconcile synchronous terminal callbacks once the handle is available.
+			forgetReturned(b, flight)
+			if b.closed or flight.stopping then closeAgentFlight(b, flight) end
+		end
+		if not b.closed then draw(b, cx) end
+	end
+	local ok, err = pcall(Fetch.runner, { "gh", "pr", "view", tostring(pr.number), "--repo", pr.repo, "--json", "headRefName,baseRefName,headRefOid" }, { timeout_ms = 30_000 }, metadata)
+	if not ok then metadata({ status = -1, stdout = "", stderr = tostring(err), timed_out = false }) end
+end
+
+local function beginAgent(b: Block, cx: BlockCx, key: string, mode: "fix" | "clone" | "folder")
+	if b.closed then return end
+	local pr = State.prOf(b.s, if key ~= "" then key else b.s.selected or "")
+	if not pr then return end
+	if b.agentFlight then forgetReturned(b, b.agentFlight) end
+	if b.agentFlight or State.agentRunning(b.s) then return cx:toast("info", "One fix at a time") end
+	local existing = b.s.agents[pr.key]
+	if existing and (existing.kind == "ready" or existing.kind == "pushing") then return end
+	if not b.fixture and not b.agent then
+		State.agentFailed(b.s, pr.key, "No agent is available", if existing and existing.kind == "failed" then existing.worktree else nil)
+		return draw(b, cx)
+	end
+	if pr.baseBranch == "" or pr.headOid == "" or pr.number < 1 then
+		State.agentFailed(b.s, pr.key, "PR refs are missing; refresh the board", if existing and existing.kind == "failed" then existing.worktree else nil)
+		return draw(b, cx)
+	end
+	b.s.now = if b.fixture then b.s.now else os.time()
+	if not State.beginAgent(b.s, pr.key, b.s.now) then return cx:toast("info", "One fix at a time") end
+	local flight: AgentFlight = { key = pr.key, settled = false, stopping = false, releasing = false }
+	b.agentFlight = flight
+	draw(b, cx)
+	if not currentFlight(b, flight) then return end
+	if b.fixture then
+		-- Even ordinary sample boards stay entirely local. ⌘R advances one recorded event.
+		local data: any = FIXTURES["agent-cards"]()
+		b.s.agents[pr.key] = { kind = "running", run = AgentFix.bind(AgentFix.start(pr.key, b.s.now), data.spec(pr.key)) }
+		flight.fixtureStep = 0
+		State.project(b.s)
+		return draw(b, cx)
+	end
+	local dir = cx.cwd or tern.getenv("HOME") or ""
+	local near: Fetch.Repo? = nil
+	local checkout: string? = nil
+	local cancelled, missing, answered = false, false, false
+	local function cloned(path: string?, err: string?)
+		if answered then return end
+		answered = true
+		if not currentFlight(b, flight) then return end
+		if path then return startAgentEngine(b, cx, flight, path, checkout or path, pr) end
+		flight.settled = true
+		b.agentFlight = nil
+		if cancelled or missing then State.noAgentClone(b.s, pr.key, pr.repo)
+		else State.agentFailed(b.s, pr.key, err or "No clone was found", nil) end
+		draw(b, cx)
+	end
+	local function find(allowClone: boolean)
+		local ok, err = pcall(Fetch.findAgentClone, near, dir, pr.repo, function(slug, answer)
+			if not currentFlight(b, flight) then return answer(nil) end
+			if not allowClone then missing = true; return answer(nil) end
+			agentFolder(b, flight, "Choose a parent folder for " .. slug, function(parent, why)
+				if not currentFlight(b, flight) then return answer(nil) end
+				if why then cloned(nil, why); return answer(nil) end
+				if not parent then cancelled = true; return answer(nil) end
+				local name = string.match(slug, "[^/]+$") :: string
+				answer(string.gsub(parent, "/+$", "") .. "/" .. name)
+			end)
+		end, cloned)
+		if not ok then cloned(nil, tostring(err)) end
+	end
+	local function choose()
+		if mode ~= "folder" then return find(mode == "clone") end
+		agentFolder(b, flight, "Choose the existing clone of " .. pr.repo, function(path, err)
+			if not currentFlight(b, flight) then return end
+			if err then return cloned(nil, err) end
+			if not path then cancelled = true; return cloned(nil, nil) end
+			local checked = false
+			local function selected(repo: Fetch.Repo?, why: string?)
+				if checked then return end
+				checked = true
+				if not currentFlight(b, flight) then return end
+				if not repo then return cloned(nil, why or "The selected folder is not a clone") end
+				local ok, problem = pcall(Fetch.rememberAgentClone, pr.repo, repo.root)
+				if not ok or problem then return cloned(nil, tostring(problem)) end
+				near = repo
+				find(false)
+			end
+			local ok, why = pcall(Fetch.findRepo, path, selected)
+			if not ok then selected(nil, tostring(why)) end
+		end)
+	end
+	-- Resolve the reader's root even when cwd is a subfolder. Both it and the source clone
+	-- are protected by #15's physical-path check at worktree acquisition.
+	local checked = false
+	local function found(repo: Fetch.Repo?)
+		if checked then return end
+		checked = true
+		if not currentFlight(b, flight) then return end
+		near, checkout = repo, if repo then repo.root else nil
+		choose()
+	end
+	local ok, err = pcall(Fetch.findRepo, dir, found)
+	if not ok then cloned(nil, tostring(err)) end
+end
+
+local function advanceAgentFixture(b: Block, cx: BlockCx): boolean
+	local flight = b.agentFlight
+	if not flight or flight.fixtureStep == nil or flight.settled then return false end
+	local data: any = FIXTURES["agent-cards"]()
+	flight.fixtureStep += 1
+	local event = data.events()[flight.fixtureStep]
+	local current = b.s.agents[flight.key]
+	if event and current and current.kind == "running" then
+		settleAgent(b, cx, flight, AgentFix.step(current.run, event))
+	end
+	if flight.settled then b.agentFlight = nil end
+	return true
 end
 
 -- How long an arrival's ring or wash is held before it fades, and how long the fade takes (--gp-dur-rare, plus a
@@ -756,7 +1035,62 @@ ACTIONS["hub-help-close"] = function(b)
 end
 
 -- Card actions: shown with their labels and keys; their effects arrive with the changes that build them.
-ACTIONS["card-agent"] = notYet("Fix with agent")
+ACTIONS["card-agent"] = function(b, cx, key) beginAgent(b, cx, key, "fix") end
+ACTIONS["card-agent-clone"] = function(b, cx, key) beginAgent(b, cx, key, "clone") end
+ACTIONS["card-agent-folder"] = function(b, cx, key) beginAgent(b, cx, key, "folder") end
+ACTIONS["card-agent-stop"] = function(b, cx, key)
+	local flight = b.agentFlight
+	local agent = b.s.agents[key]
+	if not agent or agent.kind ~= "running" then return end
+	if flight and flight.key == key then
+		if flight.stopping then return end
+		flight.stopping = true
+		if flight.cancel then flight.cancel() end
+		if flight.engine then return flight.engine.stop() end
+		if flight.starting then return end
+		flight.settled = true
+		b.agentFlight = nil
+	end
+	State.agentOutcome(b.s, key, { kind = "stopped" })
+	draw(b, cx)
+end
+ACTIONS["card-agent-retry"] = function(b, cx, key)
+	local agent, flight = b.s.agents[key], b.agentFlight
+	if not agent or agent.kind ~= "failed" then return end
+	-- A failed lease return retains the handle. Retry first retries that exact guarded
+	-- return, and starts no engine until it succeeds. Never release a ready worktree.
+	if flight and flight.key == key then
+		local disposition = forgetReturned(b, flight)
+		if disposition == "wait" then return cx:toast("info", "One fix at a time") end
+		if disposition ~= "release" then return beginAgent(b, cx, key, "fix") end
+		returnAgentLease(b, flight, function(ok, err)
+			if not ok then
+				local lease = (flight.engine :: AgentFix.Engine).held()
+				State.agentFailed(b.s, key, err or "The worktree lease could not be returned", if lease then lease.path else nil)
+				return draw(b, cx)
+			end
+			if b.closed then return end
+			beginAgent(b, cx, key, "fix")
+		end)
+		return
+	end
+	beginAgent(b, cx, key, "fix")
+end
+ACTIONS["card-agent-worktree"] = function(b, cx, key)
+	local agent = b.s.agents[key]
+	if not agent or agent.kind ~= "failed" or not agent.worktree then return end
+	if b.fixture then return cx:toast("info", "Sample worktree", agent.worktree) end
+	-- Finder is the available folder-opening surface; the path stays a single argv.
+	local replied = false
+	local function opened(out: Github.Out)
+		if replied then return end
+		replied = true
+		if b.closed then return end
+		if out.status ~= 0 or out.timed_out then cx:toast("error", "Couldn't open worktree: " .. reasonOf(out.stderr ~= "" and out.stderr or "Opening the folder failed")) end
+	end
+	local ok, err = pcall(Fetch.runner, { "open", agent.worktree }, { timeout_ms = 15_000 }, opened)
+	if not ok then opened({ status = -1, stdout = "", stderr = tostring(err), timed_out = false }) end
+end
 ACTIONS["card-handoff"] = notYet("Hand off to Tandem")
 ACTIONS["card-summarize"] = notYet("Summarize")
 ACTIONS["card-method"] = function(b, cx, key)
@@ -829,6 +1163,8 @@ end
 
 -- ⌘R: refresh now. The sample board steps through its `refreshes` instead of asking GitHub.
 ACTIONS["hub-refresh"] = function(b, cx)
+	if b.fixture and advanceAgentFixture(b, cx) then return end
+	if b.fixture == "agent-cards" then return end
 	if b.fixture then return stepFixture(b, cx) end
 	refetch(b, cx)
 end
@@ -1552,16 +1888,17 @@ end
 local function loadAgent(b: Block, cx: BlockCx)
 	tern.timer(0, function()
 		Fetch.findAgent(function(agent)
-			if not agent then return end
+			if b.closed or not agent then return end
 			b.agent = agent
 			b.s.agent = { models = {}, model = agent.model, effort = agent.effort }
-			cx:render()
+			draw(b, cx)
 			Fetch.listModels(agent, function(models)
+				if b.closed then return end
 				local choice = b.s.agent
 				if choice then
 					for _, model in models do table.insert(choice.models, { selector = model.selector, name = model.name, efforts = model.efforts }) end
 				end
-				cx:render()
+				draw(b, cx)
 			end)
 		end)
 	end)
@@ -1615,7 +1952,7 @@ local block: BlockDef<Block> = {
 		s.loading = live and cache == nil
 		if problem then s.error = { operation = "hub", message = problem } end
 		local b: Block = {
-			s = s, cache = cache, fixture = fixture, generate = opts ~= nil and opts.generate, agent = nil,
+			s = s, cache = cache, fixture = fixture, generate = opts ~= nil and opts.generate, agent = nil, agentFlight = nil,
 			github = Github.client(Fetch.runner, tern.json.decode), timers = {},
 			flights = { refresh = false, checks = false, probe = false, flake = false },
 			sched = {
@@ -1642,6 +1979,10 @@ local block: BlockDef<Block> = {
 			local data: any = FIXTURES[fixture]()
 			for repo, resolution in (data.merges or {}) do s.merges[repo] = resolution end
 			for repo, allowed in (data.autoMerge or {}) do s.autoMerge[repo] = allowed end
+			for key, agent in (data.agents or {}) do s.agents[key] = agent end
+			if data.runningKey then
+				b.agentFlight = { key = data.runningKey, settled = false, stopping = false, releasing = false, fixtureStep = data.runningStep }
+			end
 			State.project(s)
 			local sample = table.clone(SAMPLE_AGENT)
 			sample.models = table.clone(SAMPLE_AGENT.models)

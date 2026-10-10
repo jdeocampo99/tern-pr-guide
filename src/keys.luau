@@ -138,6 +138,7 @@ local function fixesKey(s: HubState.State, key: Key): Action?
 	local name = key.name
 	if key.ctrl or key.meta or key.alt then return nil end
 	if name == "escape" then return act("fixes-close") end
+	if string.match(name, "^%a$") and (s.search.text ~= "" or s.link.text ~= "") then return nil end
 	local label = cardKeyLabel(key)
 	if label == "⇧L" then return act("fixes-log") end
 	if label == "⇧R" then return act("fixes-rerun") end
@@ -154,9 +155,9 @@ local function fixesKey(s: HubState.State, key: Key): Action?
 	if main and label ~= nil and main.key == label and s.route then return act(main.act, s.route.key) end
 	-- When Re-run moved first, the agent is the card's alternative and keeps its key.
 	local card = if s.route then HubState.card(s, s.route.key) else nil
-	if card and label == "A" and s.route then
+	if card and (label == "A" or label == "O") and s.route then
 		for _, more in card.more do
-			if more.act == "card-agent" or more.act == "card-handoff" then return act(more.act, s.route.key) end
+			if more.key == label then return act(more.act, s.route.key) end
 		end
 	end
 	return nil
@@ -170,6 +171,8 @@ local function hubBoardKey(s: HubState.State, key: Key): Action?
 	if key.ctrl or key.meta or key.alt then return nil end
 	if name == "escape" then return act("hub-escape") end
 	if name == "enter" then return act(if key.shift then "hub-open-generate" else "hub-open") end
+	-- Letter shortcuts act only when both fields are empty, even after search lost focus.
+	if string.match(name, "^%a$") and (s.search.text ~= "" or s.link.text ~= "") then return nil end
 	local label = cardKeyLabel(key)
 	if name == "space" then return act("hub-mark") end
 	if label == "⇧X" and s.tab == "mine" then return act("hub-mark-stale") end
