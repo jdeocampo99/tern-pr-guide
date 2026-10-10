@@ -846,9 +846,13 @@ local function announce(b: Block, cx: BlockCx, old: Sync.Cache?, fresh: { Model.
 	end)
 end
 
--- Takes another window's newer cache, so windows share one refresh.
-local function adoptShared(b: Block, cx: BlockCx)
+-- Takes another window's newer cache, so windows share one refresh. The ownership this block restores onto it is stored
+-- at once, unless `hold`: a caller that stores the board itself right after (a successful read of Tandem) then writes
+-- nothing here, so its own write is the only one and no intermediate cache is left for a later guard to join. Returns
+-- whether ownership moved and was left unstored.
+local function adoptShared(b: Block, cx: BlockCx, hold: boolean?): boolean
 	local shared = sharedCache(b, true)
+	local unstored = false
 	if shared then
 		local now = os.time()
 		joinOwnership(b, shared)
@@ -864,9 +868,10 @@ local function adoptShared(b: Block, cx: BlockCx)
 		reconcileFlight(b, cx)
 		if moved then
 			recount(b)
-			persist(b)
+			if hold then unstored = true else persist(b) end
 		end
 	end
+	return unstored
 end
 
 -- Puts the ownership this block holds onto its PRs now, so the card and the action guards are safe before any read or
@@ -1137,12 +1142,18 @@ local function loadTandem(b: Block, cx: BlockCx)
 		-- first, so what is stored next carries its stamp and snapshot and never this block's older ones.
 		local before = b.cache
 		local readable, superseded = storedNow()
-		adoptShared(b, cx)
+		local unstored = adoptShared(b, cx, true)
 		local adopted = b.cache ~= before
+		-- Adopting wrote nothing, so a successful answer's own save is the one write; an exit that applies no answer stores
+		-- what adoption restored, as a plain adoption would have.
+		local function settle()
+			if unstored then persist(b) end
+		end
 		joinShared(b)
 		-- A hand-off Tandem took while this read was out is newer than the read, which could not name that PR: drop it and read
 		-- again. The ownership it joined guards the card at once, and the older answer stores nothing.
 		if b.handoffs ~= epoch then
+			settle()
 			if applyOwnership(b, cx) or adopted then draw(b, cx) end
 			return loadTandem(b, cx)
 		end
@@ -1158,12 +1169,14 @@ local function loadTandem(b: Block, cx: BlockCx)
 		-- A clear needs the stored cache's identity, taken above: without it the superseded cache could not be told from a
 		-- later write, so the answer changes nothing and the next read decides again.
 		if cleared and not readable then
+			settle()
 			if adopted then draw(b, cx) end
 			return
 		end
 		if watched then b.watched = watched end
 		for _, pr in b.s.prs do pr.tandem = flags[pr.key] == true end
 		if not changed then
+			settle()
 			if adopted then draw(b, cx) end
 			return
 		end
@@ -1691,6 +1704,7 @@ end
 -- With `done`, the caller owns the toast and the refresh (a batch): it hears nil when the PR merged or was handed to
 -- its repo's tool, or the reason it didn't.
 local function runMerge(b: Block, cx: BlockCx, pr: Model.HubPR, done: ((err: string?) -> ())?)
+	if b.closed then return end
 	local s = b.s
 	-- A batch reaches here once per PR, long after its dispatch: ownership stored meanwhile joins first.
 	joinOwned(b)
@@ -1717,6 +1731,8 @@ local function runMerge(b: Block, cx: BlockCx, pr: Model.HubPR, done: ((err: str
 				s.acted[pr.key] = true
 				State.dropPr(s, pr.key)
 			end)
+			-- Adopting another window's cache may have drawn, and the draw closed the block: nothing goes on from here.
+			if b.closed then return end
 			if done then done(nil) else
 				toastDone(cx, pr, method)
 				refetchSoon(b, cx)
@@ -1724,6 +1740,7 @@ local function runMerge(b: Block, cx: BlockCx, pr: Model.HubPR, done: ((err: str
 		else
 			State.setBusy(s, pr.key, nil)
 			keepCache(b, cx, function() State.setPending(s, pr.key, { method = method.kind, at = isoNow() }) end)
+			if b.closed then return end
 			if done then done(nil) else
 				toastDone(cx, pr, method)
 				refetchSoon(b, cx)
@@ -1943,6 +1960,7 @@ local function runBatch(b: Block, cx: BlockCx, keys: { string }, merge: boolean)
 	local handed = false -- some went to a repo's tool (comment, label, queue) rather than merging at once
 	local step: (index: number) -> ()
 	local function finish(failed: Model.HubPR?, reason: string?)
+		if b.closed then return end
 		local rest: { Model.HubPR } = {}
 		for i = #finished + 1, #queue do table.insert(rest, queue[i]) end
 		local done = if merge then (if handed then "Asked to merge " else "Merged ") else "Closed "
@@ -1958,9 +1976,12 @@ local function runBatch(b: Block, cx: BlockCx, keys: { string }, merge: boolean)
 		draw(b, cx)
 	end
 	step = function(index: number)
+		if b.closed then return end
 		local pr = queue[index]
 		if not pr then return finish(nil, nil) end
 		local function after(err: string?)
+			-- A redraw while keeping the cache may have closed the block: no next command, no toast.
+			if b.closed then return end
 			if err then return finish(pr, err) end
 			table.insert(finished, pr)
 			s.marked[pr.key] = nil

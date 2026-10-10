@@ -195,8 +195,10 @@ local function stubTern(w: any): any
 				if w.shared then return copy(w.kv[key]) end
 				return if w.kvIn then w.kvIn[key] else nil
 			end,
+			-- `w.cacheSets` counts every attempt to store the cache, failed or not; `w.failWhen` fails the stores it names.
 			set = function(key: string, value: any)
-				if w.failKv then
+				if key == "hub.cache" then w.cacheSets = (w.cacheSets or 0) + 1 end
+				if w.failKv or (w.failWhen and w.failWhen(key, value)) then
 					if w.whileFailing then w.whileFailing() end
 					error("disk full", 0)
 				end
@@ -2539,6 +2541,93 @@ local function sharedOwnership()
 		assert(not State.prOf(b.s, WEB).tandem and b.watched[WEB] == nil, "a readable store lets the next answer clear it")
 		assert(w.kv["hub.cache"].writeId ~= "other-window#1", "and it is saved")
 	end)
+
+	-- This window owns TARGET and another window then stores a strictly newer cache that lacks it. The answer that clears
+	-- TARGET adopts that cache first, which would restore TARGET and store the restored board; that intermediate write
+	-- would succeed and stay joinable after the answer's own save fails. Adoption writes nothing here, so the failed save
+	-- is the only attempt, the store keeps the cache the answer superseded (retired), and TARGET stays cleared.
+	withWorld(function(w, Fetch, Block)
+		local b = agentBoard(w, Fetch, Block)
+		b.github = quietGithub(function(_, done) done(nil, { operation = "hub", message = "no answer" }) end)
+		holdCache(w, b)
+		claim(w, Block, b)
+		assert(b.watched[TARGET] == true and w.kv["hub.cache"].refreshedAt == b.cache.refreshedAt, "this window owns TARGET and stored it")
+
+		Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+		local answer = reads(w)[#reads(w)]
+		local theirs = storedCache({ WEB, API114 }, Cases.asOf + 60)
+		theirs.writeId = "other-window#1"
+		w.kv["hub.cache"] = theirs
+		assert((Model.epoch(theirs.refreshedAt) :: number) > (Model.epoch(b.cache.refreshedAt) :: number), "the store holds a strictly newer cache without TARGET")
+		-- A store of the board that still flags TARGET succeeds (what adoption's own write would be); one that clears it fails.
+		w.failWhen = function(key: string, value: any): boolean
+			if key ~= "hub.cache" then return false end
+			for _, cached in value.prs do
+				if cached.key == TARGET then return cached.tandem ~= true end
+			end
+			return false
+		end
+		local before = w.cacheSets or 0
+		answer.done(out("WATCH"))
+		w.failWhen = nil
+		assert(not State.prOf(b.s, TARGET).tandem and b.watched[TARGET] == nil, "the answer cleared TARGET in memory")
+		assert(b.cache.refreshedAt == theirs.refreshedAt, "the newer cache was adopted")
+		assert((w.cacheSets or 0) == before + 1, "adopting wrote nothing: the answer's own save is the only attempt")
+		assert(same(w.kv["hub.cache"], theirs) and w.kv["hub.cache"].writeId == "other-window#1", "the store still holds the superseded cache")
+		assert(b.s.error ~= nil and b.s.error.operation == "hub.cache" and string.find(b.s.error.message, "couldn't be saved", 1, true))
+		assert(b.retired["other-window#1"] == true, "the superseded cache is retired")
+
+		local function stays(step: string)
+			assert(not State.prOf(b.s, TARGET).tandem and b.watched[TARGET] == nil and card(b.s, TARGET).main.label == "Fix with agent", step .. ": TARGET stays cleared")
+			assert(#w.started == 0 and w.stops == 0 and #handoffs(w) == 0 and same(w.kv["hub.cache"], theirs), step .. ": no effect and nothing stored")
+			assert((w.cacheSets or 0) == before + 1, step .. ": no write")
+		end
+		Block.event(b, { ev = "action", act = "hub-move", value = "down" } :: any, w.cx)
+		stays("navigation")
+		Block.event(b, { ev = "action", act = "card-agent", value = TARGET } :: any, w.cx)
+		assert(b.agentFlight ~= nil and b.agentFlight.engine == nil and #w.clones == 1, "the fix is being set up for TARGET")
+		stays("dispatch")
+		w.clones[1].done("/clone", nil)
+		assert(gh(w) ~= nil and b.agentFlight ~= nil and b.s.agents[TARGET].kind == "running", "its setup goes on")
+		stays("setup continuation")
+
+		-- A write another window stores later has its own id, is not retired, and joins.
+		local later = storedCache({ WEB, API114, TARGET }, Cases.asOf + 60)
+		later.writeId = "another-window#1"
+		w.kv["hub.cache"] = later
+		gh(w).done(out("REFS"))
+		noFixer(w, b, "a hand-off stored after the clear")
+		assert(b.watched[TARGET] == true and State.prOf(b.s, TARGET).tandem == true, "the later write joins")
+		assert(#w.toasts == 0 and #handoffs(w) == 0 and same(w.kv["hub.cache"], later), "nothing was sent or stored")
+	end)
+
+	-- A batch is out when another window stores ownership of a PR whose fix this window is still setting up. The first
+	-- command's answer keeps the cache, adopts that ownership and draws it, and the draw raises (the block is gone): the batch
+	-- sends no second command, shows no toast and draws nothing, for a merge and for a close.
+	for _, merge in { true, false } do
+		withWorld(function(w, Fetch, Block)
+			local what = if merge then "batch merge" else "batch close"
+			local FIRST, SECOND = "acme/api#109", "acme/api#116"
+			local b = agentBoard(w, Fetch, Block)
+			holdCache(w, b)
+			w.runs = {}
+			b.github.run = function(command: any, done: any) table.insert(w.runs, { command = command, done = done }) end
+			Block.event(b, { ev = "action", act = "card-agent", value = TARGET } :: any, w.cx)
+			assert(b.agentFlight ~= nil and b.agentFlight.engine == nil and #w.clones == 1, what .. ": TARGET's setup is pending")
+			b.s.confirm = { kind = if merge then "batch-merge" else "batch-close", keys = { FIRST, SECOND } } :: any
+			Block.event(b, { ev = "action", act = "hub-confirm", value = "" } :: any, w.cx)
+			assert(#w.runs == 1 and b.s.busy[FIRST] ~= nil and b.s.busy[SECOND] == nil, what .. ": the first command is out")
+
+			local theirs = storeOwned(w, { WEB, API114, TARGET }, Cases.asOf + 60)
+			w.cx.render = function() error("the window is gone", 0) end
+			w.toasts = {}
+			w.runs[1].done(nil, nil)
+			assert(b.closed and b.watched[TARGET] == true, what .. ": adopting the ownership drew it and the draw closed the block")
+			assert(#w.runs == 1 and b.s.busy[SECOND] == nil, what .. ": no second command")
+			assert(#w.toasts == 0 and #w.started == 0 and #handoffs(w) == 0, what .. ": nothing else went on")
+			assert(same(w.kv["hub.cache"], theirs), what .. ": nothing was stored")
+		end)
+	end
 
 	-- Another window's ownership of an unrelated PR joins at dispatch, the draw that shows it raises (the block is gone), and
 	-- the requested action on a PR nobody watches sends nothing.
