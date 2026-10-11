@@ -1009,8 +1009,8 @@ end
 -- nothing between the two that reads the store or draws. The caller has already joined ownership and reconciled the flight, so
 -- a redraw that closes the block comes before the write; ownership only the last read brought is reconciled after the write.
 -- Returns whether the write was safe to make (false: the store could not be read, nothing was written, and the caller decides
--- what stands) and why the write failed, if it did. A refresh answer is not written here: its snapshot is stamped newer than
--- any cache stored before it, and `Sync.merge` carries what only those hold.
+-- what stands) and why the write failed, if it did. A refresh answer is not written here: it reads the store last itself
+-- (`startRefresh`) and merges against the complete cache it finds, since its snapshot is stamped newer than any stored before it.
 local function persistWhole(b: Block, cx: BlockCx, reapply: (() -> ())?, answered: boolean?): (boolean, string?)
 	if b.closed then return false, nil end
 	if not b.cache then return true, nil end
@@ -1359,12 +1359,12 @@ local function loadTandem(b: Block, cx: BlockCx)
 			return loadTandem(b, cx)
 		end
 		local flags = Model.tandemFlags(watched or b.watched, b.s.prs)
-		local changed, cleared = false, false
+		local changed, cleared, added = false, false, false
 		for _, pr in b.s.prs do
 			local want = flags[pr.key] == true
 			if pr.tandem ~= want then
 				changed = true
-				if not want then cleared = true end
+				if want then added = true else cleared = true end
 			end
 		end
 		-- A clear needs the stored cache's identity, taken above: without it the superseded cache could not be told from a
@@ -1373,6 +1373,8 @@ local function loadTandem(b: Block, cx: BlockCx)
 			if adopted then draw(b, cx) end
 			return
 		end
+		-- What the board owned before this answer decided: a clear is final only once the last read before its write succeeded.
+		local priorWatched, wasUnsaved = table.clone(b.watched), b.unsaved
 		if watched then b.watched = watched end
 		for _, pr in b.s.prs do pr.tandem = flags[pr.key] == true end
 		if not changed then
@@ -1389,9 +1391,20 @@ local function loadTandem(b: Block, cx: BlockCx)
 		recount(b)
 		-- The write reads the store once more first: a complete cache that landed since is the base it writes onto.
 		local safe, why = persistWhole(b, cx, nil, true)
+		if b.closed then return end
 		if not safe then
-			-- The store could not be read, so nothing is written; the next successful answer stores the board.
-			b.unsaved = true
+			-- The store could not be read, so nothing is written, and the clear is not safe: the cache it superseded is still the
+			-- store's, joinable, and would bring the flag back at the next guard with no answer behind it. The flags it cleared
+			-- return, the board is as it was before the answer, and the next successful answer decides again. A flag it added
+			-- stays, unstored.
+			if cleared then
+				for key in priorWatched do b.watched[key] = true end
+				if flagPrs(b) then
+					State.project(b.s)
+					recount(b)
+				end
+			end
+			b.unsaved = wasUnsaved or added
 		elseif why then
 			-- Memory state stands. Only this successful read may clear ownership, so the cache it superseded (the one stored
 			-- when the answer arrived) must not bring a cleared flag back at the same stamp.
@@ -1429,6 +1442,20 @@ startRefresh = function(b: Block, cx: BlockCx)
 		-- `refreshTried` has moved) tries again later. The answer's own save is the one write (`hold`).
 		local safe = not fresh or adoptShared(b, cx, true)
 		if b.closed then return end
+		local facts: Sync.Local = { added = {}, tandem = {} }
+		local canonMoved = false
+		local shared: Sync.Cache? = nil
+		if safe and fresh then
+			facts = readLocal()
+			local canon, moved = State.canonicalAdded(facts.added, fresh.prs)
+			facts.added, canonMoved = canon, moved
+			-- A fix still being set up for a PR another window has taken ends before the answer is merged: ending it draws, so it
+			-- comes before the last read of the store, and nothing between that read and the write draws or reads again.
+			reconcileFlight(b, cx)
+			if b.closed then return end
+			-- The last read. The answer is dropped, nothing merged or committed, when the store cannot be read.
+			shared, safe = sharedCache(b, false)
+		end
 		if not safe then
 			b.s.loading = false
 			b.s.error = { operation = KV_CACHE, message = "the cache couldn't be read, so the refresh was not stored" }
@@ -1440,13 +1467,22 @@ startRefresh = function(b: Block, cx: BlockCx)
 			b.s.loading = false
 			b.s.error = { operation = if err then err.operation else "hub", message = reasonOf(if err then err.message else "no answer"), rateLimit = if err then err.rateLimit else nil }
 		else
-			local canon, moved = State.canonicalAdded(readLocal().added, fresh.prs)
-			if moved then writeAdded(canon) end
-			-- Another window's cache, as new as this block's own, may flag a PR this block's own set does not hold yet. Join it
-			-- before the answer is merged and persisted, so the stored cache cannot erase it; a read of Tandem still out
-			-- predates it and is read again.
-			joinShared(b)
-			local cache = Sync.merge(fresh, b.cache, withTandem(b, fresh.prs), now)
+			if canonMoved then writeAdded(facts.added) end
+			-- A complete cache another window stored since this block last read the store (newer than the board's, or another at
+			-- its stamp) is the answer's newer base: the answer is merged against it, whole, and never against the older board. The
+			-- answer stays GitHub's word on every PR; what the base adds is its ownership and the pending merges it holds. Ownership
+			-- joins either way, so the stored cache cannot erase a flag; a read of Tandem still out predates it and is read again.
+			local previous = b.cache
+			local owned = b.handoffs
+			if shared then
+				local mine = cachedAt(b)
+				if mine == nil or (Model.epoch(shared.refreshedAt) :: number) > mine or storedId(shared) ~= (b.held or "") then
+					previous, b.held = shared, storedId(shared)
+				end
+				joinOwnership(b, shared)
+			end
+			facts.tandem = Model.tandemFlags(b.watched, fresh.prs)
+			local cache = Sync.merge(fresh, previous, facts, now)
 			cache.lastModified = b.sched.lastModified
 			local stamped: any = cache
 			stamped.sinceAt = requested
@@ -1457,11 +1493,12 @@ startRefresh = function(b: Block, cx: BlockCx)
 			-- This answer may predate a local edit no write has stored (a close whose save failed): it lays that PR back, so the
 			-- still-valid retained edits apply again before the counts and the write, which then store their effects.
 			if replayEdits(b, requested) then recount(b) end
-			reconcileFlight(b, cx)
-			-- The redraw may have closed the block: nothing is stored, read, queued or armed after that.
-			if b.closed then return end
 			local why = persist(b)
 			if why then b.s.error = { operation = KV_CACHE, message = "the cache couldn't be saved: " .. why } end
+			-- Ownership only the last read brought is reconciled with a fix still being set up after the write, as `persistWhole`
+			-- does. The redraw may have closed the block: nothing is read, queued or armed after that.
+			if b.handoffs ~= owned then reconcileFlight(b, cx) end
+			if b.closed then return end
 			showAdded(b, cx)
 			loadMerges(b)
 			detectMerges(b, cx)

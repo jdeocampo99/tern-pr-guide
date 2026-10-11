@@ -190,9 +190,10 @@ local function stubTern(w: any): any
 		-- `w.kvIn` is what the plugin finds stored and `w.kv` what it wrote. With `w.shared`, one store serves both: a read sees
 		-- every earlier write, and values are copied in and out, as a store shared by two windows would.
 		kv = {
-			-- `w.failGets` fails that many reads and then recovers; `w.onGet` runs before a read and may store another window's write.
+			-- `w.failGets` fails that many reads and then recovers; `w.onGet` runs before a read (it is given the key) and may store another
+			-- window's write.
 			get = function(key: string): any
-				if w.onGet then w.onGet() end
+				if w.onGet then w.onGet(key) end
 				if w.failGet then error("disk unreadable", 0) end
 				if (w.failGets or 0) > 0 then
 					w.failGets -= 1
@@ -4122,6 +4123,195 @@ local function replayedEdits()
 			assert(#b.replays == 0, variant .. ": and nothing is left to replay")
 		end)
 	end
+	-- A refresh answer arrives with a retained edit (a pending merge on KEY whose save failed). Another window stores a complete
+	-- cache (T3) after the answer's first adoption and immediately before its last read of the store: it has a pending merge on
+	-- another PR, a flag on TARGET and an older head for WEB than GitHub's answer. The answer is merged against T3 whole, in the
+	-- one write that follows that read: GitHub's answer stays the word on every head, T3's pending merge (on a head the answer
+	-- confirms), its flag and this window's valid edit all survive. The stamp is the answer's, and a T3 at the board's own stamp
+	-- is no different from a newer one.
+	local OTHER = "acme/api#116"
+	local function t3Of(at: number): any
+		local cache = storedCache({ WEB, API114, TARGET }, at)
+		cache.writeId = "other-window#1"
+		cache.sinceAt = Cases.asOf + 30
+		for _, cached in cache.prs do
+			if cached.key == OTHER then cached.pending = { method = "comment", at = iso(Cases.asOf + 50) } end
+			if cached.key == WEB then
+				cached.headOid = "t3-head"
+				cached.pending = { method = "comment", at = iso(Cases.asOf + 50) }
+			end
+		end
+		return cache
+	end
+	local function refreshWithEdit(w: any, Fetch: any, Block: any): (any, () -> any, number)
+		local b = board(w, Fetch, Block)
+		local run = auto(w, Block, b)
+		local t0 = w.now
+		local failed = failOnce(w)
+		run.done(nil, nil)
+		w.failWhen = nil
+		assert(failed() and #b.replays == 1 and State.prOf(b.s, KEY).pending ~= nil, "the pending merge is retained")
+		w.now += 120
+		local answer: any = nil
+		b.github = quietGithub(function(_, done) answer = done end)
+		Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+		assert(answer ~= nil and b.flights.refresh, "the refresh is out")
+		return b, function() return answer end, t0
+	end
+	for _, variant in { "a newer stamp", "the same stamp" } do
+		withWorld(function(w, Fetch, Block)
+			local what = "refresh, T3 at " .. variant
+			local b, asked, t0 = refreshWithEdit(w, Fetch, Block)
+			local webHead = State.prOf(b.s, WEB).headOid
+			local requested = w.now
+			local t3 = t3Of(if variant == "a newer stamp" then Cases.asOf + 60 else Cases.asOf)
+			local events: { string } = {}
+			local cacheReads, landed = 0, false
+			w.onGet = function(key: string)
+				if key ~= "hub.cache" then return end
+				table.insert(events, "get")
+				cacheReads += 1
+				-- The first read is the answer's adoption; the second is the last one before the write.
+				if cacheReads == 2 then
+					landed = true
+					w.kv["hub.cache"] = t3
+				end
+			end
+			w.failWhen = function(key: string): boolean
+				if key == "hub.cache" then table.insert(events, "set") end
+				return false
+			end
+			local sets = w.cacheSets or 0
+			asked()(freshAnswer(), nil)
+			w.onGet, w.failWhen = nil, nil
+			assert(landed and (w.cacheSets or 0) == sets + 1, what .. ": T3 landed before the last read, and one write followed")
+			local last = 0
+			for i, event in events do
+				if event == "set" then last = i end
+			end
+			assert(last == 3 and events[2] == "get", what .. ": the write follows the last read at once")
+			local there = w.kv["hub.cache"]
+			assert(there.writeId == b.held and there.writeId ~= "other-window#1", what .. ": it is this window's own write")
+			assert(Model.epoch(there.refreshedAt) == w.now and there.sinceAt == requested, what .. ": stamped by the answer, requested when it was")
+			assert(entry(there, OTHER).pending ~= nil and entry(there, OTHER).pending.at == iso(Cases.asOf + 50), what .. ": T3's pending merge survives")
+			assert(entry(there, WEB).headOid == webHead and entry(there, WEB).pending == nil, what .. ": GitHub's head stands, and T3's pending merge on another head does not")
+			assert(entry(there, TARGET).tandem == true and b.watched[TARGET] == true and State.prOf(b.s, TARGET).tandem, what .. ": T3's flag joined")
+			assert(entry(there, KEY).pending ~= nil and entry(there, KEY).pending.at == iso(t0) and #b.replays == 0, what .. ": the valid edit is on it")
+			assert(State.prOf(b.s, OTHER).pending ~= nil and State.prOf(b.s, KEY).pending ~= nil, what .. ": and the board agrees")
+			assert(b.cache.prs == b.s.prs and there.counts.toReview == b.cache.counts.toReview and not b.unsaved, what .. ": the board is what was stored")
+			assert(not b.flights.refresh and not b.s.loading, what .. ": and the refresh ended")
+		end)
+	end
+
+	-- The last read before the refresh's write fails. Nothing is written or merged, the board and its retained edit stay as they were,
+	-- the refresh ends with its error, and the next answer that can read the store stores the board once.
+	withWorld(function(w, Fetch, Block)
+		local b, asked, t0 = refreshWithEdit(w, Fetch, Block)
+		local before, stamp, sets = copy(w.kv["hub.cache"]), b.cache.refreshedAt, w.cacheSets or 0
+		local cacheReads = 0
+		w.onGet = function(key: string)
+			if key ~= "hub.cache" then return end
+			cacheReads += 1
+			if cacheReads == 2 then w.failGets = 1 end
+		end
+		asked()(freshAnswer(), nil)
+		w.onGet = nil
+		assert(w.failGets == 0, "the last read failed")
+		assert((w.cacheSets or 0) == sets and same(w.kv["hub.cache"], before), "nothing was written")
+		assert(b.cache.refreshedAt == stamp and #b.replays == 1 and State.prOf(b.s, KEY).pending ~= nil, "the board and its retained edit are as they were")
+		assert(not b.flights.refresh and not b.s.loading and b.s.error ~= nil and b.s.error.operation == "hub.cache", "the refresh ended with its error")
+
+		w.now += 120
+		local answer: any = nil
+		b.github = quietGithub(function(_, done) answer = done end)
+		Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+		assert(answer ~= nil, "the next refresh asks GitHub")
+		answer(freshAnswer(), nil)
+		assert((w.cacheSets or 0) == sets + 1 and Model.epoch(w.kv["hub.cache"].refreshedAt) == w.now, "its answer is stored once")
+		assert(entry(w.kv["hub.cache"], KEY).pending.at == iso(t0) and #b.replays == 0, "with the edit")
+	end)
+
+	-- This window owns TARGET (and stored it). A read of Tandem that no longer names it arrives, and the store cannot be read for
+	-- the last read before the write. The clear is not safe, so nothing about ownership changes: the board, the cache in memory and
+	-- the store all still flag TARGET, no write is tried, and the next guard joins nothing. A later answer that can read the store
+	-- clears it and stores once.
+	local function owning(w: any, Fetch: any, Block: any): any
+		local b = agentBoard(w, Fetch, Block)
+		b.github = quietGithub(function(_, done) done(nil, { operation = "hub", message = "no answer" }) end)
+		holdCache(w, b)
+		claim(w, Block, b)
+		assert(b.watched[TARGET] == true and w.kv["hub.cache"].writeId == b.held and not b.unsaved, "this window owns TARGET and stored it")
+		return b
+	end
+	withWorld(function(w, Fetch, Block)
+		local b = owning(w, Fetch, Block)
+		local before, sets, joined = copy(w.kv["hub.cache"]), w.cacheSets or 0, b.handoffs
+		Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+		local answer = reads(w)[#reads(w)]
+		local gets = 0
+		w.onGet = function(key: string)
+			if key ~= "hub.cache" then return end
+			gets += 1
+			-- The answer reads the store to name the superseded cache, to adopt, to join, and last before the write.
+			if gets == 4 then w.failGets = 1 end
+		end
+		answer.done(out("WATCH"))
+		w.onGet = nil
+		assert(w.failGets == 0, "the last read failed")
+		local function owned(step: string)
+			assert(State.prOf(b.s, TARGET).tandem == true and b.watched[TARGET] == true, step .. ": the board still flags TARGET")
+			assert(entry(b.cache, TARGET).tandem == true and b.cache.prs == b.s.prs, step .. ": and so does the cache in memory")
+			assert(b.cache.counts.needFixes == needFixesOf(b), step .. ": whose counts agree")
+			assert((w.cacheSets or 0) == sets and same(w.kv["hub.cache"], before), step .. ": nothing was written")
+			assert(next(b.retired) == nil and not b.unsaved and b.handoffs == joined, step .. ": nothing retired, unsaved or joined")
+			assert(card(b.s, TARGET).main.act == "card-handoff", step .. ": the card hands off to Tandem")
+		end
+		owned("the answer")
+		Block.event(b, { ev = "action", act = "hub-move", value = "down" } :: any, w.cx)
+		owned("navigation")
+		local clones = #w.clones
+		Block.event(b, { ev = "action", act = "card-agent", value = TARGET } :: any, w.cx)
+		assert(#w.clones == clones and #w.started == 0 and b.agentFlight == nil, "no fix starts on TARGET")
+		owned("dispatch")
+
+		Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+		reads(w)[#reads(w)].done(out("WATCH"))
+		assert(not State.prOf(b.s, TARGET).tandem and b.watched[TARGET] == nil, "a readable store lets a later answer clear it")
+		assert((w.cacheSets or 0) == sets + 1 and w.kv["hub.cache"].writeId == b.held and w.kv["hub.cache"].writeId ~= before.writeId, "and it stores once")
+		assert(entry(w.kv["hub.cache"], TARGET).tandem ~= true and next(b.retired) == nil and not b.unsaved, "TARGET is stored cleared")
+	end)
+
+	-- The last read succeeds and the answer's save fails: the clear stands in memory and only the cache the answer superseded is
+	-- retired. Another window's write that lands during the failing save has its own id, is not retired, and the next guard joins it.
+	withWorld(function(w, Fetch, Block)
+		local b = owning(w, Fetch, Block)
+		local superseded = w.kv["hub.cache"].writeId
+		Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+		local answer = reads(w)[#reads(w)]
+		local theirs: any = nil
+		w.failKv = true
+		w.whileFailing = function()
+			w.whileFailing = nil
+			theirs = storedCache({ WEB, API114, TARGET }, Cases.asOf)
+			theirs.writeId = "another-window#2"
+			w.kv["hub.cache"] = theirs
+		end
+		local sets = w.cacheSets or 0
+		answer.done(out("WATCH"))
+		w.failKv = false
+		assert(theirs ~= nil and (w.cacheSets or 0) == sets + 1, "the one save failed, and the other window wrote during it")
+		assert(not State.prOf(b.s, TARGET).tandem and b.watched[TARGET] == nil, "the clear stands in memory")
+		assert(b.s.error ~= nil and b.s.error.operation == "hub.cache" and string.find(b.s.error.message, "couldn't be saved", 1, true), "the save error is shown")
+		local retired = {}
+		for id in b.retired do table.insert(retired, id) end
+		assert(#retired == 1 and b.retired[superseded] == true and b.retired["another-window#2"] == nil, "only the superseded cache is retired")
+		assert(same(w.kv["hub.cache"], theirs), "the later write stands")
+
+		Block.event(b, { ev = "action", act = "hub-move", value = "down" } :: any, w.cx)
+		assert(State.prOf(b.s, TARGET).tandem == true and b.watched[TARGET] == true, "the next guard joins the later write's flag")
+		assert((w.cacheSets or 0) == sets + 1 and same(w.kv["hub.cache"], theirs), "and stores nothing")
+	end)
+
 end
 
 return function()
