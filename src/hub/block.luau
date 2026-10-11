@@ -2089,7 +2089,8 @@ local function runMerge(b: Block, cx: BlockCx, pr: Model.HubPR, done: ((err: str
 	end
 	local method = methodOf(b, pr)
 	local head = pr.headOid
-	State.setBusy(s, pr.key, MERGE_BUSY[method.kind] or "Merging…")
+	local mark = MERGE_BUSY[method.kind] or "Merging…"
+	State.setBusy(s, pr.key, mark)
 	b.github.run(Github.commands.merge(pr, method), function(_, err)
 		if b.closed then return end
 		if err then
@@ -2100,6 +2101,9 @@ local function runMerge(b: Block, cx: BlockCx, pr: Model.HubPR, done: ((err: str
 				cx:toast("error", "Couldn't merge #" .. pr.number .. ": " .. reasonOf(err.message), pr.repo)
 			end
 		elseif method.kind == "squash" or method.kind == "merge" or method.kind == "rebase" then
+			-- The edit below applies only on the head the merge began on, and it is what clears the busy mark there. An adopted
+			-- cache that moved the head skips it, so this merge's own mark clears here, and only if nothing newer replaced it.
+			if s.busy[pr.key] == mark then State.setBusy(s, pr.key, nil) end
 			keepCache(b, cx, function()
 				s.acted[pr.key] = true
 				State.dropPr(s, pr.key)

@@ -1811,6 +1811,46 @@ local function staleUpdate()
 			end
 		end)
 	end
+
+	-- The same for a direct GitHub merge: its success after another window's complete cache moved the PR to H2 leaves H2 on the
+	-- board, unmodified, and not busy; a mark another operation has put there since stays. On the same head (the control) the
+	-- merge applies and the PR leaves the board.
+	for _, variant in { "the same head", "a moved head", "a moved head and a newer operation" } do
+		withWorld(function(w, Fetch, Block)
+			local b = behind(w, Block)
+			reads(w)[1].done(out("WATCH"))
+			lag(b)
+			w.shared = true
+			w.kv["hub.cache"] = storedCache({ WEB, API114 }, Cases.asOf)
+			b.cache = Sync.load(copy(w.kv["hub.cache"]))
+			assert(b.cache ~= nil, "this window holds a cache of the store's stamp")
+			b.s.merges["acme/api"] = { method = { kind = "squash" }, source = "declared", ask = false }
+			b.s.confirm = { kind = "merge", keys = { KEY } } :: any
+			Block.event(b, { ev = "action", act = "hub-confirm", value = "" } :: any, w.cx)
+			assert(#w.runs == 1 and table.find(w.runs[1].command.argv, "merge") ~= nil and b.s.busy[KEY] == "Merging…", variant .. ": the merge is out")
+			if variant ~= "the same head" then
+				local h2 = storedCache({ WEB, API114 }, Cases.asOf + 60)
+				h2.writeId, h2.sinceAt = "other-window#1", Cases.asOf + 30
+				for _, cached in h2.prs do
+					if cached.key == KEY then cached.headOid, cached.behind = "h2-head", true end
+				end
+				w.kv["hub.cache"] = h2
+			end
+			if variant == "a moved head and a newer operation" then b.s.busy[KEY] = "Updating…" end
+			w.runs[1].done(nil, nil)
+			local pr: any = State.prOf(b.s, KEY)
+			assert(w.toasts[#w.toasts].kind == "success", variant .. ": it succeeded")
+			if variant == "the same head" then
+				assert(pr == nil and b.s.acted[KEY] and b.s.busy[KEY] == nil, variant .. ": the merge applied and cleared it")
+			elseif variant == "a moved head" then
+				assert(pr ~= nil and pr.headOid == "h2-head" and b.s.busy[KEY] == nil, variant .. ": H2 stands and the card is not busy")
+				assert(pr.behind == true and not b.s.acted[KEY] and #b.replays == 0, variant .. ": nothing the merge made on H1 is applied to it or kept")
+			else
+				assert(pr ~= nil and pr.headOid == "h2-head" and b.s.busy[KEY] == "Updating…", variant .. ": the newer operation's mark stays")
+				assert(pr.behind == true and not b.s.acted[KEY] and #b.replays == 0, variant .. ": and nothing from H1 is applied or kept")
+			end
+		end)
+	end
 end
 
 -- A board whose TARGET holds a ready fix on the Review fix page, kept by a retained engine. The push and the lease
