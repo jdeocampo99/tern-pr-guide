@@ -4129,7 +4129,8 @@ local function replayedEdits()
 	-- one write that follows that read: GitHub's answer stays the word on every head, T3's pending merge (on a head the answer
 	-- confirms), its flag and this window's valid edit all survive. The stamp is the answer's, and a T3 at the board's own stamp
 	-- is no different from a newer one.
-	local OTHER = "acme/api#116"
+	-- Not #116: its queue merge failure removes a pending merge in `Sync.merge`, so it could never survive.
+	local OTHER = "acme/api#115"
 	local function t3Of(at: number): any
 		local cache = storedCache({ WEB, API114, TARGET }, at)
 		cache.writeId = "other-window#1"
