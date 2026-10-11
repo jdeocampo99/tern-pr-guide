@@ -37,7 +37,17 @@ type Sched = {
 type AgentFlight = {
 	key: string, engine: AgentFix.Engine?, settled: boolean, stopping: boolean,
 	input: AgentFix.Input?, bot: boolean?, cancel: (() -> ())?, releasing: boolean, starting: boolean?, fixtureStep: number?,
+	failure: string?, -- why the engine failed: a lease held after it keeps this failed state, which a watched card would otherwise drop
 }
+
+-- A local edit (a pending merge, a dropped PR) the viewer made that no write has stored: the PR it named, the head it was
+-- made on, and the edit itself, which can be applied again to another board. `at` is a time (seconds) by which that head
+-- had been seen: a snapshot whose request began after it is the later word on the head (see `replayEdits`). `applied` is
+-- whether the edit is on the board now, and `present` whether its PR is still on the board after it (a dropped PR is not),
+-- which is what a write must hold to represent the edit (see `persist`). An edit made while its PR was absent from the board
+-- (a capped cache omitted it) is kept unapplied until the PR returns on that head. Replays stay in the order the edits were made.
+-- `queued` marks a pending merge in the repo's queue: GitHub reporting the queue dropped that PR retires it (see `replayEdits`).
+type Replay = { key: string, head: string, at: number, edit: () -> (), applied: boolean, present: boolean, queued: boolean? }
 
 -- The hub block's own state.
 export type Block = {
@@ -49,7 +59,17 @@ export type Block = {
 	agentFlight: AgentFlight?, -- lookup, engine and retained lease; never serialized
 	botKeys: { [string]: boolean }, -- retains the bot input kind across clone/stop/retry, never saved
 	github: Github.Client, timers: Timers,
-	flights: { refresh: boolean, checks: boolean, probe: boolean, flake: boolean }, -- one call of each kind at a time
+	flights: { refresh: boolean, checks: boolean, probe: boolean, flake: boolean, tandem: boolean }, -- one call of each kind at a time
+	watched: { [string]: boolean }, -- the PRs Tandem watches (lowercase "owner/repo#123"): the cache's flags until a read of Tandem succeeds, then that read
+	handoffs: number, -- hand-offs Tandem has taken this session: a read that began before one cannot name that PR
+	seen: { [string]: boolean }, -- write ids of caches this block stored or joined: one id is another window's word once, never again
+	heard: { { string } }, -- the PRs each other window's ownership-bearing write joined since the read of Tandem now out began, by key
+	held: string?, -- the write id of the stored cache this block's snapshot is: the one it last stored or adopted ("" when that had none; see `sharedCache`)
+	replays: { Replay }, -- successful local edits no write has stored yet; `persist` clears those it stores, `adoptShared` lays them back onto an adopted cache
+	retired: { [string]: boolean }, -- write ids of stored caches a successful read of Tandem superseded whose own save failed (see `retire`)
+	unsaved: boolean, -- ownership restored onto an adopted cache that no write has stored yet (see `adoptShared`); `persist` clears it
+	root: string?, -- the repository root `cx.cwd` is in, found once (Tandem's calls name the project by it)
+	rootWaiters: { (string?) -> () }?, -- the callers waiting on that lookup while it runs
 	sched: Sched,
 	closed: boolean, -- a render failed: the window is gone, so no timer starts anything
 	refetch: boolean, -- a refresh was asked for while one was running: run another when it ends
@@ -222,12 +242,21 @@ local function kvGet(key: string): any
 	return if ok then value else nil
 end
 
--- The cache other windows (or an earlier run) stored, if it is a valid schema 1.
-local function readCache(): Sync.Cache?
-	return Sync.load(kvGet(KV_CACHE))
+-- The cache other windows (or an earlier run) stored, if it is a valid schema 1, and whether the store could be read at
+-- all (false: it threw, which is not the same as holding no valid cache).
+local function readCache(): (Sync.Cache?, boolean)
+	local ok, raw = pcall(tern.kv.get, KV_CACHE)
+	if not ok then return nil, false end
+	return Sync.load(raw), true
 end
 
--- Facts only this machine knows. `tandem` waits for the Tandem change.
+-- The `writeId` of a stored cache ("" when it has none, or the store holds no valid cache).
+local function storedId(cache: Sync.Cache?): string
+	local id = if cache then (cache :: any).writeId else nil
+	return if type(id) == "string" then id else ""
+end
+
+-- Facts only this machine knows. `tandem` is the block's own read of Tandem, applied by `withTandem`.
 local function readLocal(): Sync.Local
 	local added: Sync.Added = {}
 	local raw = kvGet(KV_ADDED)
@@ -241,6 +270,30 @@ local function readLocal(): Sync.Local
 	return { added = added, tandem = {} }
 end
 
+-- The local facts for a refresh of `prs`, with Tandem's watched PRs flagged by the board's own keys.
+local function withTandem(b: Block, prs: { Model.HubPR }): Sync.Local
+	local facts = readLocal()
+	facts.tandem = Model.tandemFlags(b.watched, prs)
+	return facts
+end
+
+-- `prs` with Tandem's flag set. The list a fixture hands over is shared data, so a flagged PR is a copy of it.
+local function flagged(watched: { [string]: boolean }, prs: { Model.HubPR }): { Model.HubPR }
+	local flags = Model.tandemFlags(watched, prs)
+	local out: { Model.HubPR } = {}
+	for i, pr in prs do
+		local want = flags[pr.key] == true
+		if pr.tandem == want then
+			out[i] = pr
+		else
+			local copy = table.clone(pr)
+			copy.tandem = want
+			out[i] = copy
+		end
+	end
+	return out
+end
+
 -- The tiny record the window's status segment reads every 2 s, so it never decodes the whole cache.
 local function writeStatus(cache: Sync.Cache)
 	local counts = cache.counts
@@ -250,15 +303,65 @@ local function writeStatus(cache: Sync.Cache)
 	})
 end
 
+-- Every write of `hub.cache` carries a `writeId` no other write has: this window's nonce and a count. It is how a stored
+-- cache is told apart from another stored at the same `refreshedAt` (a hand-off keeps the stamp), and it never stands in for
+-- GitHub's freshness. A cache stored before ids existed has none, which `storedId` reads as "".
+local WINDOW = string.format("%x.%x.%s", os.time(), math.random(0, 0x7fffffff), (string.gsub(tostring({}), "%W", "")))
+local writes = 0
+
 -- Writes the cache under the size cap. Returns why it failed; memory state stands either way.
 local function persist(b: Block): string?
 	local cache = b.cache
 	if not cache then return nil end
+	writes += 1
+	local id = WINDOW .. "#" .. writes
+	local stored: { [string]: boolean } = {}
 	local ok, err = pcall(function()
-		tern.kv.set(KV_CACHE, Sync.save(cache, CACHE_CAP_BYTES, function(value: any): number return #tern.json.encode(value) end))
+		local value = Sync.save(cache, CACHE_CAP_BYTES, function(value: any): number return #tern.json.encode(value) end)
+		value.writeId = id
+		for _, pr in value.prs do stored[pr.key] = true end
+		tern.kv.set(KV_CACHE, value)
 	end)
-	if ok then writeStatus(cache) end
+	if ok then
+		b.unsaved = false
+		b.held = id
+		-- A write represents an edit only when it is on the board and the stored PRs agree with the board about its PR (a PR
+		-- the size cap evicted, or one the board lacks, is not stored with the edit's effect): the rest stay for a later replay.
+		-- An edit the write holds that took its PR off the board (a close, a merge, a removal) was made after the older edits of
+		-- that PR and supersedes them, so those go too: the PR reopening on the same head must not bring a pending merge back.
+		-- A cap that omits a PR retires nothing: the board still holds that PR, so no held edit took it off.
+		local held: { [number]: boolean } = {}
+		local removedAt: { [string]: number } = {}
+		for i, replay in b.replays do
+			if replay.applied and replay.present == (stored[replay.key] == true) then
+				held[i] = true
+				if not replay.present then removedAt[replay.key] = i end
+			end
+		end
+		local kept: { Replay } = {}
+		for i, replay in b.replays do
+			if not held[i] and i > (removedAt[replay.key] or 0) then table.insert(kept, replay) end
+		end
+		b.replays = kept
+		b.seen[id] = true
+		writeStatus(cache)
+	end
 	return if ok then nil else tostring(err)
+end
+
+-- Puts the cache's PRs and its Needs fixes and To review counts back in step with the board after Tandem's flags move a PR.
+-- The counts cover every PR, not the grid a search or repo filter leaves. `flashAt` stays: a count that fell is no alert.
+local function recount(b: Block)
+	local cache = b.cache
+	if not cache then return end
+	cache.prs = b.s.prs
+	local toReview, needFixes = 0, 0
+	for _, pr in cache.prs do
+		local column = Model.classify(pr, b.s.now)
+		if column == "to_review" then toReview += 1 end
+		if column == "needs_fixes" then needFixes += 1 end
+	end
+	cache.counts = { toReview = toReview, needFixes = needFixes, flashAt = cache.counts.flashAt }
 end
 
 local function cachedAt(b: Block): number?
@@ -302,6 +405,12 @@ local function forgetReturned(b: Block, flight: AgentFlight): string
 		disposition = if flight.settled then "forget" else "wait"
 	else
 		local lease = if flight.engine then flight.engine.held() else nil
+		-- The engine's held lease is the truth. A failure that reached the board before any worktree event, or before the
+		-- engine handle existed, names no path, and a card Tandem owns drops such a state; put it back so the lease keeps
+		-- its Return worktree until a guarded return succeeds.
+		if lease and flight.settled and flight.failure and b.s.agents[flight.key] == nil then
+			State.agentFailed(b.s, flight.key, flight.failure, lease.path, true)
+		end
 		disposition = State.agentFlight(b.s, flight.key, {
 			settled = flight.settled, starting = flight.starting == true, releasing = flight.releasing,
 			busy = flight.engine ~= nil and flight.engine.busy(), worktree = if lease then lease.path else nil,
@@ -342,7 +451,7 @@ local function closeAgentFlight(b: Block, flight: AgentFlight)
 		returnAgentLease(b, flight, function(ok, err)
 			if not ok then
 				local lease = (flight.engine :: AgentFix.Engine).held()
-				State.agentFailed(b.s, flight.key, err or "The worktree lease could not be returned", if lease then lease.path else nil)
+				State.agentFailed(b.s, flight.key, err or "The worktree lease could not be returned", if lease then lease.path else nil, lease ~= nil)
 			end
 		end)
 	end
@@ -392,8 +501,159 @@ local function agentFolder(b: Block, flight: AgentFlight, prompt: string, done: 
 	if not ok then finish(nil, tostring(err)) end
 end
 
+-- Ownership runs one way. A PR the other window's cache flags joins this block's set (it may be a hand-off this block's
+-- own reads predate, so a read that began before cannot name it and is read again). The other window's silence never
+-- clears one: only a successful read of Tandem here does, whatever the cache's age.
+-- An ownership-bearing write whose id this block has not met is also remembered by the PRs it flags (`b.heard`), even when
+-- the block held every flag already: a hand-off Tandem took again moves nothing here, and a local save that follows
+-- replaces the stored id, so only this record tells a read of Tandem that began earlier that it predates the write.
+local function joinOwnership(b: Block, shared: Sync.Cache)
+	local took = false
+	local flags: { string } = {}
+	for _, pr in shared.prs do
+		local key = string.lower(pr.repo) .. "#" .. pr.number
+		if pr.tandem then
+			table.insert(flags, key)
+			if not b.watched[key] then b.watched[key], took = true, true end
+		end
+	end
+	local id = storedId(shared)
+	if id ~= "" and not b.seen[id] then
+		b.seen[id] = true
+		if #flags > 0 then table.insert(b.heard, flags) end
+	end
+	if took then b.handoffs += 1 end
+end
+
+-- The cache another window stored, if it is as new as this block's own (`strict`: newer). Adopting a cache takes the
+-- strictly newer one; joining its ownership also takes one stored at the same time, because a hand-off keeps the
+-- cache's own `refreshedAt`, so the window that took it leaves the same stamp this block holds.
+-- The second result is false when the store could not be read: "no cache" is then a guess, not an answer.
+local function sharedCache(b: Block, strict: boolean): (Sync.Cache?, boolean)
+	local shared, readable = readCache()
+	if not shared or b.retired[storedId(shared)] then return nil, readable end
+	local theirs, mine = Model.epoch(shared.refreshedAt), cachedAt(b)
+	if not theirs then return nil, true end
+	if mine == nil or theirs > mine or (not strict and theirs == mine) then return shared, true end
+	-- A cache stored at this block's own stamp that is not the one this block last stored or adopted is another window's
+	-- (a hand-off or a pending merge keeps the stamp) and may hold data this board lacks, whether or not an ownership is
+	-- unsaved, so it is adopted whole before anything writes (the store's own id decides, not its stamp).
+	if strict and theirs == mine and storedId(shared) ~= (b.held or "") then return shared, true end
+	return nil, true
+end
+
+-- The identity of the cache the store holds now, taken before a successful read of Tandem clears a flag. `readable` is false
+-- when the store cannot be read at all; `id` is nil when it holds no valid cache. If that answer's own save fails, this id
+-- is the one retired (`b.retired`), and `sharedCache` ignores a cache that carries it. It is captured before anything is
+-- joined or written, so a write that lands later, whatever its stamp, has another id and is never retired.
+local function storedNow(): (boolean, string?)
+	local ok, raw = pcall(tern.kv.get, KV_CACHE)
+	if not ok then return false, nil end
+	local cache = Sync.load(raw)
+	return true, if cache then storedId(cache) else nil
+end
+
+-- Joins the ownership of a shared cache stored at this block's cache's time or later; an older one joins nothing. Returns
+-- the cache it joined, if any.
+local function joinShared(b: Block): (Sync.Cache?, boolean)
+	local shared, readable = sharedCache(b, false)
+	if shared then joinOwnership(b, shared) end
+	return shared, readable
+end
+
+-- Whether a write another window made after a read of Tandem began (`b.heard`) flags a PR that read's answer omits. That
+-- answer predates the write, so it cannot clear the flag even when this block already held it.
+local function renewed(b: Block, watched: { [string]: boolean }): boolean
+	for _, flags in b.heard do
+		for _, key in flags do
+			if not watched[key] then return true end
+		end
+	end
+	return false
+end
+
+-- Puts Tandem's flags from this block's set onto its PRs. Positive only: a flag is set here, never cleared. Returns
+-- whether a PR moved.
+local function flagPrs(b: Block): boolean
+	local flags = Model.tandemFlags(b.watched, b.s.prs)
+	local moved = false
+	for _, pr in b.s.prs do
+		if flags[pr.key] and not pr.tandem then pr.tandem, moved = true, true end
+	end
+	return moved
+end
+
+-- The ownership half of every guard: joins what another window stored at this cache's time or later, flags the PRs and
+-- recounts. It is read-only toward everything else (no flight is touched, nothing drawn or persisted) so `carryOn` can
+-- call it. A sample board stays wholly local. Returns whether a PR moved, and whether the store could be read: when it could
+-- not, no other window's ownership was checked, and a guard must not let an effect on a branch begin or go on.
+local UNCHECKED = "Tandem's ownership couldn't be checked"
+
+local function joinOwned(b: Block): (boolean, boolean)
+	if b.fixture or b.closed then return false, true end
+	local _, readable = joinShared(b)
+	if not flagPrs(b) then return false, readable end
+	State.project(b.s)
+	recount(b)
+	return true, readable
+end
+
 local function currentFlight(b: Block, flight: AgentFlight): boolean
 	return not b.closed and b.agentFlight == flight and not flight.settled and not flight.stopping
+end
+
+-- True while the fix may go on. One owner per branch: a fix still being set up for a PR Tandem has taken (no engine
+-- yet, so no worktree is held) ends as stopped, as Stop would end it, and never starts. A running engine is Stop's.
+-- Ownership another window stored since the last callback joins first, so every continuation of the setup sees it, and
+-- a PR that move flagged is drawn here even when this fix goes on. `superseded` is a successful read of Tandem that has
+-- just decided ownership: the stored cache is older than that answer, so it joins nothing and cannot restore a flag the
+-- answer cleared. A store that cannot be read ends the setup as failed: ownership could not be checked, so no step goes on.
+local function carryOn(b: Block, cx: BlockCx, flight: AgentFlight, superseded: boolean?): boolean
+	if not currentFlight(b, flight) then return false end
+	if flight.engine or flight.starting then return true end
+	local moved, readable = false, true
+	if not superseded then moved, readable = joinOwned(b) end
+	local pr = State.prOf(b.s, flight.key)
+	local owned = pr ~= nil and pr.tandem
+	if readable and not owned then
+		if moved then draw(b, cx) end
+		-- A render that raised has closed the block and settled this flight: nothing may go on to start an engine.
+		return currentFlight(b, flight)
+	end
+	flight.stopping = true
+	if flight.cancel then flight.cancel() end
+	flight.settled = true
+	b.agentFlight = nil
+	State.agentOutcome(b.s, flight.key, if owned then { kind = "stopped" } else { kind = "failed", reason = UNCHECKED })
+	draw(b, cx)
+	return false
+end
+
+-- `carryOn` for the current flight, if any: called wherever a board is installed whole, so setup that belongs to a PR the
+-- new board marks as Tandem's ends at once.
+local function reconcileFlight(b: Block, cx: BlockCx)
+	local flight = b.agentFlight
+	if flight then carryOn(b, cx, flight) end
+end
+
+-- The check before an effect on a branch: ownership another window stored joins, and a fix still being set up is
+-- reconciled with it. Run at every action's dispatch and before each command of a push. Returns whether a PR moved, and
+-- whether ownership could be checked (see `joinOwned`).
+local function syncOwnership(b: Block, cx: BlockCx): (boolean, boolean)
+	if b.fixture then return false, true end
+	local moved, readable = joinOwned(b)
+	reconcileFlight(b, cx)
+	return moved, readable
+end
+
+-- The check at the point a direct effect on a PR's branch is decided (Update branch, merge when ready, a push): ownership
+-- another window stored joins first, and when the store cannot be read the effect is refused, since a hand-off may be in it.
+-- `what` completes "Couldn't …".
+local function ownershipChecked(b: Block, cx: BlockCx, what: string): boolean
+	local _, readable = joinOwned(b)
+	if readable then return true end
+	cx:toast("error", "Couldn't " .. what .. ": " .. UNCHECKED)
+	return false
 end
 
 local function settleAgent(b: Block, cx: BlockCx, flight: AgentFlight, outcome: AgentFix.Outcome)
@@ -403,6 +663,7 @@ local function settleAgent(b: Block, cx: BlockCx, flight: AgentFlight, outcome: 
 		return
 	end
 	flight.settled = true
+	if outcome.kind == "failed" then flight.failure = outcome.reason end
 	-- A ready callback is preserved even if closure was detected just before it arrived.
 	if outcome.kind == "ready" then
 		b.s.agents[flight.key] = { kind = "ready", fix = outcome.fix, reviewed = {} }
@@ -448,7 +709,7 @@ local function readFeedback(b: Block, pr: Model.HubPR, done: (Fixes.FixDetails?,
 end
 
 local function startAgentEngine(b: Block, cx: BlockCx, flight: AgentFlight, clone: string, checkout: string, pr: Model.HubPR)
-	if not currentFlight(b, flight) then return end
+	if not carryOn(b, cx, flight) then return end
 	-- HubPR has baseBranch and headOid, but no head branch. Read and revalidate all three
 	-- together; never guess a branch from a local checkout or pass a stale head to the engine.
 	local replied = false
@@ -457,7 +718,7 @@ local function startAgentEngine(b: Block, cx: BlockCx, flight: AgentFlight, clon
 	local function metadata(out: Github.Out)
 		if replied then return end
 		replied = true
-		if not currentFlight(b, flight) then return end
+		if not carryOn(b, cx, flight) then return end
 		local ok, meta = pcall(tern.json.decode, out.stdout)
 		local latest = State.prOf(b.s, pr.key)
 		if out.status ~= 0 or out.timed_out or not ok or type(meta) ~= "table" then
@@ -510,13 +771,13 @@ local function startAgentEngine(b: Block, cx: BlockCx, flight: AgentFlight, clon
 		if not b.closed then draw(b, cx) end
 	end
 	local function refs()
-		if not currentFlight(b, flight) then return end
+		if not carryOn(b, cx, flight) then return end
 		local ok, err = pcall(Fetch.runner, { "gh", "pr", "view", tostring(pr.number), "--repo", pr.repo, "--json", "headRefName,baseRefName,headRefOid" }, { timeout_ms = 30_000 }, metadata)
 		if not ok then metadata({ status = -1, stdout = "", stderr = tostring(err), timed_out = false }) end
 	end
 	if flight.bot then
 		readFeedback(b, pr, function(details, err)
-			if not currentFlight(b, flight) then return end
+			if not carryOn(b, cx, flight) then return end
 			local latest = State.prOf(b.s, pr.key)
 			local input, prompt = State.botFeedback(b.s, pr.key)
 			if not details or not latest or not input or not prompt then
@@ -532,7 +793,8 @@ end
 local function beginAgent(b: Block, cx: BlockCx, key: string, mode: "fix" | "clone" | "folder")
 	if b.closed then return end
 	local pr = State.prOf(b.s, if key ~= "" then key else b.s.selected or "")
-	if not pr or b.s.busy[pr.key] then return end
+	-- One owner per branch: no fix starts, retries or looks for a clone on a PR Tandem watches.
+	if not pr or pr.tandem or b.s.busy[pr.key] then return end
 	if b.agentFlight then forgetReturned(b, b.agentFlight) end
 	if b.agentFlight or State.agentRunning(b.s) then return cx:toast("info", "One fix at a time") end
 	local existing = b.s.agents[pr.key]
@@ -550,7 +812,7 @@ local function beginAgent(b: Block, cx: BlockCx, key: string, mode: "fix" | "clo
 	local flight: AgentFlight = { key = pr.key, settled = false, stopping = false, releasing = false, bot = b.botKeys[pr.key] == true }
 	b.agentFlight = flight
 	draw(b, cx)
-	if not currentFlight(b, flight) then return end
+	if not carryOn(b, cx, flight) then return end
 	if b.fixture then
 		-- Even ordinary sample boards stay entirely local. ⌘R advances one recorded event.
 		local data: any = FIXTURES["agent-cards"]()
@@ -567,7 +829,7 @@ local function beginAgent(b: Block, cx: BlockCx, key: string, mode: "fix" | "clo
 	local function cloned(path: string?, err: string?)
 		if answered then return end
 		answered = true
-		if not currentFlight(b, flight) then return end
+		if not carryOn(b, cx, flight) then return end
 		if path then return startAgentEngine(b, cx, flight, path, checkout or path, pr) end
 		flight.settled = true
 		b.agentFlight = nil
@@ -577,10 +839,10 @@ local function beginAgent(b: Block, cx: BlockCx, key: string, mode: "fix" | "clo
 	end
 	local function find(allowClone: boolean)
 		local ok, err = pcall(Fetch.findAgentClone, near, dir, pr.repo, function(slug, answer)
-			if not currentFlight(b, flight) then return answer(nil) end
+			if not carryOn(b, cx, flight) then return answer(nil) end
 			if not allowClone then missing = true; return answer(nil) end
 			agentFolder(b, flight, "Choose a parent folder for " .. slug, function(parent, why)
-				if not currentFlight(b, flight) then return answer(nil) end
+				if not carryOn(b, cx, flight) then return answer(nil) end
 				if why then cloned(nil, why); return answer(nil) end
 				if not parent then cancelled = true; return answer(nil) end
 				local name = string.match(slug, "[^/]+$") :: string
@@ -592,14 +854,14 @@ local function beginAgent(b: Block, cx: BlockCx, key: string, mode: "fix" | "clo
 	local function choose()
 		if mode ~= "folder" then return find(mode == "clone") end
 		agentFolder(b, flight, "Choose the existing clone of " .. pr.repo, function(path, err)
-			if not currentFlight(b, flight) then return end
+			if not carryOn(b, cx, flight) then return end
 			if err then return cloned(nil, err) end
 			if not path then cancelled = true; return cloned(nil, nil) end
 			local checked = false
 			local function selected(repo: Fetch.Repo?, why: string?)
 				if checked then return end
 				checked = true
-				if not currentFlight(b, flight) then return end
+				if not carryOn(b, cx, flight) then return end
 				if not repo then return cloned(nil, why or "The selected folder is not a clone") end
 				local ok, problem = pcall(Fetch.rememberAgentClone, pr.repo, repo.root)
 				if not ok or problem then return cloned(nil, tostring(problem)) end
@@ -616,7 +878,7 @@ local function beginAgent(b: Block, cx: BlockCx, key: string, mode: "fix" | "clo
 	local function found(repo: Fetch.Repo?)
 		if checked then return end
 		checked = true
-		if not currentFlight(b, flight) then return end
+		if not carryOn(b, cx, flight) then return end
 		near, checkout = repo, if repo then repo.root else nil
 		choose()
 	end
@@ -674,23 +936,177 @@ local function announce(b: Block, cx: BlockCx, old: Sync.Cache?, fresh: { Model.
 	end)
 end
 
--- Takes another window's newer cache, so windows share one refresh.
-local function adoptShared(b: Block, cx: BlockCx)
-	local shared = readCache()
-	if not shared then return end
-	local theirs, mine = Model.epoch(shared.refreshedAt), cachedAt(b)
-	if theirs and (mine == nil or theirs > mine) then
-		local now = os.time()
-		announce(b, cx, b.cache, shared.prs, now)
-		b.cache = shared
-		State.replace(b.s, shared.prs, now, shared.refreshedAt)
+-- Applies the local edits no write has stored to the board's PRs again, each only while its PR is still there on the head
+-- it was made on, and records which of them are on the board now (`applied`, `present`). `since` is for a complete board
+-- (an adopted cache, or this window's own refresh answer): the time its PR data was requested from GitHub. A PR on it at
+-- another head means the head advanced for good, so that edit is dropped, and a refresh answer from before the advance cannot
+-- make it eligible again, but only when the snapshot is provably the later one: its request began after the edit's head was
+-- seen. A snapshot stamped later can still be a delayed request that carries an older head, so a stamp alone proves nothing,
+-- and a board with no `since` drops nothing. An edit whose PR is absent or on another head, unproven, waits. A pending queue
+-- merge whose PR a provably later snapshot reports dropped from the queue, on the same head, is retired without applying: GitHub
+-- removed the entry, so nothing is in flight to cancel. Returns whether one applied.
+local function replayEdits(b: Block, since: number?): boolean
+	local replayed = false
+	local kept = {}
+	for _, replay in b.replays do
+		local pr = State.prOf(b.s, replay.key)
+		local moved = pr ~= nil and pr.headOid ~= replay.head
+		local dropped = replay.queued == true and pr ~= nil and not moved and since ~= nil and since > replay.at
+			and pr.mergeFailure ~= nil and pr.mergeFailure.kind == "queue"
+		if not dropped then
+			replay.applied = pr ~= nil and not moved
+			if replay.applied then
+				replay.edit()
+				replay.present = State.prOf(b.s, replay.key) ~= nil
+				replayed = true
+			end
+			if not (moved and since ~= nil and since > replay.at) then table.insert(kept, replay) end
+		end
 	end
+	b.replays = kept
+	return replayed
+end
+
+-- The time a stored cache's PR data was requested from GitHub, which a refresh records (`sinceAt`): every head in it was
+-- seen after that. A cache without it (stored before it existed, or only restamped by a hand-off) has no provenance.
+local function requestedAt(cache: Sync.Cache): number?
+	local at = (cache :: any).sinceAt
+	return if type(at) == "number" then at else nil
+end
+
+-- Lays `shared`, a complete cache another window stored, onto this block as its board: its ownership joins, its PRs (flagged
+-- by every flag this block holds) become the board, and the local edits no write has stored are applied to it again. It reads
+-- no store and draws nothing. Returns whether a flag moved on a PR and whether an edit applied.
+local function layShared(b: Block, cx: BlockCx, shared: Sync.Cache): (boolean, boolean)
+	local now = os.time()
+	joinOwnership(b, shared)
+	local prs = flagged(b.watched, shared.prs)
+	local moved = false
+	for i, pr in prs do
+		if pr ~= shared.prs[i] then moved = true; break end
+	end
+	shared.prs = prs
+	announce(b, cx, b.cache, prs, now)
+	b.cache = shared
+	b.held = storedId(shared)
+	State.replace(b.s, prs, now, shared.refreshedAt)
+	return moved, replayEdits(b, requestedAt(shared))
+end
+
+-- The last read before a write of the board's snapshot. A complete cache another window stored since this block last read the
+-- store (newer than the board's, or another at its stamp) is the board's newer base: it is laid on whole, `reapply` puts the
+-- caller's own results back on it (they are applied only where still valid), and the retained edits apply to it again, so the
+-- write never lays this block's older snapshot over it. One read, no retry, and nothing in here reads the store again or draws,
+-- so the caller writes at once. `answered` is a successful read of Tandem that has just decided ownership: the cache this block
+-- already holds joins nothing, so it cannot restore a flag the answer cleared. Returns whether the store could be read (when
+-- it could not, "no cache" is a guess and nothing may be written) and whether a cache was laid on or a flag moved on a PR, which
+-- a fix still being set up must be reconciled with (`persistWhole` does, after the write).
+local function reconcileStore(b: Block, cx: BlockCx, reapply: (() -> ())?, answered: boolean?): (boolean, boolean)
+	local shared, readable = sharedCache(b, false)
+	if not shared and not readable then return false, false end
+	local changed = false
+	if shared then
+		local mine = cachedAt(b)
+		if mine == nil or (Model.epoch(shared.refreshedAt) :: number) > mine or storedId(shared) ~= (b.held or "") then
+			local moved, replayed = layShared(b, cx, shared)
+			if reapply then reapply() end
+			if moved or replayed then
+				recount(b)
+				b.unsaved = true
+			end
+			changed = true
+		elseif not answered then
+			joinOwnership(b, shared)
+		end
+	end
+	if flagPrs(b) then
+		State.project(b.s)
+		recount(b)
+		changed = true
+	end
+	return true, changed
+end
+
+-- Every write of a board snapshot that follows a local change goes through here: `reconcileStore`, then `persist`, with
+-- nothing between the two that reads the store or draws. The caller has already joined ownership and reconciled the flight, so
+-- a redraw that closes the block comes before the write; ownership only the last read brought is reconciled after the write.
+-- Returns whether the write was safe to make (false: the store could not be read, nothing was written, and the caller decides
+-- what stands) and why the write failed, if it did. A refresh answer is not written here: it reads the store last itself
+-- (`startRefresh`) and merges against the complete cache it finds, since its snapshot is stamped newer than any stored before it.
+local function persistWhole(b: Block, cx: BlockCx, reapply: (() -> ())?, answered: boolean?): (boolean, string?)
+	if b.closed then return false, nil end
+	if not b.cache then return true, nil end
+	local readable, moved = reconcileStore(b, cx, reapply, answered)
+	if not readable then return false, nil end
+	local board = b.cache :: Sync.Cache
+	board.prs = b.s.prs
+	local why = persist(b)
+	local flight = b.agentFlight
+	if moved and flight then carryOn(b, cx, flight, answered) end
+	return true, why
+end
+
+-- Installs `shared`, a cache another window stored that `sharedCache` took, as this block's board; `adoptShared` says when it
+-- may go on and why.
+local function installShared(b: Block, cx: BlockCx, shared: Sync.Cache, hold: boolean?): boolean
+	local moved, replayed = layShared(b, cx, shared)
+	reconcileFlight(b, cx)
+	-- The redraw may have closed the block: nothing is stored or counted after that.
+	if b.closed then return false end
+	if moved or replayed then
+		recount(b)
+		if hold then
+			b.unsaved = true
+		else
+			local safe, why = persistWhole(b, cx)
+			if why or not safe then
+				b.unsaved = true
+				return false
+			end
+		end
+	end
+	return true
+end
+
+-- Takes another window's newer cache, so windows share one refresh. The ownership this block restores onto it is stored
+-- at once, unless `hold`: a read of Tandem then writes nothing here and marks the block `unsaved`, so the successful answer's
+-- own save is the only write and no intermediate cache is left for a later guard to join. An answer that is dropped as
+-- stale or fails closed writes nothing either; the mark waits for the next successful answer, or any other write.
+-- Returns whether the caller may go on to edit and store the board. It may not when the block closed, or when the save of
+-- the restored ownership failed: another window may have stored a newer cache meanwhile, and this block's snapshot is
+-- then older than the store. The ownership stays in memory (`unsaved`), and the next guard adopts the newer cache.
+-- It may not either when the store cannot be read, whether or not `unsaved`: "no cache" is then a guess, and the store may
+-- hold a distinct or newer cache this board lacks, so nothing that writes a snapshot goes on until a read succeeds and adopts
+-- it. A caller that cannot write one (`rearm`) may ignore the result.
+-- A local edit that no write has stored (`b.replays`) is applied to the adopted board again, so the cache that is stored next
+-- carries it.
+local function adoptShared(b: Block, cx: BlockCx, hold: boolean?): boolean
+	local shared, readable = sharedCache(b, true)
+	if not shared then return readable end
+	return installShared(b, cx, shared, hold)
+end
+
+-- Puts the ownership this block holds onto its PRs now, so the card and the action guards are safe before any read or
+-- refresh answers: a fix still being set up for a PR that just became Tandem's ends as stopped (`carryOn`), and the
+-- counts follow. The flight is reconciled even when no flag moved here, since an adopted cache may already have set
+-- the flag. Positive only: a flag is set here, never cleared; a successful read of Tandem is the one that clears.
+-- Nothing is persisted; the caller decides what to store. Returns whether a PR moved.
+local function applyOwnership(b: Block, cx: BlockCx): boolean
+	local moved = flagPrs(b)
+	local flight = b.agentFlight
+	if flight then carryOn(b, cx, flight) end
+	-- `carryOn` draws, and the draw may have closed the block: nothing is projected or counted after that.
+	if b.closed or not moved then return false end
+	State.project(b.s)
+	recount(b)
+	return true
 end
 
 -- Arms the probe, refresh (as the debounce while a change or focus waits) and checks timers from the schedule.
 local function rearm(b: Block, cx: BlockCx)
 	if b.fixture or b.closed then return end
 	adoptShared(b, cx)
+	if b.closed then return end
 	local sched = b.sched
 	local last, tried = cachedAt(b), sched.refreshTried
 	local plan = Sync.schedule({
@@ -900,9 +1316,141 @@ local function loadFlakes(b: Block, cx: BlockCx)
 	step(1)
 end
 
+-- The repository root `cx.cwd` is in, which is the project Tandem knows: `cx.cwd` itself may be a subfolder. Found
+-- once and kept; callers that ask while it is being found share the one lookup. `done` gets nil when it cannot be
+-- found (nothing is kept, so a later call tries again) or when there is no `cx.cwd`.
+local function projectRoot(b: Block, cx: BlockCx, done: (string?) -> ())
+	-- A closed block looks nothing up: its callers drop a nil root without a word.
+	if b.closed then return done(nil) end
+	if b.root then return done(b.root) end
+	local dir = cx.cwd
+	if not dir then return done(nil) end
+	local waiters = b.rootWaiters
+	if waiters then return table.insert(waiters, done) end
+	local mine: { (string?) -> () } = { done }
+	b.rootWaiters = mine
+	local settled = false
+	local function found(repo: Fetch.Repo?)
+		if settled then return end
+		settled = true
+		if b.rootWaiters == mine then b.rootWaiters = nil end
+		local root = if repo then repo.root else nil
+		if root then b.root = root end
+		for _, waiting in mine do waiting(root) end
+	end
+	local ok = pcall(Fetch.findRepo, dir, found)
+	if not ok then found(nil) end
+end
+
+-- Reads which PRs Tandem watches and flags them, one read at a time. With no project folder, or when the read
+-- fails, the flags stay as they were (none before a first good read) and the board carries on.
+local function loadTandem(b: Block, cx: BlockCx)
+	if b.fixture or b.closed or b.flights.tandem or not cx.cwd then return end
+	b.flights.tandem = true
+	local epoch = b.handoffs
+	-- The cache the store held when this read began: a write that lands after it postdates the answer (see `renewed`).
+	local _, began = storedNow()
+	b.heard = {}
+	if began and began ~= "" then b.seen[began] = true end
+	local replied = false
+	local function apply(watched: { [string]: boolean }?, err: string?)
+		if replied then return end
+		replied = true
+		b.flights.tandem = false
+		if b.closed then return end
+		-- The answer lands on the newest cache there is: one stored strictly newer than this block's own becomes the board
+		-- first, so what is stored next carries its stamp and snapshot and never this block's older ones.
+		local before = b.cache
+		local readable, superseded = storedNow()
+		local safe = adoptShared(b, cx, true)
+		-- An unsafe snapshot (the store was unreadable while an adopted cache's ownership is unstored) takes no part: the answer
+		-- stores, clears and joins nothing, and the next read decides again.
+		if b.closed or not safe then return end
+		local adopted = b.cache ~= before
+		joinShared(b)
+		-- A write another window stored after this read began, flagging a PR the answer omits, is a hand-off even when this
+		-- block held the flag already (so joining it moved nothing) and even when a local save has since replaced the stored
+		-- id: it counts like one.
+		if watched and b.handoffs == epoch and renewed(b, watched) then b.handoffs += 1 end
+		-- A hand-off Tandem took while this read was out is newer than the read, which could not name that PR: drop it and read
+		-- again. The ownership it joined guards the card at once, and the older answer stores nothing.
+		if b.handoffs ~= epoch then
+			if applyOwnership(b, cx) or adopted then draw(b, cx) end
+			-- Either draw may have closed the block: no further read starts.
+			if b.closed then return end
+			return loadTandem(b, cx)
+		end
+		local flags = Model.tandemFlags(watched or b.watched, b.s.prs)
+		local changed, cleared, added = false, false, false
+		for _, pr in b.s.prs do
+			local want = flags[pr.key] == true
+			if pr.tandem ~= want then
+				changed = true
+				if want then added = true else cleared = true end
+			end
+		end
+		-- A clear needs the stored cache's identity, taken above: without it the superseded cache could not be told from a
+		-- later write, so the answer changes nothing and the next read decides again.
+		if cleared and not readable then
+			if adopted then draw(b, cx) end
+			return
+		end
+		-- What the board owned before this answer decided: a clear is final only once the last read before its write succeeded.
+		local priorWatched, wasUnsaved = table.clone(b.watched), b.unsaved
+		if watched then b.watched = watched end
+		for _, pr in b.s.prs do pr.tandem = flags[pr.key] == true end
+		if not changed then
+			-- Nothing moved, so this answer's save is the one that stores what adoption restored (a failed read stores nothing).
+			if watched and b.unsaved then persistWhole(b, cx, nil, true) end
+			if adopted then draw(b, cx) end
+			return
+		end
+		local flight = b.agentFlight
+		if flight then carryOn(b, cx, flight, true) end
+		-- The redraw may have closed the block: nothing is projected, counted or stored after that.
+		if b.closed then return end
+		State.project(b.s)
+		recount(b)
+		-- The write reads the store once more first: a complete cache that landed since is the base it writes onto.
+		local safe, why = persistWhole(b, cx, nil, true)
+		if b.closed then return end
+		if not safe then
+			-- The store could not be read, so nothing is written, and the clear is not safe: the cache it superseded is still the
+			-- store's, joinable, and would bring the flag back at the next guard with no answer behind it. The flags it cleared
+			-- return, the board is as it was before the answer, and the next successful answer decides again. A flag it added
+			-- stays, unstored.
+			if cleared then
+				for key in priorWatched do b.watched[key] = true end
+				if flagPrs(b) then
+					State.project(b.s)
+					recount(b)
+				end
+			end
+			b.unsaved = wasUnsaved or added
+		elseif why then
+			-- Memory state stands. Only this successful read may clear ownership, so the cache it superseded (the one stored
+			-- when the answer arrived) must not bring a cleared flag back at the same stamp.
+			if cleared and superseded then b.retired[superseded] = true end
+			b.s.error = { operation = KV_CACHE, message = "the cache couldn't be saved: " .. why }
+		end
+		draw(b, cx)
+	end
+	projectRoot(b, cx, function(root)
+		if b.closed or not root then return apply(nil, "The project folder is unknown") end
+		local ok, err = pcall(Fetch.tandemWatch, root, apply)
+		if not ok then apply(nil, tostring(err)) end
+	end)
+end
+
 startRefresh = function(b: Block, cx: BlockCx)
 	b.flights.refresh = true
 	b.s.loading = true
+	-- Every head in the answer was seen after this: the cache stores it (`sinceAt`), so a window adopting it can tell a snapshot
+	-- that is the later word on a head from one that only finished later.
+	local requested = os.time()
+	loadTandem(b, cx)
+	-- A read of Tandem that answered at once may have drawn, and the draw closed the block: nothing is read or asked after that.
+	if b.closed then return end
 	local refs: { Model.PRRef } = {}
 	for _, ref in readLocal().added do table.insert(refs, ref) end
 	b.github.refresh({ added = refs, previous = b.s.prs }, function(fresh, err)
@@ -910,20 +1458,69 @@ startRefresh = function(b: Block, cx: BlockCx)
 		if b.closed then return end
 		local now = os.time()
 		b.sched.refreshTried = now
+		-- The answer lands on the newest cache there is, looked at again now: another window's may have landed while the request
+		-- was out, and `Sync.merge` carries what only that cache holds (a pending merge). When the store cannot be read, or the
+		-- adoption could not be stored, the answer is dropped: it merges, stores and chains nothing, and the schedule (which
+		-- `refreshTried` has moved) tries again later. The answer's own save is the one write (`hold`).
+		local safe = not fresh or adoptShared(b, cx, true)
+		if b.closed then return end
+		local facts: Sync.Local = { added = {}, tandem = {} }
+		local canonMoved = false
+		local shared: Sync.Cache? = nil
+		if safe and fresh then
+			facts = readLocal()
+			local canon, moved = State.canonicalAdded(facts.added, fresh.prs)
+			facts.added, canonMoved = canon, moved
+			-- A fix still being set up for a PR another window has taken ends before the answer is merged: ending it draws, so it
+			-- comes before the last read of the store, and nothing between that read and the write draws or reads again.
+			reconcileFlight(b, cx)
+			if b.closed then return end
+			-- The last read. The answer is dropped, nothing merged or committed, when the store cannot be read.
+			shared, safe = sharedCache(b, false)
+		end
+		if not safe then
+			b.s.loading = false
+			b.s.error = { operation = KV_CACHE, message = "the cache couldn't be read, so the refresh was not stored" }
+			rearm(b, cx)
+			draw(b, cx)
+			return
+		end
 		if not fresh then
 			b.s.loading = false
 			b.s.error = { operation = if err then err.operation else "hub", message = reasonOf(if err then err.message else "no answer"), rateLimit = if err then err.rateLimit else nil }
 		else
-			local canon, moved = State.canonicalAdded(readLocal().added, fresh.prs)
-			if moved then writeAdded(canon) end
-			local cache = Sync.merge(fresh, b.cache, readLocal(), now)
+			if canonMoved then writeAdded(facts.added) end
+			-- A complete cache another window stored since this block last read the store (newer than the board's, or another at
+			-- its stamp) is the answer's newer base: the answer is merged against it, whole, and never against the older board. The
+			-- answer stays GitHub's word on every PR; what the base adds is its ownership and the pending merges it holds. Ownership
+			-- joins either way, so the stored cache cannot erase a flag; a read of Tandem still out predates it and is read again.
+			local previous = b.cache
+			local owned = b.handoffs
+			if shared then
+				local mine = cachedAt(b)
+				if mine == nil or (Model.epoch(shared.refreshedAt) :: number) > mine or storedId(shared) ~= (b.held or "") then
+					previous, b.held = shared, storedId(shared)
+				end
+				joinOwnership(b, shared)
+			end
+			facts.tandem = Model.tandemFlags(b.watched, fresh.prs)
+			local cache = Sync.merge(fresh, previous, facts, now)
 			cache.lastModified = b.sched.lastModified
+			local stamped: any = cache
+			stamped.sinceAt = requested
 			announce(b, cx, b.cache, cache.prs, now)
 			b.cache = cache
 			b.sched.probeChanged, b.sched.focusedAt = false, nil
 			State.replace(b.s, cache.prs, now, cache.refreshedAt)
+			-- This answer may predate a local edit no write has stored (a close whose save failed): it lays that PR back, so the
+			-- still-valid retained edits apply again before the counts and the write, which then store their effects.
+			if replayEdits(b, requested) then recount(b) end
 			local why = persist(b)
 			if why then b.s.error = { operation = KV_CACHE, message = "the cache couldn't be saved: " .. why } end
+			-- Ownership only the last read brought is reconciled with a fix still being set up after the write, as `persistWhole`
+			-- does. The redraw may have closed the block: nothing is read, queued or armed after that.
+			if b.handoffs ~= owned then reconcileFlight(b, cx) end
+			if b.closed then return end
 			showAdded(b, cx)
 			loadMerges(b)
 			detectMerges(b, cx)
@@ -941,7 +1538,16 @@ end
 
 onRefresh = function(b, cx)
 	if b.flights.refresh then return end
-	adoptShared(b, cx)
+	local safe = adoptShared(b, cx)
+	if b.closed then return end
+	-- An unreadable store starts no refresh: its answer could not be reconciled. The attempt counts as tried, so the schedule
+	-- waits before the next one.
+	if not safe then
+		b.sched.refreshTried = os.time()
+		rearm(b, cx)
+		draw(b, cx)
+		return
+	end
 	-- Another window refreshed a moment ago: its cache is the answer.
 	local last = cachedAt(b)
 	if last and os.time() - last < Sync.DEBOUNCE then
@@ -962,19 +1568,41 @@ onChecks = function(b, cx)
 		if b.closed then return end
 		b.sched.checksAt = os.time()
 		if update then
-			local changed = false
-			for _, pr in b.s.prs do
-				local result = update.byId[pr.id]
-				-- A moved head means the next full refresh knows better.
-				if result and result.headOid == pr.headOid then
-					pr.checks = result.checks
-					changed = true
+			-- The results land on the newest cache there is: one stored strictly newer than this block's own becomes the board
+			-- first (its stamp stays), and a PR whose head it moved is skipped below like any other moved head.
+			local safe = adoptShared(b, cx)
+			if b.closed then return end
+			-- The results land on whichever board is written: they are applied again to a cache that lands before the write.
+			local function land(): boolean
+				local changed = false
+				for _, pr in b.s.prs do
+					local result = update.byId[pr.id]
+					-- A moved head means the next full refresh knows better.
+					if result and result.headOid == pr.headOid then
+						pr.checks = result.checks
+						changed = true
+					end
 				end
+				return changed
 			end
-			if changed then
+			if land() then
 				b.s.now = os.time()
+				-- A check result is no word on ownership: another window's flags at this stamp or later stay.
+				joinShared(b)
+				applyOwnership(b, cx)
+				-- The redraw may have closed the block: nothing is projected, stored or read after that.
+				if b.closed then return end
 				State.project(b.s)
-				local why = persist(b)
+				-- Not stored when adopting a newer cache failed to save: the store may hold one this board has not seen. The write
+				-- reads the store once more first: a cache that landed since is the base, with these results applied to it again.
+				local why: string? = nil
+				if safe then
+					local _, reason = persistWhole(b, cx, function()
+						land()
+						State.project(b.s)
+					end)
+					why = reason
+				end
 				if why then b.s.error = { operation = KV_CACHE, message = "the cache couldn't be saved: " .. why } end
 				loadFlakes(b, cx)
 			end
@@ -1103,7 +1731,8 @@ end
 -- Card actions: shown with their labels and keys; their effects arrive with the changes that build them.
 ACTIONS["card-agent"] = function(b, cx, key)
 	local pr = State.prOf(b.s, if key ~= "" then key else b.s.selected or "")
-	if not pr then return end
+	-- One owner per branch: Tandem's PRs are handed to it, never fixed by an agent here.
+	if not pr or pr.tandem then return end
 	b.botKeys[pr.key] = Model.classify(pr, b.s.now) == "in_review" and State.botActionable(pr)
 	beginAgent(b, cx, pr.key, "fix")
 end
@@ -1128,20 +1757,28 @@ end
 ACTIONS["card-agent-retry"] = function(b, cx, key)
 	local agent, flight = b.s.agents[key], b.agentFlight
 	if not agent or agent.kind ~= "failed" then return end
+	-- On a PR Tandem watches this is Return worktree: it retries the guarded return and never starts a fixer.
+	local owner = State.prOf(b.s, key)
+	local cleanup = owner ~= nil and owner.tandem
+	local function afterReturn()
+		if not cleanup then return beginAgent(b, cx, key, "fix") end
+		State.project(b.s)
+		draw(b, cx)
+	end
 	-- A failed lease return retains the handle. Retry first retries that exact guarded
 	-- return, and starts no engine until it succeeds. Never release a ready worktree.
 	if flight and flight.key == key then
 		local disposition = forgetReturned(b, flight)
 		if disposition == "wait" then return cx:toast("info", "One fix at a time") end
-		if disposition ~= "release" then return beginAgent(b, cx, key, "fix") end
+		if disposition ~= "release" then return afterReturn() end
 		returnAgentLease(b, flight, function(ok, err)
 			if not ok then
 				local lease = (flight.engine :: AgentFix.Engine).held()
-				State.agentFailed(b.s, key, err or "The worktree lease could not be returned", if lease then lease.path else nil)
+				State.agentFailed(b.s, key, err or "The worktree lease could not be returned", if lease then lease.path else nil, lease ~= nil)
 				return draw(b, cx)
 			end
 			if b.closed then return end
-			beginAgent(b, cx, key, "fix")
+			afterReturn()
 		end)
 		return
 	end
@@ -1162,7 +1799,6 @@ ACTIONS["card-agent-worktree"] = function(b, cx, key)
 	local ok, err = pcall(Fetch.runner, { "open", agent.worktree }, { timeout_ms = 15_000 }, opened)
 	if not ok then opened({ status = -1, stdout = "", stderr = tostring(err), timed_out = false }) end
 end
-ACTIONS["card-handoff"] = notYet("Hand off to Tandem")
 ACTIONS["card-summarize"] = function(b, cx, key)
 	local s = b.s
 	local pr = State.prOf(s, if key ~= "" then key else s.selected or "")
@@ -1238,7 +1874,11 @@ local function stepFixture(b: Block, cx: BlockCx)
 	local list = data.refreshes
 	if not list or #list == 0 then return end
 	b.step = b.step % #list + 1
-	local entry = list[b.step]
+	local source = list[b.step]
+	-- Every step's boards carry Tandem's flag, from the same recorded read.
+	local entry = table.clone(source)
+	entry.prs = flagged(b.watched, source.prs)
+	if source.previous then entry.previous = flagged(b.watched, source.previous) end
 	local none: Sync.Local = { added = {}, tandem = {} }
 	local before: Sync.Cache? = nil
 	if entry.previous then
@@ -1276,12 +1916,123 @@ ACTIONS["hub-refresh"] = function(b, cx)
 	refetch(b, cx)
 end
 
--- Keeps the cache in step with a change the viewer just made to the board.
-local function keepCache(b: Block)
-	if b.cache then
+-- Keeps the cache in step with a change the viewer just made to the board. `edit` is that change, applied here and
+-- nowhere else (nil when the caller's change is ownership, which `applyOwnership` carries). A cache another window
+-- stored strictly newer than this block's own becomes the board first, with its stamp and its ownership, and `edit`
+-- lands on it: the write never lowers `refreshedAt` and never lays this block's older PR snapshot over newer data. The
+-- change says nothing about Tandem, so ownership stored at this stamp or later joins and is never written back as false.
+-- `head` is the head of PR `key` the action began on, taken before its external effect. The edit applies only while the board's
+-- PR still has that head: an adopted cache that moved it knows better, and the stale edit is neither applied nor kept.
+-- An `edit` that no write stores (the store could not be read, or the save failed) is kept with that head, and
+-- `adoptShared` applies it to the cache it adopts later, while that head stands. A write clears only the edits it holds (see
+-- `persist`), so an edit whose PR a later cache omits stays for the refresh that brings the PR back. `queued` is an edit that
+-- sets a pending merge in the repo's queue (see `Replay`).
+local function keepCache(b: Block, cx: BlockCx, edit: (() -> ())?, key: string?, head: string?, queued: boolean?)
+	local safe = true
+	if b.cache and not b.fixture then safe = adoptShared(b, cx) end
+	-- Adopting a cache redraws, and the redraw may have closed the block: no edit and no write follow.
+	if b.closed then return end
+	if edit then
+		local pr = if key then State.prOf(b.s, key) else nil
+		local tracked = key ~= nil and head ~= nil and b.cache ~= nil and not b.fixture
+		if pr == nil and tracked then
+			-- The PR is absent (a capped cache omits it): the edit has nothing to land on, and is not applied to the absence. It
+			-- waits, unapplied, for the PR to return on this head. Its time is now, which no snapshot requested before it can pass.
+			table.insert(b.replays, {
+				key = key :: string, head = head :: string, at = os.time(), edit = edit, applied = false, present = true, queued = queued,
+			})
+		elseif not (pr and head and pr.headOid ~= head) then
+			edit()
+			if pr and head and b.cache and not b.fixture then
+				table.insert(b.replays, {
+					key = pr.key, head = head, at = cachedAt(b) or os.time(), edit = edit,
+					applied = true, present = State.prOf(b.s, pr.key) ~= nil, queued = queued,
+				})
+			end
+		end
+	end
+	if not b.cache then return end
+	if b.fixture then
+		joinShared(b)
+		applyOwnership(b, cx)
+		if b.closed then return end
 		b.cache.prs = b.s.prs
 		persist(b)
+		return
 	end
+	-- The write reads the store once more first (`persistWhole`): a cache another window stored since the first adoption (a
+	-- pending merge, a flag) is the board's newer base, so it is installed whole and the retained edits, this one included, are
+	-- applied to it again. Nothing reads the store or draws between that read and the write. An unreadable store writes nothing,
+	-- as at the first read, and so does a first adoption that failed to save: the edit stays on the board, but the store may
+	-- hold a cache newer than this board, and the write would lay this one over it. The last read still installs that cache.
+	if safe then
+		applyOwnership(b, cx)
+		-- So does applying ownership: a closed block writes nothing.
+		if b.closed then return end
+		persistWhole(b, cx)
+	else
+		reconcileStore(b, cx)
+		local board = b.cache
+		if board then board.prs = b.s.prs end
+		applyOwnership(b, cx)
+	end
+end
+
+-- Hand off to Tandem (A on a card Tandem watches): one `pr-fix` request, sent only now, from the repository root.
+-- Tandem's answer is dropped when the card is gone or its head moved meanwhile. A refusal shows Tandem's notice
+-- and changes nothing.
+local HANDOFF_BUSY = "Handing off to Tandem…"
+local TANDEM_OWNS = "Tandem watches this pull request" -- why a push or merge on its branch is refused
+
+ACTIONS["card-handoff"] = function(b, cx, asked)
+	local s = b.s
+	local pr = State.prOf(s, if asked ~= "" then asked else s.selected or "")
+	if b.closed or not pr or s.busy[pr.key] then return end
+	if b.fixture then return cx:toast("info", "The sample board doesn't hand off to Tandem", pr.key) end
+	if not cx.cwd then return cx:toast("error", "Couldn't hand off to Tandem: the project folder is unknown", pr.key) end
+	local head, repo, number, key = pr.headOid, pr.repo, pr.number, pr.key
+	local reason = Model.handoffReason(pr, s.now)
+	State.setBusy(s, key, HANDOFF_BUSY)
+	draw(b, cx)
+	-- The draw may have closed the block: no root is looked up and nothing is sent.
+	if b.closed then return end
+	local replied = false
+	local function answered(outcome: Fetch.TandemOutcome?, err: string?)
+		if replied then return end
+		replied = true
+		if b.closed then return end
+		if s.busy[key] == HANDOFF_BUSY then State.setBusy(s, key, nil) end
+		local current = State.prOf(s, key)
+		if not current or current.headOid ~= head then return draw(b, cx) end
+		if not outcome then
+			cx:toast("error", "Couldn't hand off to Tandem: " .. reasonOf(err or "no answer"), key)
+		elseif outcome.status == "refused" then
+			cx:toast("error", if outcome.notice then outcome.notice.text else "Tandem didn't take this pull request", key)
+		else
+			current.tandem = true
+			b.watched[string.lower(repo) .. "#" .. number] = true
+			b.handoffs += 1
+			local flight = b.agentFlight
+			if flight then carryOn(b, cx, flight) end
+			-- Stopping the setup draws, and the draw may have closed the block: nothing is counted, stored or shown after that.
+			if b.closed then return end
+			State.project(s)
+			recount(b)
+			keepCache(b, cx)
+			if b.closed then return end
+			if outcome.notice then cx:toast("info", outcome.notice.text, key) end
+		end
+		draw(b, cx)
+	end
+	projectRoot(b, cx, function(root)
+		if replied then return end
+		local current = State.prOf(s, key)
+		-- Nothing is sent for a card that is gone or moved while the root was being found; `answered` settles it quietly.
+		if b.closed or not current or current.headOid ~= head then return answered(nil, "stale") end
+		if not root then return answered(nil, "the project folder is unknown") end
+		local ok, err = pcall(Fetch.tandemHandoff, root, repo, number, reason, answered)
+		if not ok then answered(nil, tostring(err)) end
+	end)
 end
 
 -- Copy link (C): "title url" as plain text, which is all Tern's clipboard takes.
@@ -1320,9 +2071,26 @@ end
 -- With `done`, the caller owns the toast and the refresh (a batch): it hears nil when the PR merged or was handed to
 -- its repo's tool, or the reason it didn't.
 local function runMerge(b: Block, cx: BlockCx, pr: Model.HubPR, done: ((err: string?) -> ())?)
+	if b.closed then return end
 	local s = b.s
+	-- A batch reaches here once per PR, long after its dispatch: ownership stored meanwhile joins first, and a store that
+	-- cannot be read merges nothing.
+	local _, readable = joinOwned(b)
+	if not readable then
+		if done then return done(UNCHECKED) end
+		return cx:toast("error", "Couldn't merge #" .. pr.number .. ": " .. UNCHECKED, pr.repo)
+	end
+	-- One owner per branch: nothing new merges a PR Tandem watches (a merge already pending is only cancelled).
+	-- A batch holds the PRs it captured: the board may have dropped one Tandem took, so the durable set is asked too.
+	local owned = State.prOf(s, pr.key)
+	if (owned and owned.tandem) or b.watched[string.lower(pr.repo) .. "#" .. pr.number] then
+		if done then return done(TANDEM_OWNS) end
+		return cx:toast("error", "Couldn't merge #" .. pr.number .. ": " .. TANDEM_OWNS, pr.repo)
+	end
 	local method = methodOf(b, pr)
-	State.setBusy(s, pr.key, MERGE_BUSY[method.kind] or "Merging…")
+	local head = pr.headOid
+	local mark = MERGE_BUSY[method.kind] or "Merging…"
+	State.setBusy(s, pr.key, mark)
 	b.github.run(Github.commands.merge(pr, method), function(_, err)
 		if b.closed then return end
 		if err then
@@ -1333,17 +2101,25 @@ local function runMerge(b: Block, cx: BlockCx, pr: Model.HubPR, done: ((err: str
 				cx:toast("error", "Couldn't merge #" .. pr.number .. ": " .. reasonOf(err.message), pr.repo)
 			end
 		elseif method.kind == "squash" or method.kind == "merge" or method.kind == "rebase" then
-			s.acted[pr.key] = true
-			State.dropPr(s, pr.key)
-			keepCache(b)
+			-- The edit below applies only on the head the merge began on, and it is what clears the busy mark there. An adopted
+			-- cache that moved the head skips it, so this merge's own mark clears here, and only if nothing newer replaced it.
+			if s.busy[pr.key] == mark then State.setBusy(s, pr.key, nil) end
+			keepCache(b, cx, function()
+				s.acted[pr.key] = true
+				State.dropPr(s, pr.key)
+			end, pr.key, head)
+			-- Adopting another window's cache may have drawn, and the draw closed the block: nothing goes on from here.
+			if b.closed then return end
 			if done then done(nil) else
 				toastDone(cx, pr, method)
 				refetchSoon(b, cx)
 			end
 		else
-			State.setPending(s, pr.key, { method = method.kind, at = isoNow() })
 			State.setBusy(s, pr.key, nil)
-			keepCache(b)
+			-- One stamp for every application of the edit: a replay must not move it past a bot's later rejection.
+			local at = isoNow()
+			keepCache(b, cx, function() State.setPending(s, pr.key, { method = method.kind, at = at }) end, pr.key, head, method.kind == "queue")
+			if b.closed then return end
 			if done then done(nil) else
 				toastDone(cx, pr, method)
 				refetchSoon(b, cx)
@@ -1358,7 +2134,7 @@ end
 ACTIONS["card-merge"] = function(b, cx, key)
 	local s = b.s
 	local card = State.card(s, key)
-	if not card or s.busy[key] then return end
+	if not card or s.busy[key] or card.pr.tandem then return end
 	local pr = card.pr
 	if not b.fixture and not s.merges[pr.repo] then
 		-- Not known yet how this repo merges: GitHub's merge is never the guess.
@@ -1388,6 +2164,7 @@ ACTIONS["card-cancel"] = function(b, cx, key)
 	if not ok or method.kind ~= pending.method then
 		return cx:toast("error", "Couldn't cancel the merge of #" .. pr.number .. ": " .. pr.repo .. " has no way to cancel it", pr.title)
 	end
+	local head = pr.headOid
 	State.setBusy(s, key, "Cancelling…")
 	b.github.run(command :: Github.Command, function(_, err)
 		if b.closed then return end
@@ -1395,8 +2172,8 @@ ACTIONS["card-cancel"] = function(b, cx, key)
 		if err then
 			cx:toast("error", "Couldn't cancel the merge of #" .. pr.number .. ": " .. reasonOf(err.message), pr.repo)
 		else
-			State.setPending(s, key, nil)
-			keepCache(b)
+			keepCache(b, cx, function() State.setPending(s, key, nil) end, key, head)
+			if b.closed then return end
 			if method.kind == "comment" then
 				cx:toast("success", "Commented " .. (method.cancel or "") .. " on #" .. pr.number, pr.title)
 			elseif method.kind == "label" then
@@ -1417,14 +2194,17 @@ end
 ACTIONS["card-auto"] = function(b, cx, key)
 	local s = b.s
 	local card = State.card(s, key)
-	if not card or s.busy[key] or card.pr.pending then return end
+	if not card or s.busy[key] or card.pr.pending or card.pr.tandem then return end
 	local pr = card.pr
 	State.select(s, key)
 	if b.fixture then return cx:toast("info", "The sample board doesn't merge", pr.key) end
+	if not ownershipChecked(b, cx, "set #" .. pr.number .. " to merge when ready") then return end
+	if pr.tandem then return cx:toast("error", "Couldn't set #" .. pr.number .. " to merge when ready: " .. TANDEM_OWNS, pr.repo) end
 	if not Model.canMergeWhenReady(s.merges[pr.repo], s.autoMerge[pr.repo]) then
 		return cx:toast("error", "Couldn't set #" .. pr.number .. " to merge when ready: " .. pr.repo .. " doesn't allow auto-merge", pr.title)
 	end
 	local method = methodOf(b, pr)
+	local head = pr.headOid
 	State.setBusy(s, key, MERGE_BUSY[method.kind] or "Setting…")
 	b.github.run(Github.commands.autoMerge(pr, method), function(_, err)
 		if b.closed then return end
@@ -1433,8 +2213,9 @@ ACTIONS["card-auto"] = function(b, cx, key)
 			cx:toast("error", "Couldn't set #" .. pr.number .. " to merge when ready: " .. reasonOf(err.message), pr.repo)
 		else
 			local kind = if method.kind == "comment" or method.kind == "label" then method.kind else "queue"
-			State.setPending(s, key, { method = kind, at = isoNow() })
-			keepCache(b)
+			local at = isoNow()
+			keepCache(b, cx, function() State.setPending(s, key, { method = kind, at = at }) end, key, head, kind == "queue")
+			if b.closed then return end
 			cx:toast("success", "#" .. pr.number .. " will merge when ready", pr.title)
 			refetchSoon(b, cx)
 		end
@@ -1453,6 +2234,7 @@ ACTIONS["card-rerequest"] = function(b, cx, key)
 	State.select(s, key)
 	if b.fixture then return cx:toast("info", "The sample board doesn't ask for reviews", pr.key) end
 	local logins = again.ask
+	local head = pr.headOid
 	State.setBusy(s, key, "Requesting…")
 	b.github.run(Github.commands.requestReview(pr, table.concat(logins, ",")), function(_, err)
 		if b.closed then return end
@@ -1460,8 +2242,8 @@ ACTIONS["card-rerequest"] = function(b, cx, key)
 		if err then
 			cx:toast("error", "Couldn't re-request review on #" .. pr.number .. ": " .. reasonOf(err.message), pr.repo)
 		else
-			State.reRequested(s, key, logins)
-			keepCache(b)
+			keepCache(b, cx, function() State.reRequested(s, key, logins) end, key, head)
+			if b.closed then return end
 			cx:toast("success", "Asked " .. Model.reviewerList(logins) .. " to review #" .. pr.number .. " again", pr.title)
 			refetchSoon(b, cx)
 		end
@@ -1566,7 +2348,7 @@ local function runBatch(b: Block, cx: BlockCx, keys: { string }, merge: boolean)
 	local handed = false -- some went to a repo's tool (comment, label, queue) rather than merging at once
 	local step: (index: number) -> ()
 	local function finish(failed: Model.HubPR?, reason: string?)
-		keepCache(b)
+		if b.closed then return end
 		local rest: { Model.HubPR } = {}
 		for i = #finished + 1, #queue do table.insert(rest, queue[i]) end
 		local done = if merge then (if handed then "Asked to merge " else "Merged ") else "Closed "
@@ -1582,9 +2364,12 @@ local function runBatch(b: Block, cx: BlockCx, keys: { string }, merge: boolean)
 		draw(b, cx)
 	end
 	step = function(index: number)
+		if b.closed then return end
 		local pr = queue[index]
 		if not pr then return finish(nil, nil) end
 		local function after(err: string?)
+			-- A redraw while keeping the cache may have closed the block: no next command, no toast.
+			if b.closed then return end
 			if err then return finish(pr, err) end
 			table.insert(finished, pr)
 			s.marked[pr.key] = nil
@@ -1596,13 +2381,16 @@ local function runBatch(b: Block, cx: BlockCx, keys: { string }, merge: boolean)
 			runMerge(b, cx, pr, after)
 			return
 		end
+		local head = pr.headOid
 		State.setBusy(s, pr.key, "Closing…")
 		b.github.run(Github.commands.close(pr), function(_, err)
 			if b.closed then return end
 			State.setBusy(s, pr.key, nil)
 			if err then return after(reasonOf(err.message)) end
-			s.acted[pr.key] = true
-			State.dropPr(s, pr.key)
+			keepCache(b, cx, function()
+				s.acted[pr.key] = true
+				State.dropPr(s, pr.key)
+			end, pr.key, head)
 			after(nil)
 		end)
 	end
@@ -1641,23 +2429,34 @@ ACTIONS["hub-confirm"] = function(b, cx)
 end
 
 -- Update branch (U): a Ready card that is behind main. Its checks run again, so the card waits on them.
+local UPDATE_BUSY = "Updating…"
+
 ACTIONS["card-update"] = function(b, cx, key)
 	local s = b.s
 	local card = State.card(s, key)
 	if not card or s.busy[key] then return end
 	local pr = card.pr
+	if not ownershipChecked(b, cx, "update #" .. pr.number) then return end
+	-- One owner per branch: a queued Update branch for a PR Tandem took meanwhile sends nothing.
+	if pr.tandem then return cx:toast("error", "Couldn't update #" .. pr.number .. ": " .. TANDEM_OWNS, pr.repo) end
 	if not pr.behind or pr.conflicts then return cx:toast("info", "#" .. pr.number .. " isn't behind " .. pr.baseBranch, pr.key) end
 	if b.fixture then return cx:toast("info", "The sample board doesn't update branches", pr.key) end
-	State.setBusy(s, key, "Updating…")
+	local head = pr.headOid
+	State.setBusy(s, key, UPDATE_BUSY)
 	b.github.run(Github.commands.updateBranch(pr), function(_, err)
 		if b.closed then return end
 		if err then
 			State.setBusy(s, key, nil)
 			cx:toast("error", "Couldn't update #" .. pr.number .. ": " .. reasonOf(err.message), pr.repo)
 		else
-			s.acted[key] = true
-			State.branchUpdated(s, key)
-			keepCache(b)
+			-- The edit below applies only on the head the update began on, and it is what clears the busy mark there. An adopted
+			-- cache that moved the head skips it, so this update's own mark clears here, and only if nothing newer replaced it.
+			if s.busy[key] == UPDATE_BUSY then State.setBusy(s, key, nil) end
+			keepCache(b, cx, function()
+				s.acted[key] = true
+				State.branchUpdated(s, key)
+			end, key, head)
+			if b.closed then return end
 			cx:toast("success", "Updated #" .. pr.number .. " with " .. pr.baseBranch)
 			refetchSoon(b, cx)
 		end
@@ -1769,8 +2568,8 @@ ACTIONS["card-remove"] = function(b, cx, key)
 		local why = writeAdded(added)
 		if why then return cx:toast("error", "Couldn't remove #" .. pr.number .. ": " .. why, pr.repo) end
 	end
-	State.unadd(s, key)
-	keepCache(b)
+	keepCache(b, cx, function() State.unadd(s, key) end, key, pr.headOid)
+	if b.closed then return end
 	cx:toast("info", "Removed #" .. pr.number .. " from Review requests", pr.repo)
 	refetch(b, cx)
 end
@@ -1851,6 +2650,13 @@ local function reviewEffect(b: Block, cx: BlockCx, action: "push" | "discard")
 			return cx:toast("error", "Couldn't " .. verb .. " the fix: the worktree lease is unavailable")
 		end
 	end
+	-- One owner per branch: no push begins on a PR Tandem watches, or when that could not be checked. The ready fix and its
+	-- lease stay for Discard.
+	if action == "push" and plan.command and not ownershipChecked(b, cx, "push the fix") then return end
+	local owner = State.prOf(b.s, request.key)
+	if action == "push" and plan.command and owner and owner.tandem then
+		return cx:toast("error", "Couldn't push the fix: " .. TANDEM_OWNS)
+	end
 	local route = b.s.route :: State.Route
 	route.ask, route.error = false, nil
 	State.setBusy(b.s, request.key, if action == "push" and plan.command then "Pushing fix…" else "Returning worktree lease…")
@@ -1903,21 +2709,28 @@ local function reviewEffect(b: Block, cx: BlockCx, action: "push" | "discard")
 	end
 	if action == "discard" or not plan.command then release(); return end
 	local called = false
+	local unchecked = false
 	local function completed(ok: boolean?, err: string?)
 		if called then return end
 		called = true
-		if not ok then return fail(err or "Git refused the push") end
+		if not ok then
+			local current = State.prOf(b.s, request.key)
+			return fail(if current and current.tandem then TANDEM_OWNS elseif unchecked then UNCHECKED else err or "Git refused the push")
+		end
 		pushed = true
 		release()
 	end
 	if b.fixture then completed(true, nil); return end
+	-- Fetch asks this before every command of the push, the remote reads too: a PR Tandem takes meanwhile is never pushed to.
 	local function canPush(): boolean
+		local _, readable = syncOwnership(b, cx)
+		unchecked = not readable
 		local current = b.s.agents[request.key]
 		local pr = State.prOf(b.s, request.key)
-		return not b.closed and b.agentFlight == flight and current ~= nil and current == agent and current.kind == "ready"
+		return readable and not b.closed and b.agentFlight == flight and current ~= nil and current == agent and current.kind == "ready"
 			and current.fix == request.fix and b.s.selected == request.key and b.s.route == route
 			and route.kind == "review-fix" and State.reviewed(current.fix, current.reviewed)
-			and pr ~= nil and pr.repo == request.repo and pr.number == request.number
+			and pr ~= nil and not pr.tandem and pr.repo == request.repo and pr.number == request.number
 			and (pr.headOid == request.fix.headOid or pr.headOid == request.fix.commit)
 	end
 	local ok, err = pcall(Fetch.pushAgentFix, plan, canPush, completed)
@@ -2156,7 +2969,12 @@ end
 
 local function dispatch(b: Block, cx: BlockCx, action: Keys.Action)
 	local handler = ACTIONS[action.act]
-	if handler then handler(b, cx, action.value or "") end
+	if not handler then return end
+	-- Ownership another window stored joins before the handler reads a guard, so no direct effect reaches a Tandem branch.
+	if syncOwnership(b, cx) then draw(b, cx) end
+	-- A draw that raised has closed the block: the handler sends nothing for it.
+	if b.closed then return end
+	handler(b, cx, action.value or "")
 end
 
 -- The agent the reader's omp is set to, and the models it can run (a live board only).
@@ -2202,16 +3020,23 @@ local block: BlockDef<Block> = {
 		local now = os.time()
 		local refreshedAt: string? = nil
 		local fixture = if opts then opts.fixture else nil
+		-- A sample board reads the recorded `tandem watch --json` with no process, and flags every list it shows.
+		local watched: { [string]: boolean } = {}
+		if fixture then watched = Model.parseTandemWatch(require("../../fixtures/hub/raw-tandem-watch")) or {} end
 		local live = opts ~= nil and fixture == nil
 		local cache: Sync.Cache? = nil
 		if fixture then
 			local data = FIXTURES[fixture]()
-			prs, now, refreshedAt = data.prs, data.asOf, data.asOfIso
+			prs, now, refreshedAt = flagged(watched, data.prs), data.asOf, data.asOfIso
 		elseif live then
 			-- Open from the cache with no network wait; the first tick refreshes in the background.
 			cache = readCache()
 			if cache then
 				prs, refreshedAt = cache.prs, cache.refreshedAt
+				-- Ownership the cache holds stands until a read of Tandem succeeds: a failed read or an earlier GitHub refresh keeps it.
+				for _, pr in prs do
+					if pr.tandem then watched[string.lower(pr.repo) .. "#" .. pr.number] = true end
+				end
 				writeStatus(cache)
 			end
 		end
@@ -2229,7 +3054,7 @@ local block: BlockDef<Block> = {
 		local b: Block = {
 			s = s, cache = cache, fixture = fixture, generate = opts ~= nil and opts.generate, agent = nil, agentFlight = nil, botKeys = {},
 			github = Github.client(Fetch.runner, tern.json.decode), timers = {},
-			flights = { refresh = false, checks = false, probe = false, flake = false },
+			flights = { refresh = false, checks = false, probe = false, flake = false, tandem = false }, watched = watched, handoffs = 0, seen = {}, heard = {}, held = if cache then storedId(cache) else nil, replays = {}, retired = {}, unsaved = false, root = nil, rootWaiters = nil,
 			sched = {
 				probedAt = now, probeChanged = false, focusedAt = if live then now else nil, checksAt = nil,
 				refreshTried = nil, lastModified = if cache then cache.lastModified else nil,
@@ -2266,6 +3091,7 @@ local block: BlockDef<Block> = {
 			-- How each repo merges is known from the first frame, before any refresh.
 			loadMerges(b)
 			loadAgent(b, cx)
+			loadTandem(b, cx)
 			rearm(b, cx)
 		end
 		return b

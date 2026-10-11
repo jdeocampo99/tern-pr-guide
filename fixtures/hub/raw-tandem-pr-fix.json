@@ -1,0 +1,17 @@
+{
+  "done": { "status": "done" },
+  "kept": {
+    "status": "kept",
+    "notice": {
+      "code": "failed",
+      "text": "Tandem took over acme/web#104, but the fix could not start: No worktree is free"
+    }
+  },
+  "refusal": {
+    "status": "refused",
+    "notice": {
+      "code": "failed",
+      "text": "Tandem does not know this project"
+    }
+  }
+}

@@ -33,7 +33,7 @@ export type AgentFixState =
 	| { kind: "running", run: AgentFix.Run }
 	| { kind: "ready", fix: AgentFix.Fix, reviewed: { [string]: boolean }, review: ReviewFix.Review?, completion: ("push" | "discard")? }
 	| { kind: "pushing", fix: AgentFix.Fix }
-	| { kind: "failed", reason: string, worktree: string? }
+	| { kind: "failed", reason: string, worktree: string?, held: boolean? } -- `held`: the engine still holds the worktree's lease, so its return can be retried
 
 -- A pill on a card's chip line. `kind` picks its look; `running` carries the amber spinner.
 export type Chip = { text: string, kind: "bad" | "bad-soft" | "info" | "wait" | "done" | "agent" | "running" }
@@ -191,8 +191,8 @@ function M.noAgentClone(s: State, key: string, slug: string)
 	M.project(s)
 end
 
-function M.agentFailed(s: State, key: string, reason: string, worktree: string?)
-	s.agents[key] = { kind = "failed", reason = reason, worktree = worktree }
+function M.agentFailed(s: State, key: string, reason: string, worktree: string?, held: boolean?)
+	s.agents[key] = { kind = "failed", reason = reason, worktree = worktree, held = held }
 	M.project(s)
 end
 
@@ -205,8 +205,8 @@ export type AgentFlightFacts = {
 function M.agentFlight(s: State, key: string, facts: AgentFlightFacts): "wait" | "release" | "forget" | "ready"
 	local agent = s.agents[key]
 	if agent and (agent.kind == "ready" or agent.kind == "pushing") then return "ready" end
-	if agent and agent.kind == "failed" and agent.worktree ~= facts.worktree then
-		agent.worktree = facts.worktree
+	if agent and agent.kind == "failed" and (agent.worktree ~= facts.worktree or (agent.held == true) ~= (facts.worktree ~= nil)) then
+		agent.worktree, agent.held = facts.worktree, facts.worktree ~= nil
 		M.project(s)
 	end
 	if not facts.settled or facts.starting or facts.releasing then return "wait" end
@@ -461,7 +461,11 @@ local function actionsFor(pr: HubPR, column: Column, reasons: { Model.Reason }, 
 		local main, more = copy, {}
 		-- A reviewer waits on the author to say the fix is in: asking again is the card's job until they have been asked.
 		local again = Model.awaitingReReview(pr)
-		if M.botActionable(pr) then
+		if pr.tandem then
+			-- Tandem owns the branch, so the card offers the hand-off and never an agent of its own.
+			main, more = action("card-handoff", "Hand off to Tandem", "A"), { copy }
+			if again and #again.ask > 0 then table.insert(more, action("card-rerequest", "Re-request review", "Q")) end
+		elseif M.botActionable(pr) then
 			main, more = action("card-agent", "Fix bot comments", "A"), { copy, action("card-summarize", "Summarize", "⇧A") }
 			if again and #again.ask > 0 then table.insert(more, action("card-rerequest", "Re-request review", "Q")) end
 		elseif again and #again.ask > 0 then
@@ -472,7 +476,8 @@ local function actionsFor(pr: HubPR, column: Column, reasons: { Model.Reason }, 
 			if not (method and method.kind == "comment" and not method.cancel) then
 				table.insert(more, action("card-cancel", "Cancel merge", "M"))
 			end
-		elseif Model.canMergeWhenReady(merge, autoMerge) then
+		elseif not pr.tandem and Model.canMergeWhenReady(merge, autoMerge) then
+			-- Tandem owns the branch: no new merge is offered, only Cancel merge for one already pending.
 			table.insert(more, action("card-auto", "Merge when ready", "M"))
 		end
 		return main, more
@@ -653,7 +658,14 @@ local function toCard(pr: HubPR, placement: Model.Placement, s: State): Card
 		elseif agent.kind == "no_clone" then
 			main, more, chips = action("card-agent-clone", "Clone repo", "A"), { action("card-agent-folder", "Choose folder…", "O") }, { chip("No local clone", "wait") }
 		elseif agent.kind == "failed" then
-			main, more, chips = action("card-agent-retry", "Try again", "A"), {}, { chip("Fix failed", "bad-soft") }
+			if pr.tandem then
+				-- A worktree is still held: Open worktree stays, while the branch's owner is Tandem. A lease whose return failed
+				-- keeps its retry as Return worktree (⇧A, free on this card), which returns it and starts no fixer.
+				main, more = action("card-handoff", "Hand off to Tandem", "A"), {}
+				if agent.held and agent.worktree then table.insert(more, action("card-agent-retry", "Return worktree", "⇧A")) end
+			else
+				main, more, chips = action("card-agent-retry", "Try again", "A"), {}, { chip("Fix failed", "bad-soft") }
+			end
 			if agent.worktree then table.insert(more, action("card-agent-worktree", "Open worktree", "O")) end
 		else
 			-- Enter and double-click use hub-open for Review fix; keep the lifecycle card's stable action slot.
@@ -663,7 +675,7 @@ local function toCard(pr: HubPR, placement: Model.Placement, s: State): Card
 	return {
 		flake = if flake and flake.flaky and flake.reason then "Likely flaky: " .. flake.reason else nil,
 		pr = pr, chips = chips, detail = detail, detailKind = detailKind, column = placement.column, reasons = placement.reasons, main = main, more = more,
-		agent = agent, agentSlot = agent ~= nil or placement.column == "needs_fixes" or (placement.column == "in_review" and M.botActionable(pr)),
+		agent = agent, agentSlot = agent ~= nil or placement.column == "needs_fixes" or (placement.column == "in_review" and not pr.tandem and M.botActionable(pr)),
 		agentMessage = message, agentPath = path, agentCommit = commit,
 		summary = if agent then nil else summary, merge = s.merges[pr.repo], note = M.pendingNote(s, pr),
 		asking = askingOf(s, pr), busy = s.busy[pr.key],
@@ -727,7 +739,17 @@ local function pruneMarks(s: State, byKey: { [string]: HubPR }, placements: { [s
 end
 
 -- Recomputes `s.board` from `s.prs` and the inputs. Keeps the selection only while its card is on the board.
+-- One owner per branch: a no_clone or failed state with no worktree on a PR Tandem watches is obsolete (its Clone repo
+-- and Try again start nothing now), so it is dropped. A failed state that still names a worktree is kept for its cleanup.
+local function dropObsoleteAgents(s: State)
+	for _, pr in s.prs do
+		local agent = s.agents[pr.key]
+		if pr.tandem and agent and (agent.kind == "no_clone" or (agent.kind == "failed" and not agent.worktree)) then s.agents[pr.key] = nil end
+	end
+end
+
 function M.project(s: State)
+	dropObsoleteAgents(s)
 	local filter: Model.Filter = { repositories = s.repositories, search = s.search.text }
 	local placements: { [string]: Model.Placement } = {}
 	local counts = { mine = 0, review = 0 }

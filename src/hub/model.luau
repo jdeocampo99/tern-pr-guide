@@ -249,6 +249,8 @@ function M.placement(pr: HubPR, now: number): Placement
 		return { tab = "review", column = column, reasons = {} }
 	end
 	if pr.draft or not active(pr, now) then return { tab = "mine", column = "inactive", reasons = {} } end
+	-- Tandem owns the branch it watches: the PR waits in In review, whatever is wrong with it or not.
+	if pr.tandem then return { tab = "mine", column = "in_review", reasons = {} } end
 	local reasons = M.reasons(pr, now)
 	if #reasons > 0 then return { tab = "mine", column = "needs_fixes", reasons = reasons } end
 	local passing = pr.checks.state == "passing" or pr.checks.state == "none"
@@ -273,6 +275,72 @@ function M.botFeedback(pr: HubPR): boolean
 		end
 	end
 	return false
+end
+
+-- Tandem ---------------------------------------------------------------------------------------------------
+-- `tandem watch --json` rows as the watched set, and that set as the flag on each board PR. Tandem spells a
+-- repo as it was given; the key is lowercase, so the match ignores case.
+
+local TANDEM_COLORS: { [string]: boolean } = { red = true, yellow = true, green = true, done = true, unwatched = true }
+
+local function isCount(value: any): boolean
+	return type(value) == "number" and value >= 0 and value % 1 == 0
+end
+
+local function tandemRow(row: any): string?
+	if type(row) ~= "table" then return nil end
+	local repo, number = row.repo, row.number
+	if type(repo) ~= "string" or not string.match(repo, "^[%w%-_.]+/[%w%-_.]+$") then return nil end
+	if type(number) ~= "number" or number < 1 or number % 1 ~= 0 then return nil end
+	for _, field in { "branch", "url", "checks", "status", "note" } do
+		if type(row[field]) ~= "string" then return nil end
+	end
+	if type(row.color) ~= "string" or not TANDEM_COLORS[row.color] then return nil end
+	for _, field in { "link", "taskId" } do
+		if row[field] ~= nil and type(row[field]) ~= "string" then return nil end
+	end
+	local counts = row.checkCounts
+	if counts ~= nil and not (type(counts) == "table" and isCount(counts.passed) and isCount(counts.failed) and isCount(counts.pending)) then
+		return nil
+	end
+	if row.color == "unwatched" then return nil end
+	return string.lower(repo) .. "#" .. number
+end
+
+-- The PRs Tandem watches, as "owner/repo#123" in lowercase, from the decoded output of `tandem watch --json`.
+-- Nil when the output is not that document; a malformed row, or one Tandem does not watch, is left out.
+function M.parseTandemWatch(decoded: any): { [string]: boolean }?
+	if type(decoded) ~= "table" or type(decoded.now) ~= "string" or type(decoded.rows) ~= "table" then return nil end
+	for _, field in { "readAt", "rateLimitedUntil" } do
+		if decoded[field] ~= nil and type(decoded[field]) ~= "string" then return nil end
+	end
+	local watched: { [string]: boolean } = {}
+	for _, row in decoded.rows do
+		local key = tandemRow(row)
+		if key then watched[key] = true end
+	end
+	return watched
+end
+
+-- The flag for each board PR, by the board's own key, from a watched set.
+function M.tandemFlags(watched: { [string]: boolean }, prs: { HubPR }): { [string]: boolean }
+	local flags: { [string]: boolean } = {}
+	for _, pr in prs do
+		if watched[string.lower(pr.repo) .. "#" .. pr.number] then flags[pr.key] = true end
+	end
+	return flags
+end
+
+-- The reason a hand-off gives Tandem: what is wrong with the PR now, in the rules' own words.
+local REASON_TEXT: { [string]: string } = {
+	merge_failed = "the merge failed", feedback = "review feedback to address", checks = "failing checks", conflict = "merge conflicts",
+}
+
+function M.handoffReason(pr: HubPR, now: number): string
+	local parts: { string } = {}
+	for _, reason in M.reasons(pr, now) do table.insert(parts, REASON_TEXT[reason]) end
+	if #parts == 0 then return "Hand off from the PR hub" end
+	return "PR hub: " .. table.concat(parts, ", ")
 end
 
 -- Ready, not behind, nothing pending: the cards Space may select.
