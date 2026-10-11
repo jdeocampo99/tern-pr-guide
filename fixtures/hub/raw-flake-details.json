@@ -1,0 +1,917 @@
+{
+ "_note": "SYNTHETIC details.graphql nodes, one failing check each, for the flake acceptance matrix (tests/flake_test.luau). Annotation texts are the wording GitHub's runners and tools use; the smoke repo's workflow emits only .github annotations.",
+ "timeout": {
+  "data": {
+   "node": {
+    "id": "PR_e2e",
+    "headRefOid": "ffffffffffffffffffffffffffffffffffffffff",
+    "reviews": {
+     "nodes": []
+    },
+    "reviewThreads": {
+     "nodes": []
+    },
+    "files": {
+     "nodes": [
+      {
+       "path": "src/cart.ts"
+      }
+     ]
+    },
+    "commits": {
+     "nodes": [
+      {
+       "commit": {
+        "statusCheckRollup": {
+         "contexts": {
+          "nodes": [
+           {
+            "__typename": "CheckRun",
+            "name": "e2e",
+            "conclusion": "FAILURE",
+            "detailsUrl": "https://github.com/acme/web/actions/runs/5101/job/1",
+            "summary": "The job running on runner GitHub Actions 12 has exceeded the maximum execution time of 30 minutes.",
+            "checkSuite": {
+             "workflowRun": {
+              "databaseId": 5101,
+              "workflow": {
+               "name": "e2e"
+              }
+             }
+            },
+            "annotations": {
+             "nodes": [
+              {
+               "path": ".github",
+               "annotationLevel": "FAILURE",
+               "title": "",
+               "message": "Process completed with exit code 1.",
+               "location": {
+                "start": {
+                 "line": 1
+                }
+               }
+              }
+             ]
+            }
+           }
+          ]
+         }
+        }
+       }
+      }
+     ]
+    }
+   }
+  }
+ },
+ "reset": {
+  "data": {
+   "node": {
+    "id": "PR_test",
+    "headRefOid": "ffffffffffffffffffffffffffffffffffffffff",
+    "reviews": {
+     "nodes": []
+    },
+    "reviewThreads": {
+     "nodes": []
+    },
+    "files": {
+     "nodes": [
+      {
+       "path": "src/cart.ts"
+      }
+     ]
+    },
+    "commits": {
+     "nodes": [
+      {
+       "commit": {
+        "statusCheckRollup": {
+         "contexts": {
+          "nodes": [
+           {
+            "__typename": "CheckRun",
+            "name": "test",
+            "conclusion": "FAILURE",
+            "detailsUrl": "https://github.com/acme/web/actions/runs/5102/job/1",
+            "summary": "",
+            "checkSuite": {
+             "workflowRun": {
+              "databaseId": 5102,
+              "workflow": {
+               "name": "ci"
+              }
+             }
+            },
+            "annotations": {
+             "nodes": [
+              {
+               "path": ".github",
+               "annotationLevel": "FAILURE",
+               "title": "",
+               "message": "Error: read ECONNRESET while fetching https://registry.npmjs.org/left-pad",
+               "location": {
+                "start": {
+                 "line": 1
+                }
+               }
+              },
+              {
+               "path": ".github",
+               "annotationLevel": "FAILURE",
+               "title": "",
+               "message": "Process completed with exit code 1.",
+               "location": {
+                "start": {
+                 "line": 1
+                }
+               }
+              }
+             ]
+            }
+           }
+          ]
+         }
+        }
+       }
+      }
+     ]
+    }
+   }
+  }
+ },
+ "ratelimit": {
+  "data": {
+   "node": {
+    "id": "PR_test",
+    "headRefOid": "ffffffffffffffffffffffffffffffffffffffff",
+    "reviews": {
+     "nodes": []
+    },
+    "reviewThreads": {
+     "nodes": []
+    },
+    "files": {
+     "nodes": [
+      {
+       "path": "src/cart.ts"
+      }
+     ]
+    },
+    "commits": {
+     "nodes": [
+      {
+       "commit": {
+        "statusCheckRollup": {
+         "contexts": {
+          "nodes": [
+           {
+            "__typename": "CheckRun",
+            "name": "test",
+            "conclusion": "FAILURE",
+            "detailsUrl": "https://github.com/acme/web/actions/runs/5103/job/1",
+            "summary": "",
+            "checkSuite": {
+             "workflowRun": {
+              "databaseId": 5103,
+              "workflow": {
+               "name": "ci"
+              }
+             }
+            },
+            "annotations": {
+             "nodes": [
+              {
+               "path": ".github",
+               "annotationLevel": "FAILURE",
+               "title": "",
+               "message": "API rate limit exceeded for installation. Retry after 60 seconds.",
+               "location": {
+                "start": {
+                 "line": 1
+                }
+               }
+              },
+              {
+               "path": ".github",
+               "annotationLevel": "FAILURE",
+               "title": "",
+               "message": "Process completed with exit code 1.",
+               "location": {
+                "start": {
+                 "line": 1
+                }
+               }
+              }
+             ]
+            }
+           }
+          ]
+         }
+        }
+       }
+      }
+     ]
+    }
+   }
+  }
+ },
+ "lostrunner": {
+  "data": {
+   "node": {
+    "id": "PR_build",
+    "headRefOid": "ffffffffffffffffffffffffffffffffffffffff",
+    "reviews": {
+     "nodes": []
+    },
+    "reviewThreads": {
+     "nodes": []
+    },
+    "files": {
+     "nodes": [
+      {
+       "path": "src/cart.ts"
+      }
+     ]
+    },
+    "commits": {
+     "nodes": [
+      {
+       "commit": {
+        "statusCheckRollup": {
+         "contexts": {
+          "nodes": [
+           {
+            "__typename": "CheckRun",
+            "name": "build",
+            "conclusion": "FAILURE",
+            "detailsUrl": "https://github.com/acme/web/actions/runs/5104/job/1",
+            "summary": "",
+            "checkSuite": {
+             "workflowRun": {
+              "databaseId": 5104,
+              "workflow": {
+               "name": "ci"
+              }
+             }
+            },
+            "annotations": {
+             "nodes": [
+              {
+               "path": ".github",
+               "annotationLevel": "FAILURE",
+               "title": "",
+               "message": "The hosted runner lost communication with the server. Anything in your workflow that terminates the runner process, starves it for CPU/Memory, or blocks its network access can cause this error.",
+               "location": {
+                "start": {
+                 "line": 1
+                }
+               }
+              }
+             ]
+            }
+           }
+          ]
+         }
+        }
+       }
+      }
+     ]
+    }
+   }
+  }
+ },
+ "oom": {
+  "data": {
+   "node": {
+    "id": "PR_build",
+    "headRefOid": "ffffffffffffffffffffffffffffffffffffffff",
+    "reviews": {
+     "nodes": []
+    },
+    "reviewThreads": {
+     "nodes": []
+    },
+    "files": {
+     "nodes": [
+      {
+       "path": "src/cart.ts"
+      }
+     ]
+    },
+    "commits": {
+     "nodes": [
+      {
+       "commit": {
+        "statusCheckRollup": {
+         "contexts": {
+          "nodes": [
+           {
+            "__typename": "CheckRun",
+            "name": "build",
+            "conclusion": "FAILURE",
+            "detailsUrl": "https://github.com/acme/web/actions/runs/5105/job/1",
+            "summary": "",
+            "checkSuite": {
+             "workflowRun": {
+              "databaseId": 5105,
+              "workflow": {
+               "name": "ci"
+              }
+             }
+            },
+            "annotations": {
+             "nodes": [
+              {
+               "path": ".github",
+               "annotationLevel": "FAILURE",
+               "title": "",
+               "message": "Process completed with exit code 137.",
+               "location": {
+                "start": {
+                 "line": 1
+                }
+               }
+              }
+             ]
+            }
+           }
+          ]
+         }
+        }
+       }
+      }
+     ]
+    }
+   }
+  }
+ },
+ "plain": {
+  "data": {
+   "node": {
+    "id": "PR_build",
+    "headRefOid": "ffffffffffffffffffffffffffffffffffffffff",
+    "reviews": {
+     "nodes": []
+    },
+    "reviewThreads": {
+     "nodes": []
+    },
+    "files": {
+     "nodes": [
+      {
+       "path": "src/cart.ts"
+      }
+     ]
+    },
+    "commits": {
+     "nodes": [
+      {
+       "commit": {
+        "statusCheckRollup": {
+         "contexts": {
+          "nodes": [
+           {
+            "__typename": "CheckRun",
+            "name": "build",
+            "conclusion": "FAILURE",
+            "detailsUrl": "https://github.com/acme/web/actions/runs/5106/job/1",
+            "summary": "tsc --noEmit found 1 error.",
+            "checkSuite": {
+             "workflowRun": {
+              "databaseId": 5106,
+              "workflow": {
+               "name": "ci"
+              }
+             }
+            },
+            "annotations": {
+             "nodes": [
+              {
+               "path": ".github",
+               "annotationLevel": "FAILURE",
+               "title": "",
+               "message": "Process completed with exit code 2.",
+               "location": {
+                "start": {
+                 "line": 1
+                }
+               }
+              }
+             ]
+            }
+           }
+          ]
+         }
+        }
+       }
+      }
+     ]
+    }
+   }
+  }
+ },
+ "history": {
+  "data": {
+   "node": {
+    "id": "PR_test",
+    "headRefOid": "ffffffffffffffffffffffffffffffffffffffff",
+    "reviews": {
+     "nodes": []
+    },
+    "reviewThreads": {
+     "nodes": []
+    },
+    "files": {
+     "nodes": [
+      {
+       "path": "src/cart.ts"
+      }
+     ]
+    },
+    "commits": {
+     "nodes": [
+      {
+       "commit": {
+        "statusCheckRollup": {
+         "contexts": {
+          "nodes": [
+           {
+            "__typename": "CheckRun",
+            "name": "test",
+            "conclusion": "FAILURE",
+            "detailsUrl": "https://github.com/acme/web/actions/runs/5107/job/1",
+            "summary": "",
+            "checkSuite": {
+             "workflowRun": {
+              "databaseId": 5107,
+              "workflow": {
+               "name": "ci"
+              }
+             }
+            },
+            "annotations": {
+             "nodes": [
+              {
+               "path": ".github",
+               "annotationLevel": "FAILURE",
+               "title": "",
+               "message": "Process completed with exit code 1.",
+               "location": {
+                "start": {
+                 "line": 1
+                }
+               }
+              }
+             ]
+            }
+           }
+          ]
+         }
+        }
+       }
+      }
+     ]
+    }
+   }
+  }
+ },
+ "history1": {
+  "data": {
+   "node": {
+    "id": "PR_test",
+    "headRefOid": "ffffffffffffffffffffffffffffffffffffffff",
+    "reviews": {
+     "nodes": []
+    },
+    "reviewThreads": {
+     "nodes": []
+    },
+    "files": {
+     "nodes": [
+      {
+       "path": "src/cart.ts"
+      }
+     ]
+    },
+    "commits": {
+     "nodes": [
+      {
+       "commit": {
+        "statusCheckRollup": {
+         "contexts": {
+          "nodes": [
+           {
+            "__typename": "CheckRun",
+            "name": "test",
+            "conclusion": "FAILURE",
+            "detailsUrl": "https://github.com/acme/web/actions/runs/5108/job/1",
+            "summary": "",
+            "checkSuite": {
+             "workflowRun": {
+              "databaseId": 5108,
+              "workflow": {
+               "name": "e2e"
+              }
+             }
+            },
+            "annotations": {
+             "nodes": [
+              {
+               "path": ".github",
+               "annotationLevel": "FAILURE",
+               "title": "",
+               "message": "Process completed with exit code 1.",
+               "location": {
+                "start": {
+                 "line": 1
+                }
+               }
+              }
+             ]
+            }
+           }
+          ]
+         }
+        }
+       }
+      }
+     ]
+    }
+   }
+  }
+ },
+ "history2": {
+  "data": {
+   "node": {
+    "id": "PR_test",
+    "headRefOid": "ffffffffffffffffffffffffffffffffffffffff",
+    "reviews": {
+     "nodes": []
+    },
+    "reviewThreads": {
+     "nodes": []
+    },
+    "files": {
+     "nodes": [
+      {
+       "path": "src/cart.ts"
+      }
+     ]
+    },
+    "commits": {
+     "nodes": [
+      {
+       "commit": {
+        "statusCheckRollup": {
+         "contexts": {
+          "nodes": [
+           {
+            "__typename": "CheckRun",
+            "name": "test",
+            "conclusion": "FAILURE",
+            "detailsUrl": "https://github.com/acme/web/actions/runs/5109/job/1",
+            "summary": "",
+            "checkSuite": {
+             "workflowRun": {
+              "databaseId": 5109,
+              "workflow": {
+               "name": "release"
+              }
+             }
+            },
+            "annotations": {
+             "nodes": [
+              {
+               "path": ".github",
+               "annotationLevel": "FAILURE",
+               "title": "",
+               "message": "Process completed with exit code 1.",
+               "location": {
+                "start": {
+                 "line": 1
+                }
+               }
+              }
+             ]
+            }
+           }
+          ]
+         }
+        }
+       }
+      }
+     ]
+    }
+   }
+  }
+ },
+ "rerun": {
+  "data": {
+   "node": {
+    "id": "PR_test",
+    "headRefOid": "1111111111111111111111111111111111111111",
+    "reviews": {
+     "nodes": []
+    },
+    "reviewThreads": {
+     "nodes": []
+    },
+    "files": {
+     "nodes": [
+      {
+       "path": "src/cart.ts"
+      }
+     ]
+    },
+    "commits": {
+     "nodes": [
+      {
+       "commit": {
+        "statusCheckRollup": {
+         "contexts": {
+          "nodes": [
+           {
+            "__typename": "CheckRun",
+            "name": "test",
+            "conclusion": "FAILURE",
+            "detailsUrl": "https://github.com/acme/web/actions/runs/7002/job/1",
+            "summary": "",
+            "checkSuite": {
+             "workflowRun": {
+              "databaseId": 7002,
+              "workflow": {
+               "name": "ci"
+              }
+             }
+            },
+            "annotations": {
+             "nodes": [
+              {
+               "path": ".github",
+               "annotationLevel": "FAILURE",
+               "title": "",
+               "message": "Process completed with exit code 1.",
+               "location": {
+                "start": {
+                 "line": 1
+                }
+               }
+              }
+             ]
+            }
+           }
+          ]
+         }
+        }
+       }
+      }
+     ]
+    }
+   }
+  }
+ },
+ "typeerror": {
+  "data": {
+   "node": {
+    "id": "PR_typecheck",
+    "headRefOid": "ffffffffffffffffffffffffffffffffffffffff",
+    "reviews": {
+     "nodes": []
+    },
+    "reviewThreads": {
+     "nodes": []
+    },
+    "files": {
+     "nodes": [
+      {
+       "path": "src/lib/query-persister.ts"
+      },
+      {
+       "path": "src/cart.ts"
+      }
+     ]
+    },
+    "commits": {
+     "nodes": [
+      {
+       "commit": {
+        "statusCheckRollup": {
+         "contexts": {
+          "nodes": [
+           {
+            "__typename": "CheckRun",
+            "name": "typecheck",
+            "conclusion": "FAILURE",
+            "detailsUrl": "https://github.com/acme/web/actions/runs/5110/job/1",
+            "summary": "tsc --noEmit found 1 error.",
+            "checkSuite": {
+             "workflowRun": {
+              "databaseId": 5110,
+              "workflow": {
+               "name": "ci"
+              }
+             }
+            },
+            "annotations": {
+             "nodes": [
+              {
+               "path": "src/lib/query-persister.ts",
+               "annotationLevel": "FAILURE",
+               "title": "TS2322",
+               "message": "Type 'PersistedClient | undefined' is not assignable to type 'PersistedClient'.",
+               "location": {
+                "start": {
+                 "line": 39
+                }
+               }
+              },
+              {
+               "path": ".github",
+               "annotationLevel": "FAILURE",
+               "title": "",
+               "message": "Process completed with exit code 2.",
+               "location": {
+                "start": {
+                 "line": 1
+                }
+               }
+              }
+             ]
+            }
+           }
+          ]
+         }
+        }
+       }
+      }
+     ]
+    }
+   }
+  }
+ },
+ "typeerror_infra": {
+  "data": {
+   "node": {
+    "id": "PR_typecheck",
+    "headRefOid": "ffffffffffffffffffffffffffffffffffffffff",
+    "reviews": {
+     "nodes": []
+    },
+    "reviewThreads": {
+     "nodes": []
+    },
+    "files": {
+     "nodes": [
+      {
+       "path": "src/lib/query-persister.ts"
+      }
+     ]
+    },
+    "commits": {
+     "nodes": [
+      {
+       "commit": {
+        "statusCheckRollup": {
+         "contexts": {
+          "nodes": [
+           {
+            "__typename": "CheckRun",
+            "name": "typecheck",
+            "conclusion": "FAILURE",
+            "detailsUrl": "https://github.com/acme/web/actions/runs/5107/job/1",
+            "summary": "",
+            "checkSuite": {
+             "workflowRun": {
+              "databaseId": 5107,
+              "workflow": {
+               "name": "ci"
+              }
+             }
+            },
+            "annotations": {
+             "nodes": [
+              {
+               "path": "src/lib/query-persister.ts",
+               "annotationLevel": "FAILURE",
+               "title": "TS2322",
+               "message": "Type 'PersistedClient | undefined' is not assignable to type 'PersistedClient'.",
+               "location": {
+                "start": {
+                 "line": 39
+                }
+               }
+              },
+              {
+               "path": ".github",
+               "annotationLevel": "FAILURE",
+               "title": "",
+               "message": "Error: read ECONNRESET",
+               "location": {
+                "start": {
+                 "line": 1
+                }
+               }
+              },
+              {
+               "path": ".github",
+               "annotationLevel": "FAILURE",
+               "title": "",
+               "message": "Process completed with exit code 2.",
+               "location": {
+                "start": {
+                 "line": 1
+                }
+               }
+              }
+             ]
+            }
+           }
+          ]
+         }
+        }
+       }
+      }
+     ]
+    }
+   }
+  }
+ },
+ "outside": {
+  "data": {
+   "node": {
+    "id": "PR_lint",
+    "headRefOid": "ffffffffffffffffffffffffffffffffffffffff",
+    "reviews": {
+     "nodes": []
+    },
+    "reviewThreads": {
+     "nodes": []
+    },
+    "files": {
+     "nodes": [
+      {
+       "path": "src/cart.ts"
+      }
+     ]
+    },
+    "commits": {
+     "nodes": [
+      {
+       "commit": {
+        "statusCheckRollup": {
+         "contexts": {
+          "nodes": [
+           {
+            "__typename": "CheckRun",
+            "name": "lint",
+            "conclusion": "FAILURE",
+            "detailsUrl": "https://github.com/acme/web/actions/runs/5111/job/1",
+            "summary": "",
+            "checkSuite": {
+             "workflowRun": {
+              "databaseId": 5111,
+              "workflow": {
+               "name": "ci"
+              }
+             }
+            },
+            "annotations": {
+             "nodes": [
+              {
+               "path": "src/legacy/format.ts",
+               "annotationLevel": "FAILURE",
+               "title": "no-unused-vars",
+               "message": "'x' is assigned a value but never used.",
+               "location": {
+                "start": {
+                 "line": 8
+                }
+               }
+              },
+              {
+               "path": ".github",
+               "annotationLevel": "FAILURE",
+               "title": "",
+               "message": "Process completed with exit code 1.",
+               "location": {
+                "start": {
+                 "line": 1
+                }
+               }
+              }
+             ]
+            }
+           }
+          ]
+         }
+        }
+       }
+      }
+     ]
+    }
+   }
+  }
+ }
+}

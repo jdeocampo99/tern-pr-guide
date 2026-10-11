@@ -1,5 +1,6 @@
 # Run after hub-f.graphql with ids = PRs that have an unresolved thread and changed updatedAt.
+# Measured 2026-10-09: 5 points for 17 PRs with reviewThreads(first: 30), 0.7-0.8 s (9 points at first: 50, 4 at first: 20).
 query Threads($ids: [ID!]!) {
-  rateLimit { cost remaining }
-  nodes(ids: $ids) { ... on PullRequest { number reviewThreads(first: 50) { nodes { isResolved comments(first: 1) { nodes { author { __typename login } } } } } } }
+  rateLimit { cost remaining limit resetAt }
+  nodes(ids: $ids) { ... on PullRequest { id number reviewThreads(first: 30) { nodes { isResolved comments(first: 1) { nodes { author { __typename login } } } } } } }
 }

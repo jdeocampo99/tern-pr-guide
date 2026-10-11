@@ -1,0 +1,27 @@
+# The fixes page's one call when a Needs fixes PR opens: changes-requested reviews, unresolved threads with
+# their first comment and diff hunk, the changed paths, and failing check runs with annotations. `commentReviews`
+# carries the bodies of comment reviews; only a Bot author's is kept (a bot's review-level comment).
+# Requests (not nodes) set the cost: 1 + 1 + 1 + 50 (a first comment per thread) + 1 + 1 + 1 + 30 (annotations per run) is under 100, so 1 point.
+query Details($id: ID!) {
+  rateLimit { cost remaining limit resetAt }
+  node(id: $id) { ... on PullRequest {
+    id
+    headRefOid
+    reviews(last: 20, states: [CHANGES_REQUESTED]) { nodes { author { __typename login } body submittedAt url } }
+    commentReviews: reviews(last: 20, states: [COMMENTED]) { nodes { author { __typename login } body submittedAt url commit { oid } } }
+    reviewThreads(first: 50) { nodes {
+      id isResolved isOutdated path line
+      comments(first: 1) { totalCount nodes { author { __typename login } body url diffHunk pullRequestReview { state } } }
+    } }
+    files(first: 100) { nodes { path } }
+    commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 30) { nodes {
+      __typename
+      ... on CheckRun {
+        name conclusion detailsUrl summary
+        checkSuite { workflowRun { databaseId workflow { name } } }
+        annotations(first: 20) { nodes { path annotationLevel title message location { start { line } } } }
+      }
+      ... on StatusContext { context state targetUrl }
+    } } } } } }
+  } }
+}

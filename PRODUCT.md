@@ -29,7 +29,7 @@ The PR is read as a story, not a wall of files. The overview comes first, then a
 
 ## Operating Context
 
-- Opened from Tern's command palette (**New PR review block**, `⌥⌘R`; **New AI generated PR review block**, `⌥⇧⌘R`). It works inside a clone or anywhere else. A picker lists open PRs, and recently opened PRs from any repo sit at the top.
+- Opened from the PR hub (`⌥⌘R`, or **PR hub** in Tern's command palette; `⌥⇧⌘R`, **PR hub, AI guides**, starts the AI review as the PR opens). The hub is the one way in: it lists the reader's PRs and review requests from any repo, and PRs opened lately sit in a Recently opened fold. It works inside a clone or anywhere else.
 - Keyboard-first: every action has a key (`j`/`k` steps, `⏎` reviewed, `/` search, `r` review, `⌘⏎` submit, `?` all shortcuts).
 - Depends on `gh` (logged in), `git`, and optionally `omp` for AI reviews. Reviews are stored at `.git/prguide/<n>.json`, in the format documented in `GUIDE.md`.
 - Posting to GitHub takes a two-press confirm. Dry runs (`post=false`, and the sample block) save to `/tmp` instead.
@@ -52,7 +52,7 @@ The PR is read as a story, not a wall of files. The overview comes first, then a
 
 ## Evidence on Hand
 
-- README screenshots in `docs/screenshots/`: overview, step, search, review, whole file, picker.
+- README screenshots in `docs/screenshots/`: overview, step, search, review, whole file.
 - Sample data: `fixtures/pr-350.json`, `fixtures/guide-350.json`, and the built-in **New PR Guide sample block**.
 - Performance claims in the README (85-file PR, a 5,600-line file opens instantly) come from the author's own use.
 - No user counts, testimonials or external benchmarks exist. Don't invent them.

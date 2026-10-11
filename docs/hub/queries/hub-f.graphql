@@ -1,3 +1,5 @@
+# Measured 2026-10-09 on 42 open PRs: 11 points, 5.8-9.2 s (9 points before timelineItems). Never add thread authors here: 159 points.
+# A PR added by link adds `addedN: repository(owner:, name:) { pullRequest(number:) { ...Hub } }` before the fragment (no change in cost).
 query Hub($n: Int = 50) {
   viewer { login }
   rateLimit { cost remaining resetAt limit used nodeCount }
@@ -24,14 +26,21 @@ fragment Hub on PullRequest {
   title
   url
   isDraft
+  createdAt
   updatedAt
   headRefOid
-  author { login }
+  baseRefName
+  additions
+  deletions
+  changedFiles
+  author { __typename login }
   repository { nameWithOwner }
   reviewDecision
   mergeable
   mergeStateStatus
   totalCommentsCount
+  autoMergeRequest { enabledAt }
+  timelineItems(last: 1, itemTypes: [REMOVED_FROM_MERGE_QUEUE_EVENT]) { nodes { ... on RemovedFromMergeQueueEvent { createdAt reason } } }
   commits(last: 1) { nodes { commit { committedDate statusCheckRollup { state contexts(first: 0) { totalCount checkRunCountsByState { state count } statusContextCountsByState { state count } } } } } }
   latestReviews(first: 20) {
     nodes { author { __typename login } state submittedAt commit { oid } }

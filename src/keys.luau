@@ -1,7 +1,7 @@
 --!strict
 -- What each key does in each mode, as the same actions the page's clicks send.
 local Fields = require("./text-field")
-local Picker = require("./picker")
+local HubState = require("./hub/state")
 local Review = require("./review")
 local State = require("./state")
 
@@ -104,16 +104,167 @@ function M.action(s: State.State, key: Key): Action?
  return readingKey(s, key)
 end
 
--- The action `key` triggers on the PR picker, or nil when it types into the filter field. j and k
--- move only while the field is empty, so they can still be typed.
-function M.pickerAction(p: Picker.Picker, key: Key): Action?
- local name = key.name
- local empty = p.field.text == "" and not (key.ctrl or key.meta or key.alt or key.shift)
- if name == "down" or (empty and name == "j") then return act("picker-move", 1) end
- if name == "up" or (empty and name == "k") then return act("picker-move", -1) end
- if name == "enter" then return act("picker-open") end
- if name == "escape" then return act("picker-clear") end
- return nil
+-- The shortcut label a key press has on a card's split button: "A", "⇧A", ",", "⏎".
+local function cardKeyLabel(key: Key): string?
+	if key.ctrl or key.meta or key.alt then return nil end
+	local name = key.name
+	if name == "enter" then return "⏎" end
+	if #name ~= 1 then return nil end
+	local upper = string.upper(name)
+	return if key.shift or name ~= string.lower(name) then "⇧" .. upper else upper
+end
+
+local function hubMenuKey(s: HubState.State, key: Key): Action?
+	local name = key.name
+	-- The merge menu is asking for a command or a label: ⏎ saves, Esc goes back to the list, the rest is typed.
+	if s.methodEdit then
+		if name == "enter" then return act("hub-method-save") end
+		if name == "escape" then return act("hub-method-cancel") end
+		return nil
+	end
+	if name == "down" or name == "j" then return act("hub-menu-move", 1) end
+	if name == "up" or name == "k" then return act("hub-menu-move", -1) end
+	if name == "enter" then return act("hub-menu-enter") end
+	if name == "space" then return act("hub-menu-select") end
+	if name == "escape" then return act("hub-menu-close") end
+	if s.menu == "agent" and name == "left" then return act("hub-menu-effort", -1) end
+	if s.menu == "agent" and name == "right" then return act("hub-menu-effort", 1) end
+	return nil
+end
+
+-- The fixes page: j and k move over the steps (or the panel's actions), h and l between the two, ⏎ goes in or
+-- chooses, Esc goes back to the board. A step's own keys follow the buttons it shows.
+local function fixesKey(s: HubState.State, key: Key): Action?
+	local name = key.name
+	if key.ctrl or key.meta or key.alt then return nil end
+	if name == "escape" then return act("fixes-close") end
+	if string.match(name, "^%a$") and (s.search.text ~= "" or s.link.text ~= "") then return nil end
+	local label = cardKeyLabel(key)
+	if label == "⇧L" then return act("fixes-log") end
+	if label == "⇧R" then return act("fixes-rerun") end
+	if name == "down" or name == "j" then return act("fixes-move", 1) end
+	if name == "up" or name == "k" then return act("fixes-move", -1) end
+	if name == "left" or name == "h" then return act("fixes-focus", "steps") end
+	if name == "right" or name == "l" then return act("fixes-focus", "panel") end
+	if name == "enter" then return act("fixes-press") end
+	if label == "R" then return act("fixes-reply") end
+	if label == "E" then return act("fixes-resolve") end
+	if label == "G" then return act("fixes-github") end
+	if label == "B" then return act("fixes-bots") end
+	local main = HubState.fixMain(s)
+	if main and label ~= nil and s.route and (main.key == label or (label == "⇧A" and main.act == "card-summarize")) then return act(main.act, s.route.key) end
+	-- When Re-run moved first, the agent is the card's alternative and keeps its key.
+	local card = if s.route then HubState.card(s, s.route.key) else nil
+	if card and (label == "A" or label == "⇧A" or label == "O") and s.route then
+		for _, more in card.more do
+			if more.key == label then return act(more.act, s.route.key) end
+		end
+	end
+	return nil
+end
+
+local function hubBoardKey(s: HubState.State, key: Key): Action?
+	local name = key.name
+	if isQuestionMark(key) then return act("hub-help") end
+	if name == "/" or key.text == "/" then return act("hub-search") end
+	if (key.meta or key.ctrl) and name == "r" then return act("hub-refresh") end
+	if key.ctrl or key.meta or key.alt then return nil end
+	if name == "escape" then return act("hub-escape") end
+	if name == "enter" then return act(if key.shift then "hub-open-generate" else "hub-open") end
+	-- Letter shortcuts act only when both fields are empty, even after search lost focus.
+	if string.match(name, "^%a$") and (s.search.text ~= "" or s.link.text ~= "") then return nil end
+	local label = cardKeyLabel(key)
+	if name == "space" then return act("hub-mark") end
+	if label == "⇧X" and s.tab == "mine" then return act("hub-mark-stale") end
+	-- With a selection, M merges it and X closes it.
+	if next(s.marked) ~= nil then
+		if label == "M" then return act("hub-batch-merge") end
+		if label == "X" then return act("hub-batch-close") end
+	end
+	if name == "left" or name == "h" then return act("hub-move", "left") end
+	if name == "right" or name == "l" then return act("hub-move", "right") end
+	if name == "down" or name == "j" then return act("hub-move", "down") end
+	if name == "up" or name == "k" then return act("hub-move", "up") end
+	if name == "." or key.text == "." then return act("hub-next") end
+	if label == "T" then return act("hub-tab") end
+	if label == "I" then return act("hub-fold", "inactive") end
+	if label == "R" and s.tab == "review" then return act("hub-fold", "recent") end
+	if label == "F" then return act("hub-menu", "repositories") end
+	if label == "S" then return act("hub-menu", "sort") end
+	if label == "⇧M" then return act("hub-menu", "agent") end
+	if label == "N" then return act("hub-link") end
+	local card = HubState.selectedCard(s)
+	if card and label then
+		local main = card.main
+		if main and (main.key == label or (label == "⇧A" and main.act == "card-summarize")) then return act(main.act, card.pr.key) end
+		for _, more in card.more do
+			if more.key == label then return act(more.act, card.pr.key) end
+		end
+	end
+	return nil
+end
+
+-- The action `key` triggers on the PR hub, or nil when it changes nothing or, in the search field, types
+-- into it. Letters act only on the board and in menus: while the filter is typed they are text.
+function M.hubAction(s: HubState.State, key: Key): Action?
+	local mode = HubState.mode(s)
+	if mode == "review-fix" then
+		local page = HubState.reviewPage(s)
+		if not page then return if key.name == "escape" then act("review-fix-close") else nil end
+		if page.busy then return nil end
+		if page.ask then
+			if key.name == "enter" and (key.meta or key.ctrl) and not key.alt then return act("review-fix-discard-confirm") end
+			if key.name == "escape" then return act("review-fix-discard-cancel") end
+			return nil
+		end
+		if key.ctrl or key.meta or key.alt then return nil end
+		if key.name == "escape" then return act("review-fix-close") end
+		if key.name == "enter" then return act("review-fix-reviewed") end
+		if string.match(key.name, "^%a$") and (s.search.text ~= "" or s.link.text ~= "") then return nil end
+		if key.name == "down" or key.name == "j" then return act("review-fix-move", 1) end
+		if key.name == "up" or key.name == "k" then return act("review-fix-move", -1) end
+		local label = cardKeyLabel(key)
+		if label == "B" then return act("review-fix-original") end
+		if label == "D" then return act("review-fix-discard") end
+		if label == "P" then return act("review-fix-push") end
+		return nil
+	end
+	if mode == "search" then
+		if key.name == "enter" then return act("hub-search-done") end
+		if key.name == "escape" then return act("hub-search-clear") end
+		if key.name == "down" then return act("hub-move", "down") end
+		if key.name == "up" then return act("hub-move", "up") end
+		return nil
+	end
+	if mode == "menu" then return hubMenuKey(s, key) end
+	if mode == "fixes" then return fixesKey(s, key) end
+	if mode == "reply" then
+		if key.name == "enter" and (key.meta or key.ctrl) then return act("fixes-post") end
+		if key.name == "escape" then return act("fixes-cancel") end
+		return nil
+	end
+	if mode == "link" then
+		if key.name == "enter" then return act(if key.shift then "hub-link-open" else "hub-link-add") end
+		if key.name == "escape" then return act("hub-link-clear") end
+		return nil
+	end
+	if mode == "confirm" then
+		if key.name == "enter" and (key.meta or key.ctrl) then return act("hub-confirm") end
+		if key.name == "escape" then return act("hub-confirm-cancel") end
+		return nil
+	end
+	if mode == "help" then
+		if key.name == "escape" or isQuestionMark(key) then return act("hub-help-close") end
+		return nil
+	end
+	if mode == "board" then return hubBoardKey(s, key) end
+	return nil
+end
+
+-- The action that follows a key typed into the hub's search field.
+function M.hubAfterTyping(mode: HubState.Mode, outcome: Fields.Outcome): Action?
+	if mode == "search" and outcome == "changed" then return act("hub-searched") end
+	return nil
 end
 
 -- The action that follows a key typed into a text mode's field.

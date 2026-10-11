@@ -13,6 +13,8 @@ export type Notice = {
  error: boolean,
  -- Stages finished so far, oldest first.
  done: { string },
+ -- A message with nothing loading: no stages and no sweeping bar.
+ plain: boolean?,
 }
 
 local M = {}
@@ -29,6 +31,11 @@ function M.loading(name: string, stage: string, previous: Notice?): Notice
   if previous.text ~= "" and previous.text ~= stage then table.insert(done, previous.text) end
  end
  return { title = "Fetching " .. pr(name) .. "…", text = stage, error = false, done = done }
+end
+
+-- A plain message that is neither progress nor a failure: `text` under `title`, in the usual text color.
+function M.message(title: string, text: string): Notice
+ return { title = title, text = text, error = false, done = {}, plain = true }
 end
 
 function M.failed(name: string, failure: string): Notice
@@ -48,8 +55,8 @@ end
 
 function M.view(notice: Notice): Node
  local kids = { span("gp-notice-title", notice.title) }
- if notice.error then
-  table.insert(kids, span("gp-notice-text gp-notice-error", notice.text))
+ if notice.error or notice.plain then
+  table.insert(kids, span("gp-notice-text" .. (if notice.error then " gp-notice-error" else ""), notice.text))
  else
   local stages = {}
   for n, text in notice.done do table.insert(stages, stage(n, text, true)) end

@@ -6,8 +6,8 @@ A Tern plugin (Luau and one stylesheet) that turns a GitHub PR into a guided rev
 
 Each module's header comment names its one job. Put new code in the module that comment already covers. If none covers it, make a new module with its own header comment.
 
-- **Boundary:** only `src/fetch.luau` reaches outside the plugin: `gh`, `git`, `omp`, `tern.kv`, and files.
-- **Glue:** only `src/block.luau` does window effects: scrolling, focus, timers, toasts. A new action is one `ACTIONS` entry, sent by both clicks and `keys.luau`.
+- **Boundary:** only `src/fetch.luau` and `src/github.luau` reach outside the plugin. `fetch.luau`: `gh`, `git`, `omp`, `tern.kv`, and files. `github.luau`: GitHub, only through the runner it is given (`Fetch.runner` in the plugin).
+- **Glue:** only `src/block.luau` and `src/hub/block.luau` do window effects: scrolling, focus, timers, toasts. A new action is one `ACTIONS` entry, sent by both clicks and `keys.luau`.
 - **Views:** `src/view/*.luau` turn state into nodes and nothing else. Build them with `Ui.el` and `Ui.span`.
 - **Styles:** `guide.css` only, with `gp-` classes and the color tokens `DESIGN.md` names. To change a look, edit the rule where it lives.
 - `GUIDE.md`, `prompts/guide.md` and `src/guide.luau` change together.
@@ -22,7 +22,7 @@ Read `DESIGN.md` and `docs/ui.md` before any change to `src/view/` or `guide.css
 - It has a key, listed in `view/help.luau` (the `?` panel) and the README Keys table, and shown as a `kbd` where `DESIGN.md`'s Keycaps section says.
 - A menu or list opened by key works without the mouse: arrows (or `j`/`k`) move, ⏎ chooses, Esc closes, and a keyboard-opened menu appears without animation.
 - The key and the click send the same `ACTIONS` entry.
-- In the picker, letter keys act only while the filter field is empty, as `j` and `k` do.
+- In the hub, letter keys act only while the search and add-by-link fields are empty, as `j` and `k` do.
 
 ## Copy
 
@@ -41,6 +41,7 @@ New UI text sounds official: neutral, plain and short, like GitHub.
 
 ## Verify
 
+- `/opt/homebrew/bin/luau tests/run.luau` runs the pure-module tests and exits non-zero on a failed assert. Run it, then `tern plugin reload`.
 - `tern plugin reload` exits 1 if the plugin fails to load.
 - Try the change in Tern with **New PR Guide sample block**, or a real PR opened with `post=false`. Test reviews are always dry runs.
 - Check UI changes in light and dark.

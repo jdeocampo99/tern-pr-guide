@@ -80,9 +80,9 @@ Each PR appears exactly once.
 | Agent running | **Stop** (A) | |
 | Fix ready | **Review fix** (⏎) | **Discard fix** (D, with an inline confirm) |
 | Reviewed fix | **Push to branch** (P) | Discard fix (D) |
-| Fix failed | **Try again** (A) | Open worktree (O) |
+| Fix failed | **Try again** (A) | Open worktree (O), only while its lease is retained |
 | No local clone | **Clone repo** (A) | Choose folder… (O) |
-| In review | **Copy link** (C): copies "title url" as plain text (Tern's clipboard has no rich flavor; see the clipboard facts) | |
+| In review | **Copy link** (C), or **Re-request review** (Q) while a reviewer waits on a re-review: copies "title url" as plain text (Tern's clipboard has no rich flavor; see the clipboard facts) | |
 | In review with a bot review | **Fix bot comments** (A); the card stays in In review | Copy link (C) |
 | Ready to merge | **Merge** (M) | Merge method for the repo (`,`) |
 | To review | **Review** (⏎) | Remove from Review requests (X), only on PRs you added |
@@ -100,12 +100,14 @@ This opens the PR at what needs fixing, in the guided review layout.
 | Failing check | The annotation pinned at its line | View log (⇧L) |
 | Merge conflict | "Your branch" and "main" blocks, plus "Main changed this in #415 by @devon" | Fix with agent (A), Resolve on GitHub (G) |
 
-- **Keys:** h/l move between the steps and the code panel; j/k move within either one.
+- **Keys:** h/l move between the steps and the code panel; j/k move within either one; ⏎ goes into the panel, then chooses the highlighted action; R reply, E resolve, ⇧L view log, G open on GitHub (the conflict editor for a conflict), B bot comments, A the card's own action, Esc back to the board with the card still selected.
+- **Data:** one `details.graphql` call when the page opens (1 point, measured 2026-10-10), cached in `s.details[key]`. A thread's code is its first comment's diff hunk. Conflicts and annotated source come from `Fetch.readFixes` on the repo's checkout (or PR Guide's saved copy when already set up); with neither, the conflict step shows "No local copy of owner/repo". Bot threads are listed apart as "Not counted". Reply and Resolve write to GitHub (`commands.reply`, `commands.resolve`); the sample block applies them to the page only.
 
 ### Agent fixes (v2)
 
 - **The agent:** your own `omp`, with the model and effort from the `⇧M` menu, which guided reviews already use (`src/agent.luau`, kv key `model`).
 - **One PR at a time.** There is no "Fix all".
+- **Failed worktree ownership:** the block reconciles failure paths against `Engine.held()` during callbacks and after assigning the engine. A returned worktree has no Open worktree action. A failed lease return keeps the same engine handle; Try again retries its release before another run starts. Closing stops a running engine or retries a settled failed lease return, retaining the handle if return still fails. Fix ready worktrees are preserved.
 - **Where it works:** in a treehouse worktree, never in your checkout. It commits there and never pushes. The card goes running → **Fix ready** → **Review fix** (`review-fix.html`) → **Push to branch**.
 - **Review fix page (`review-fix.html`):**
   - The diff shows only the agent's resolution. Each line is tagged main, Your branch or Agent.
@@ -128,17 +130,19 @@ Each repo has one merge setting, stored in kv. It's one of six kinds:
 |---|---|---|
 | Squash and merge · Create a merge commit · Rebase and merge | `gh pr merge` | ⌘⏎ inline |
 | Merge when ready (GitHub merge queue) | `gh pr merge --auto` | No, it can be cancelled |
+| *Merge when ready on an In review card* (any method) | GitHub methods: `gh pr merge --auto --squash\|--merge\|--rebase`; queue: `--auto`; comment and label: the method's command, sent early | No; cancel is `--disable-auto` or the method's cancel |
 | Comment a command (`/merge`, `/aviator merge`, plus an optional cancel comment) | `gh pr comment` | No, it can be cancelled |
 | Add a label | `gh pr edit --add-label` | No, it can be cancelled |
 
 - **Where the setting comes from (first match wins):**
   1. Set by you.
   2. Declared by the repo: `.aviator/config.yml` means comment `/aviator merge`, and `repository.mergeQueue` means the merge queue.
-  3. **Learned** from the repo's last 8 merged PRs. For example, a bot merged right after a person commented `/…`. Checking costs 1 point. It's shown as a suggestion and asked once.
+  3. **Learned** from the repo's last 8 merged PRs: a bot merged right after a person commented the same `/…` command, in at least 3 of the 8 and more than half of them. Checking costs 1 point (`merge-detect.graphql`, together with the declared config). It's shown as a suggestion and asked once: ⌘⏎ saves it as your own setting and merges, Esc declines it for good (`learnedAnswered`).
   4. `viewerDefaultMergeMethod`.
 - **Detection runs once per repo and is cached.**
 - **The hub never calls GitHub's merge on a repo that merges by comment, label or queue.** Two tools can't own one branch.
-- **Queued merges:** the card shows "Commented /merge · waiting for the merge" or "Queued in Aviator". A queue rejection moves the PR to Needs fixes as **Merge failed**, with the reason from GitHub's `RemovedFromMergeQueueEvent.reason` or Aviator's blocked status. For comment merges, failure is known only from a check failing after the comment, or from the bot's reply.
+- **Queued merges:** the card shows "Commented /merge · waiting for the merge" or "Queued in Aviator". A queue rejection moves the PR to Needs fixes as **Merge failed**, with the reason from GitHub's `RemovedFromMergeQueueEvent.reason` or Aviator's blocked status. For comment merges, failure is known only from a check failing after the comment, or from the bot's reply. That lookup (`merge-failure.graphql`, 1 point for all of them) runs only for PRs whose comment or label merge the hub started and whose head commit has not changed; the lookup reads the latest 10 comments and the head's first 50 check contexts, and counts only what came after the merge was asked for. A merge started outside the hub is not watched.
+- **The chooser** (`,` or the ▾ on Merge) lists the six kinds. "Comment a command" and "Add a label" ask for text in the menu's foot: `/merge`, or `/merge | /cancel` to name the cancel comment.
 
 ### Adding a PR by link
 
@@ -171,7 +175,10 @@ To review has its own field: "Paste a pull request link to review" (`N`, from ei
 |---|---|
 | h j k l / arrows | Move: up and down within a column, left and right to the nearest card in the next column |
 | ⏎ / double-click | Open (Needs fixes cards open at the fixes) |
+| ⇧⏎ | Open with the AI guide started |
 | T | Switch tab |
+| I | Show or hide Inactive |
+| R | Show or hide Recently opened (Review requests) |
 | F / S | Repository filter / Sort menu (menus: j/k, ⏎ or Space, Esc) |
 | ⇧M | Agent model menu (↑↓ model, ←→ effort) |
 | N | Add a PR by link |
@@ -188,15 +195,17 @@ To review has its own field: "Paste a pull request link to review" (`N`, from ei
 
 | Call | Cost | Time | When |
 |---|---|---|---|
-| `docs/hub/queries/hub-f.graphql`: 3 searches (author, review-requested, reviewed-by), check counts, author types | 9 pts, before the extensions in Verification are re-measured | 6–8 s | On a change, on focus (debounced to 30 s), and every 5 min while the hub block exists (a block can't observe visibility) |
-| `threads.graphql`: thread authors via `nodes(ids:)`, only for PRs with an unresolved thread whose `updatedAt` changed | 9 pts for 17 PRs | 0.7 s | After hub-f |
-| `checks.graphql`: CI state for PRs with running checks | 1 pt for 5 or 40 PRs | 1–1.5 s | Every 30 s while any check is running |
+| `docs/hub/queries/hub-f.graphql`: 3 searches (author, review-requested, reviewed-by), check counts, author types, and the fields `HubPR` needs (size, dates, base branch, auto-merge, last queue removal) | 11 pts (9 before the extensions; the queue-removal timeline adds 2) | 6–9 s | On a change, on focus (debounced to 30 s), and every 5 min while the hub block exists (a block can't observe visibility) |
+| `threads.graphql`: thread authors via `nodes(ids:)`, only for PRs with an unresolved thread whose `updatedAt` changed | 5 pts for 17 PRs (the first 30 threads of each; 9 pts at 50) | 0.7–0.8 s | After hub-f |
+| `checks.graphql`: CI state for PRs with running checks | 1 pt for 5 or 42 PRs | 1–1.6 s | Every 30 s while any check is running |
 | REST `/notifications` with `If-Modified-Since` | free (304) | | Every 60 s, as the change probe |
 | Fixes-page details: threads with path/line/body, changes-requested reviews, failing check runs with annotations | 1 pt | | When a Needs fixes PR is opened |
-| Learning a repo's merge habit: last 8 merged PRs with `mergedBy` and comments | 1 pt | | Once per repo |
+| `merge-detect.graphql`: what a repo declares (`.aviator/config.yml`, a merge queue) and its last 8 merged PRs with `mergedBy` and comments. Measured on the smoke repo 2026-10-10 | 1 pt | | Once per repo, for repos with a Ready card; the result is cached in kv |
+| `merge-failure.graphql`: latest comments and head check contexts, via `nodes(ids:)` | 1 pt for any number of PRs (measured for 2) | | After hub-f, only when a comment or label merge is in flight on the same head |
 
 - **Don't** put thread authors inside the search query. Measured at **159 points** per call.
-- **Budget:** about 220 pts/hr while the hub block exists. Even the 30 s debounce ceiling (about 2,200/hr) fits the 5,000/hr GraphQL budget, which Tandem's pr-watch shares.
+- **Per refresh:** hub-f 11 + threads 5 + checks 1 = 17 on real data (18 with a merge failure lookup, which is the limit) (42 PRs, 17 with unresolved threads, no cache), under the 18-point limit the tests hold. A cost depends on the connections a query selects times the PRs it can return (`first:` on a connection under a search doesn't change it), so an added connection is paid 150 times per hub-f call. Alias-added PRs didn't change the 11.
+- **Budget:** about 220 pts/hr while the hub block exists (12 refreshes at the 18-point limit; measured 12 × 17 = 204). Even the 30 s debounce ceiling (about 2,200/hr) fits the 5,000/hr GraphQL budget, which Tandem's pr-watch shares.
 - **Latency is the real cost.** Always render from the kv cache first, then refresh in the background.
 - **Check annotations include noise.** Drop paths under `.github/` and messages like "Process completed with exit code". Measured on Tagalingo-App #1013, the useful one was `src/lib/query-persister.ts:39 Type …`.
 - **Conflicted files** come from local `git merge-tree --write-tree --name-only`, not GitHub.
@@ -224,15 +233,17 @@ Every issue builds against these types and signatures. An issue that needs a cha
 | `src/github.luau` | `model`, `fixes`. No `tern.*` at load; parsers take already decoded tables (`tern.json.decode` runs in the caller). |
 | `src/hub/sync.luau` | `model` |
 | `src/hub/agent-fix.luau` | `model`, `fixes` |
+| `src/hub/review-fix.luau` | `agent-fix`, `fixes` (pure commit excerpts and effect plans) |
 | `src/hub/summary.luau` | `model`, `fixes` |
-| `src/hub/state.luau` | `model`, `sync`, `fixes`, `agent-fix`, `summary`, `src/text-field.luau`. Never `fetch`, `github` or `block`. |
+| `window.luau` | `src/links.luau` |
+| `src/hub/state.luau` | `model`, `sync`, `fixes`, `agent-fix`, `review-fix`, `summary`, `src/text-field.luau`, `src/links.luau` (pure: link parsing and the `#prguide-open=` link). Never `fetch`, `github` or `block`. |
 | `src/keys.luau` | `src/hub/state.luau`, plus what it requires today minus `picker` |
 | `src/view/hub/*.luau` | `state`, `model`, `fixes`, `src/view/ui.luau`, `src/text.luau`. Never `sync` or `github`. |
-| `src/fetch.luau` | `model` and `fixes` for types, `github` for the `Runner` type, plus what it requires today minus `picker` |
+| `src/fetch.luau` | `model` and `fixes` for types, `github` for the `Runner` type, `review-fix` for validated command plans, `src/links.luau`, `src/hub/sync.luau` (the recent store), plus what it requires today minus `picker` |
 | `src/hub/block.luau` | everything above; it is the only module that wires them |
 | `tools/conflicts` | nothing (a standalone script) |
 
-### `src/links.luau` (pure; the picker's link parsing, moved)
+### `src/links.luau` (pure; the picker's link parsing, moved, and the way in's decisions)
 
 ```luau
 function M.named(text: string): number?            -- "354", "#354" or a PR link -> 354 (picker.luau:179)
@@ -241,7 +252,29 @@ function M.linkHost(text: string): string?         -- the link's host (picker.lu
 function M.reference(slug: string?, number: number): string  -- link, or the bare number without a slug (picker.luau:196)
 function M.remoteRepo(url: string): string?        -- "owner/repo" of a git remote URL (picker.luau:202)
 function M.sameRepo(a: string?, b: string?): boolean  -- case-insensitive (picker.luau:211)
+function M.resolve(text: string, slug: string?): string?  -- ⏎ on pasted text: a PR link as it is; a bare number only with a `slug` (then its link); else nil, so a number alone is refused (the picker's `choice`)
+
+-- The link the hub opens a PR with, and the window's route (`window.luau`) that claims it.
+export type OpenRoute = { number: number, root: string, generate: boolean, search: boolean, link: string }
+function M.openLink(slug: string, number: number, root: string, generate: boolean, search: boolean): string
+	-- https://github.com/<slug>/pull/<n>#prguide-open=<escaped root>[&generate=true][&search=true]
+function M.openRoute(url: string): OpenRoute?     -- nil for any other link (GitHub's page opens)
+function M.routeArgs(route: OpenRoute): { string }
+	-- { "pr=<n>", "repo=<root>", "generate=true"? }; with `search`, "pr=<link>" instead of the number
+
+-- ⌥⌘R and the status segment.
+export type PaneLike = { pane: number, block: string?, parked: boolean? }
+export type Entry = { kind: "new" | "focus" | "unpark", pane: number? }
+function M.hubCandidates(panes: { PaneLike }, focused: number?): { Entry }   -- focused hub, then tiled, then parked
+function M.hubEntry(panes: { PaneLike }, focused: number?, answers: ((pane: number) -> boolean)?): Entry
+	-- the first candidate that `answers` (window.luau probes with the set-generate event: a dead block raises), else "new"
+function M.statusText(toReview: number, needFixes: number): string  -- "PRs · 2 to review · 10 need fixes"; zero parts are left out, both zero is "PRs"
+function M.flashing(flashAt: number?, now: number): boolean          -- FLASH_SECONDS (10)
+function M.watchDelay(flashAt: number?, now: number): number         -- WATCH_SECONDS (15), sooner when a flash ends first
+function M.statusChanged(old: Seen?, new: Seen?): boolean            -- refreshedAt, a count or the flash changed
 ```
+
+With `search` the root is a folder to look for a checkout in (no clone was found, and PR Guide's own copy of the repo is used): the guide gets the link and resolves it as it does a pasted link, since a saved copy is a bare repo the guide cannot open by path.
 
 ### `src/hub/model.luau` (pure rules)
 
@@ -317,6 +350,10 @@ function M.placement(pr: HubPR, now: number): Placement
 function M.classify(pr: HubPR, now: number): Column     -- placement(pr, now).column
 function M.botFeedback(pr: HubPR): boolean              -- a bot's latest review or unresolved thread, for Fix bot comments
 function M.mergeable(pr: HubPR): boolean                -- ready, not behind, nothing pending: the cards Space may select
+function M.selectGroup(pr: HubPR, now: number): ("ready" | "inactive")?, string?   -- the group Space may select it in, or nil and why not; Inactive rows (drafts too) always qualify
+function M.stale(pr: HubPR, now: number): boolean       -- Inactive for 7+ days of silence and not a draft: what Close stale (⇧X) selects
+function M.confirmList(prs: { HubPR }): { shown: { HubPR }, more: number }   -- the first CONFIRM_TITLES (5), then the count left
+function M.methodLines(methods: { MergeMethod }): { string }                 -- one line per distinct method: "Squash and merge", "Comments /merge"
 function M.size(pr: HubPR): number                      -- additions + deletions
 export type Filter = { repositories: { [string]: boolean }?, search: string }   -- nil repositories = all
 function M.visible(pr: HubPR, filter: Filter): boolean  -- search matches "#n", title, author, repo, base branch
@@ -326,7 +363,7 @@ function M.order(prs: { HubPR }, column: Column, sort: Sort, now: number): { Hub
 export type NextItem = { key: string, tab: Tab, column: Column, reason: Reason? }
 export type NextUp = { item: NextItem, index: number, total: number }
 function M.queue(prs: { HubPR }, now: number): { NextItem }    -- everything that needs the viewer, both tabs, most urgent first
-function M.nextUp(prs: { HubPR }, now: number, after: string?): NextUp?  -- the item after `after`; the first when nil; wraps; nil when none
+function M.nextUp(prs: { HubPR }, now: number, after: string?): NextUp?  -- the item after `after`; the first when nil or no longer queued; wraps; nil when none. `index` is the returned item's place (the banner's "n of N")
 
 -- Flakes. Evidence is fetched by github.luau; the verdict is a rule.
 export type FlakeEvidence = {
@@ -335,13 +372,16 @@ export type FlakeEvidence = {
 	text: string,                                  -- the failure text
 	annotationPaths: { string },
 	changedPaths: { string },
+	base: string?,                                 -- the base branch the history counted, for the reason's wording; "main" when nil
 }
 export type FlakeVerdict = { flaky: boolean, basis: ("history" | "rerun" | "text" | "outside_diff")?, reason: string? }
 function M.flake(evidence: FlakeEvidence): FlakeVerdict
 	-- An annotation on a changed path is never flaky. `reason` reads "failed 3 of the last 20 runs on main".
 	-- History: 3 or more failures in the last 20 runs on the base branch means likely flaky; 1 or fewer means not.
 	-- Two is not enough on its own: only another basis (passedBefore, text, outside_diff) makes it flaky.
-	-- The thresholds are named constants in this file, pinned by the flake issue's tests.
+	-- The thresholds are named constants in this file, pinned by the flake issue's tests:
+	-- M.FLAKE_FAILED_MIN = 3, M.FLAKE_FAILED_MAX = 1, M.FLAKE_RUNS = 20. Order of the bases: history, rerun, text, outside_diff.
+function M.flakeAll(verdicts: { FlakeVerdict }): FlakeVerdict   -- one verdict for a card: flaky only when every failing check is
 
 -- Merging
 export type MergeMethod =
@@ -365,30 +405,54 @@ function M.resolveMergeMethod(evidence: MergeEvidence): MergeResolution   -- use
 
 ```luau
 export type ThreadDetail = {
-	id: string, group: "requested" | "comment",
+	id: string, group: "requested" | "comment",   -- "requested": the thread's first comment is part of a changes-requested review
 	author: string, bot: boolean,
 	path: string, line: number?,      -- nil when the thread is on the file or the line is gone
 	outdated: boolean,
 	body: string,                     -- the first comment
 	replies: number, url: string,
+	hunk: string?,                    -- the first comment's diff hunk, which ends at the commented line: the page's code for a thread
 }
 export type ReviewDetail = { author: string, body: string, at: string, url: string }   -- a changes-requested review
 export type Annotation = { path: string, line: number, level: "failure" | "warning" | "notice", title: string?, message: string }
 export type FailingCheck = {
 	name: string, workflow: string?, runId: number?, url: string,
 	summary: string?,
-	annotations: { Annotation },      -- after the noise filter: no `.github/` paths, no "Process completed with exit code"
+	annotations: { Annotation },      -- as GitHub sent them; `usable` drops `.github` paths and "Process completed with exit code"
 }
-export type Cause = { number: number?, title: string, author: string, sha: string }   -- "Main changed this in #415 by @devon"
-export type Conflict = { path: string, cause: Cause? }
+export type Cause = { number: number?, title: string, author: string, sha: string }   -- "Main changed this in #415 by @devon"; author is git's name
+export type ConflictHunk = { start: number, branch: { string }, main: { string } }   -- one conflict block, side by side
+export type Conflict = { path: string, cause: Cause?, hunks: { ConflictHunk } }
 export type FixDetails = {
 	key: string, headOid: string, fetchedAt: string,
 	reviews: { ReviewDetail },
-	threads: { ThreadDetail },
+	threads: { ThreadDetail },        -- unresolved ones only
 	checks: { FailingCheck },
 	changedPaths: { string },
 	conflicts: { Conflict }?,         -- nil until fetch.luau has read local `git merge-tree --write-tree --name-only`
+	conflictNote: string?,            -- why `conflicts` is nil: "No local copy of acme/web", "Couldn't read the conflicts: …"
+	files: { [string]: string }?,     -- annotated files as the head commit has them (`git show`), for the pinned annotations
 }
+
+export type Row = { kind: "ctx" | "add" | "del", old: number?, new: number?, text: string }
+export type Excerpt = { rows: { Row }, before: number, after: number? }   -- before/after: lines left out
+export type MergeTree = { tree: string, files: { string } }
+export type Group = "requested" | "comment" | "check" | "conflict" | "failure"
+export type Step = { id: string, group: Group, who: string, text: string, path: string?, line: number?,
+	thread: ThreadDetail?, review: ReviewDetail?, check: FailingCheck?, conflict: Conflict?, note: string? }
+
+M.GROUPS: { { id: Group, label: string, chip: string } }       -- Requested changes, Comments, Failing checks, Merge conflicts, Merge failed
+function M.usable(annotations: { Annotation }): { Annotation }  -- the noise filter
+function M.steps(d: FixDetails, pr: HubPR): { Step }            -- in group order; bot threads are no step; a merge failure alone is one "failure" step with its reason
+function M.bots(d: FixDetails): { { author: string, count: number } }
+function M.chips(steps: { Step }): { string }                   -- the header's "Address changes", "Reply", "Fix checks", "Resolve conflicts"
+function M.hunkExcerpt(hunk: string): Excerpt?                  -- the last 8 rows of a diff hunk
+function M.fileExcerpt(text: string, line: number): Excerpt?    -- 5 lines either side
+function M.parseMergeTree(text: string): MergeTree?             -- `git merge-tree --write-tree --name-only`: tree id, then the conflicted files; "" files when clean
+function M.parseHunks(content: string): { ConflictHunk }        -- conflict markers (two-sided or diff3) in `git show <tree>:<path>`
+function M.parseCause(output: string): Cause?                   -- `git log -1 --format=%H%x09%an%x09%s`; the number is the subject's "(#415)" or "Merge pull request #415"
+function M.conflicts(tree: MergeTree, shown: { [string]: string }, logs: { [string]: string }): { Conflict }
+function M.logUrl(check: FailingCheck, repo: string): string    -- the run's page, else the check's own link
 ```
 
 ### `src/github.luau` (the GitHub boundary)
@@ -403,8 +467,10 @@ export type Runner = (argv: { string }, opts: { cwd: string?, stdin: string?, ti
 export type RefreshRequest = { added: { PRRef }, previous: { HubPR } }   -- previous supplies cached threads when `lastActivityAt` is unchanged
 export type Probe = { changed: boolean, lastModified: string?, pollSeconds: number? }   -- REST /notifications
 export type ChecksUpdate = { byId: { [string]: { headOid: string, checks: Checks } }, rateLimit: RateLimit }
-export type History = { failed: number, total: number }
-export type Detected = { declared: MergeMethod?, learned: MergeMethod?, viewerDefault: "squash" | "merge" | "rebase", checkedAt: string }
+export type RunRow = { id: number, workflow: string, sha: string, conclusion: string }   -- one Actions run, REST `workflow_runs[]`
+export type RepoHistory = { base: string, byWorkflow: { [string]: { failed: number, total: number } } }   -- per workflow: failures among its newest 20 finished runs
+export type HistoryCache = { read: (repo: string, base: string, now: number, done: (value: RepoHistory?) -> ()) -> () }   -- one read per repo and branch per hour (M.HISTORY_SECONDS), failures included
+export type Detected = { declared: MergeMethod?, learned: MergeMethod?, viewerDefault: "squash" | "merge" | "rebase", checkedAt: string }   -- `checkedAt` is "" from github (it reads no clock); the block stamps it before saving
 export type Command = { argv: { string }, stdin: string? }
 
 export type Client = {
@@ -412,26 +478,38 @@ export type Client = {
 	probe: (since: string?, done: (value: Probe?, err: Error?) -> ()) -> (),
 	checks: (ids: { string }, done: (value: ChecksUpdate?, err: Error?) -> ()) -> (),
 	details: (pr: HubPR, done: (value: FixDetails?, err: Error?) -> ()) -> (),
-	history: (repo: string, checkName: string, done: (value: History?, err: Error?) -> ()) -> (),
+	history: (repo: string, base: string, done: (value: RepoHistory?, err: Error?) -> ()) -> (),   -- gh api repos/<r>/actions/runs?branch=<base>&status=completed&per_page=100; keyed by workflow, not check, because the runs API has no job names
+	runs: (repo: string, sha: string, done: (value: { RunRow }?, err: Error?) -> ()) -> (),   -- gh api repos/<r>/actions/runs?head_sha=<sha>&status=completed&per_page=50 (the "passed earlier on this commit" basis)
 	detect: (repo: string, done: (value: Detected?, err: Error?) -> ()) -> (),
 	run: (command: Command, done: (stdout: string?, err: Error?) -> ()) -> (),   -- executes a command from `commands`
 }
-function M.client(run: Runner): Client
+export type Decode = (text: string) -> any      -- `tern.json.decode`, passed in so `github` never touches `tern`
+function M.client(run: Runner, decode: Decode): Client
+	-- Calls never throw: a failed run, a body that isn't JSON data and a rate limit are `Error` values ("Couldn't …: reason").
+	-- Argv: `gh api graphql -f query=<text> [-f ids[]=<id> …]`; probe is `gh api -i notifications?per_page=1 [-H If-Modified-Since: <since>]`.
+	-- `refresh` reads threads (threads.graphql) only for PRs with an unresolved thread whose `lastActivityAt` differs from `previous`'s.
 
 -- Pure parsers: decoded JSON in, normalized records out. They never throw on a missing field.
+function M.parseDetect(raw: any): Detected?                                  -- merge-detect.graphql
+function M.parseMergeFailure(raw: any, pending: PendingMerge): MergeFailure? -- one node of merge-failure.graphql; only events after `pending.at` count
 function M.parseHub(raw: any): { prs: { HubPR }, viewer: string, rateLimit: RateLimit, truncated: boolean }?
 function M.parseThreads(raw: any): { threads: { [string]: { OpenThread } }, rateLimit: RateLimit }?   -- keyed by node id
 function M.parseChecks(raw: any): ChecksUpdate?
 function M.parseProbe(stdout: string): Probe?             -- `gh api -i`: 200 or 304, Last-Modified, X-Poll-Interval
 function M.parseDetails(raw: any, pr: HubPR): FixDetails?
+function M.parseRuns(raw: any): { RunRow }                                  -- REST actions/runs
+function M.parseHistory(raw: any, base: string): RepoHistory                -- cancelled and skipped runs are not counted
+function M.evidenceFor(check: FailingCheck, changedPaths: { string }, history: RepoHistory?, runs: { RunRow }?): FlakeEvidence
+function M.historyCache(client: Client): HistoryCache
 
 -- Command builders: exact argv, no network. Merging squash/merge/rebase is `gh pr merge`; queue is `--auto`;
 -- comment is `gh pr comment`; label is `gh pr edit --add-label`.
 M.commands = {
-	merge = function(pr: HubPR, method: MergeMethod): Command end,
-	cancelMerge = function(pr: HubPR, method: MergeMethod): Command end,
+	merge = function(pr: HubPR, method: MergeMethod): Command end,   -- squash, merge, rebase: `gh pr merge <n> --repo <owner/repo> --squash|--merge|--rebase`; queue: `--auto`; comment: `gh pr comment <n> --repo <r> --body <command>`; label: `gh pr edit <n> --repo <r> --add-label <label>`
+	cancelMerge = function(pr: HubPR, method: MergeMethod): Command end,   -- queue: `gh pr merge … --disable-auto`; comment: `--body <cancel>`; label: `--remove-label`; raises for a GitHub merge and for a comment with no cancel
 	updateBranch = function(pr: HubPR): Command end,
-	rerun = function(repo: string, runId: number): Command end,            -- gh run rerun <id> --failed
+	close = function(pr: HubPR): Command end,   -- gh pr close <n> --repo <repo>, no comment
+	rerun = function(repo: string, runId: number): Command end,            -- gh run rerun <id> --failed --repo <repo>
 	requestReview = function(pr: HubPR, login: string): Command end,
 	close = function(pr: HubPR): Command end,
 	comment = function(pr: HubPR, body: string): Command end,
@@ -443,6 +521,8 @@ M.commands = {
 `threads.graphql` and `checks.graphql` select `number` and not the repository, so a bare number is ambiguous across repos. Both gain `id` and key their results by it (see Verification).
 
 ### `src/hub/sync.luau` (pure; cache shapes, diff, schedule)
+
+Luau has no literal types, so `schema` is a `number` in code and `load` accepts only 1. A PR missing from the old cache never arrives in `diff` (it is new or evicted, and nothing says which). `merge` sets `counts.flashAt` to `now` when the Needs fixes count rose. A refresh in flight turns `schedule`'s `refresh` off (nil).
 
 ```luau
 export type Counts = { toReview: number, needFixes: number, flashAt: number? }   -- what the status segment reads; flashAt is a time
@@ -456,7 +536,7 @@ export type Cache = {
 }
 export type Added = { [string]: PRRef }       -- hub.added, by key
 export type Local = { added: Added, tandem: { [string]: boolean } }
-export type MergeRecord = { schema: 1, user: MergeMethod?, declared: MergeMethod?, learned: MergeMethod?, learnedAnswered: boolean, checkedAt: string? }
+export type MergeRecord = { schema: 1, user: MergeMethod?, declared: MergeMethod?, learned: MergeMethod?, learnedAnswered: boolean, checkedAt: string?, viewerDefault: string? }
 export type Opened = { repo: string, number: number, title: string, author: string, at: string }   -- hub.recent, newest first, at most RECENT_CAP
 
 M.RECENT_CAP = 8                      -- picker.luau:62
@@ -482,6 +562,11 @@ export type Changes = {
 }
 function M.diff(old: Cache?, fresh: { HubPR }, now: number, suppressed: { [string]: boolean }): Changes
 	-- `suppressed` holds the keys the viewer just acted on. Inactive PRs never arrive.
+export type Alerts = { toast: { text: string, sub: string? }?, rings: { string }, good: { string } }
+function M.alerts(changes: Changes): Alerts   -- what the block shows: the one toast, the keys to ring red, the keys to wash green
+	-- The block sets `state.ringed[key]` to "bad" or "good", holds it (about 1.4 s), switches it to "bad-out" or "good-out"
+	-- (the CSS transition, `--gp-dur-rare`) and clears it. The toast's level is "error" (Tern has no "warning").
+	-- ⌘R is `hub-refresh`: live, a refresh now; in `fixture=cases`, the next `refreshes` entry, wrapping to the first after the last.
 
 export type ScheduleInput = {
 	now: number,
@@ -538,6 +623,50 @@ function M.step(run: Run, event: Event): Outcome
 | `write <id>` | reads the replacement from stdin; `{ "id", "lines" }` |
 | `check` | `{ "remaining": number }`; exit 1 when above 0 |
 
+### `src/hub/review-fix.luau` (pure; issue #16)
+
+```luau
+export type Line = { tag: AgentFix.LineTag, text: string, label: string?, number: number }
+export type Hunk = { id: string, path: string, start: number, by: "rule" | "agent", lines: { Line }, ours: { string }, theirs: { string } }
+export type Review = { hunks: { Hunk }, verified: boolean, error: string? }
+export type Original = { path: string, start: number, base: { string }, ours: { string }, theirs: { string } }
+export type Command = { argv: { string }, cwd: string }
+export type Request = {
+	kind: string, key: string, selectedKey: string?, routeKey: string?, repo: string, number: number,
+	headOid: string, fix: AgentFix.Fix, reviewed: { [string]: boolean }, verified: boolean,
+	completion: ("push" | "discard")?,
+}
+export type Plan = {
+	kind: "push" | "discard", request: Request, command: Command?, returnLease: boolean,
+	remoteHeadOid: string, next: "refresh" | "needs_fixes",
+}
+export type Result = { clear: boolean, remoteHeadOid: string, card: "fix_ready" | "needs_fixes" | "refresh" }
+function M.allReviewed(fix: AgentFix.Fix, reviewed: { [string]: boolean }): boolean
+function M.build(fix: AgentFix.Fix, files: { [string]: string }, details: Fixes.FixDetails?, originals: { [string]: Original }?): Review
+function M.lines(hunk: Hunk, before: boolean): { Line }
+function M.readCommands(fix: AgentFix.Fix): ({ Command }?, string?)
+function M.plan(action: "push" | "discard", request: Request, confirmed: boolean?, remoteRepo: string?): (Plan?, string?)
+function M.result(plan: Plan, pushed: boolean, returned: boolean): Result
+```
+
+`build` locates each recorded resolution plus bounded context exactly once in the immutable commit's
+file. Missing, changed or ambiguous resolutions lock Push. Context at the conflict tool's 240-character
+preview cap is matched as a prefix; all other context and every resolution line must match exactly.
+Displayed context comes from the commit in full. It never shows unrelated commit changes.
+The retained journal's full original sides are authoritative because #15's `show` caps side previews.
+Agent-write lines copied exactly from those sides are tagged ours/theirs; lines common to both are
+base. Lines with no side match remain agent-written. #12's `FixDetails` is reused only when path,
+start and both sides agree exactly. This avoids reading a newer conflict after a refresh. `theirs`
+displays as main, `ours` as Your branch, `agent` as Agent, and `base` has no ownership badge. Every
+line keeps its exact text. Duplicate or missing ids lock the all-reviewed gate; zero hunks pass.
+
+`plan` runs no effects. A refused P produces no process plan. A permitted P contains one plain
+`git -C <worktree> push https://github.com/<head repo>.git <commit>:refs/heads/<branch>` command.
+Confirmed D contains no process or remote write and requests the retained engine's lease return.
+`result` permits clearing state only after return succeeds, and for Push only after push succeeds too.
+The supplied remote head stays unchanged on Discard. `completion = "push"` produces a return-only
+retry; `completion = "discard"` requires confirmation again and forbids Push.
+
 ### `src/hub/summary.luau` (pure; read-only Summarize)
 
 ```luau
@@ -545,28 +674,39 @@ export type Summary = { verdict: string, comments: { { author: string, text: str
 function M.prompt(details: FixDetails): string
 function M.parse(text: string): Summary?
 function M.onlyComments(details: FixDetails): boolean    -- the only reason is comments, so A summarizes
+function M.current(details: FixDetails, pr: HubPR): FixDetails   -- only the feedback still live on the PR (see Issue #19)
+function M.plan(command: string, model: string, effort: string?, prompt: string): { string }?   -- the read-only argv, nil when a field is unsafe
 ```
 
 ### `src/hub/state.luau` (interaction state and the prepared board)
 
 ```luau
-export type Mode = "board" | "search" | "link" | "menu" | "confirm" | "help"
+export type Mode = "board" | "search" | "link" | "menu" | "confirm" | "help" | "fixes" | "reply" | "review-fix"
 export type MenuId = "repositories" | "sort" | "agent" | "merge" | "actions"
 export type CardAction = { act: string, value: string?, label: string, key: string?, confirm: boolean }
 
 export type AgentFixState =
 	{ kind: "no_clone", slug: string }
 	| { kind: "running", run: AgentFix.Run }
-	| { kind: "ready", fix: AgentFix.Fix, reviewed: { [string]: boolean } }    -- `reviewed` holds reviewedConflictIds
+	| { kind: "ready", fix: AgentFix.Fix, reviewed: { [string]: boolean }, review: ReviewFix.Review?, completion: ("push" | "discard")? }    -- `reviewed` holds reviewedConflictIds; completion retains cleanup ownership
 	| { kind: "pushing", fix: AgentFix.Fix }
 	| { kind: "failed", reason: string, worktree: string? }
 -- A ready fix is "reviewed" once `reviewed` holds every hunk id: State.reviewed(fix, reviewed): boolean.
 
+-- A pill on a card's chip line; `kind` picks its look ("running" carries the amber spinner).
+export type Chip = { text: string, kind: "bad" | "bad-soft" | "info" | "wait" | "done" | "agent" | "running" }
+
 export type Card = {
 	pr: HubPR, column: Column, reasons: { Reason },
+	chips: { Chip },                  -- the job, or who the card waits on; empty on done cards
+	detail: string?,                  -- the first job's detail, shown after the chips ("Conflicts with main")
+	detailKind: ("bad" | "info")?,    -- the detail's color: red on your PRs, blue on review requests
 	main: CardAction?,                -- the split button's action
 	more: { CardAction },             -- behind the attached ▾
 	agent: AgentFixState?, summary: Summary?, merge: MergeResolution?,
+	note: string?,                    -- a merge in flight: "Commented /merge · waiting for the merge", "Queued in Aviator", "In the merge queue"
+	asking: string?,                  -- an inline question ("Squash and merge #412?"): Confirm (⌘⏎) and Cancel (Esc) replace the split button
+	busy: string?,                    -- an action in flight ("Merging…", "Updating…")
 	ring: ("bad" | "good")?,          -- the arrival ring, until it fades
 	selected: boolean, marked: boolean,
 }
@@ -581,9 +721,14 @@ export type BoardData = {
 	grid: { { string } },                               -- keys per column, for h j k l
 	counts: { mine: number, review: number },           -- your-turn cards per tab: the blue counts
 	repositories: { RepoOption },
+	open: { inactive: boolean, recent: boolean },       -- which folds show their rows (a search opens Inactive)
 	nextUp: NextUp?,
 	empty: boolean,
 }
+
+-- The agent's model and effort, and the models the ⇧M menu offers. nil until the block has found the agent.
+export type AgentModel = { selector: string, name: string, efforts: { string } }
+export type AgentChoice = { models: { AgentModel }, model: string, effort: string? }
 
 export type State = {
 	prs: { HubPR }, now: number,
@@ -594,22 +739,85 @@ export type State = {
 	sort: Sort,
 	search: Fields.Field, link: Fields.Field,
 	mode: Mode, menu: MenuId?, menuCursor: number,
-	confirm: { kind: string, keys: { string } }?,
-	folded: { [string]: boolean },
+	confirm: { kind: string, keys: { string } }?,   -- kind "merge" (a GitHub method) or "learned" (the suggested comment command)
+	methodEdit: { repo: string, kind: "comment" | "label", field: Fields.Field }?,   -- the merge menu is asking for a command or a label
+	folded: { [string]: boolean },    -- true: the fold is closed; Inactive and Recently opened start closed
+	recent: { Opened },               -- hub.recent, newest first, set by the block
 	walking: boolean,                 -- Next up is being walked: the banner shows "2 of 11"
 	ringed: { [string]: "bad" | "good" },
 	agents: { [string]: AgentFixState },
 	details: { [string]: FixDetails }, summaries: { [string]: Summary },
 	merges: { [string]: MergeResolution },    -- by repo
+	acted: { [string]: boolean },     -- cards the viewer just merged or updated: the block hands these to `Sync.diff` as `suppressed`
+	busy: { [string]: string },       -- by card key: the action in flight
 	refreshedAt: string?, loading: boolean, error: Error?,
+	agent: AgentChoice?,
 	keyed: boolean,                   -- as src/state.luau:108
 	born: { [string]: string }, booted: boolean,   -- arrival motion, as src/state.luau:113
 }
 
 function M.new(prs: { HubPR }, now: number, saved: any): State
+function M.setRecent(s: State, recent: { Opened })   -- hub.recent; builds BoardData.recent (Review requests only, narrowed by the search)
+function M.recentKey(opened: Opened): string
+function M.recentRow(s: State, key: string): Opened?
+function M.selectedRecent(s: State): Opened?
+function M.replace(s: State, prs: { HubPR }, now: number, refreshedAt: string?)   -- a refresh's PRs: sets time, clears loading and error, re-projects
 function M.project(s: State)                 -- recomputes s.board from s.prs and the inputs
 function M.mode(s: State): Mode
 function M.reviewed(fix: AgentFix.Fix, reviewed: { [string]: boolean }): boolean
+
+-- Transient ownership facts from Block; never stored in State and never contain an engine.
+export type AgentFlightFacts = {
+	settled: boolean, starting: boolean, releasing: boolean, busy: boolean, worktree: string?,
+}
+function M.agentFlight(s: State, key: string, facts: AgentFlightFacts): "wait" | "release" | "forget" | "ready"
+-- Reconciles a failed card's path with the held lease. Block retains the handle for
+-- wait/release/ready; only forget permits dropping it. starting guards synchronous callbacks.
+
+-- The fixes page (#12): a route over the board. `s.route = { kind = "fixes", key, cur, focus, item, loading, error, bots, resolved, replies, reply, busy }`.
+function M.openFixes(s: State, key: string): boolean / M.closeFixes(s)   -- Esc returns to the board with the card still selected
+function M.prOf(s: State, key: string): HubPR? / M.fixDetails(s) / M.fixSteps(s) / M.fixStep(s) / M.fixLeft(s)
+function M.fixItems(s: State, step: Fixes.Step?): { string } / M.fixMain(s): CardAction?   -- the panel's actions; the card's own main action
+function M.fixSelect(s, index) / M.fixMove(s, delta) / M.fixFocus(s, "steps" | "panel") / M.fixPress(s): string? / M.fixToggleBots(s)
+function M.beginReply(s): boolean / M.cancelReply(s) / M.setDetails(s, details)
+
+-- #16 extends Route.kind to "fixes" | "review-fix" and adds original: boolean?, ask: boolean?.
+-- All existing fixes/reply fields remain. ReviewPage is the prepared view data:
+export type ReviewPage = {
+	pr: HubPR, fix: AgentFix.Fix, review: ReviewFix.Review?, reviewed: { [string]: boolean },
+	current: ReviewFix.Hunk?, lines: { ReviewFix.Line },
+	count: number, all: boolean, cur: number, original: boolean, ask: boolean,
+	busy: boolean, loading: boolean, error: string?, progress: string?, completion: ("push" | "discard")?,
+}
+function M.openReviewFix(s: State, key: string): boolean
+function M.reviewPage(s: State): ReviewPage?
+function M.reviewSelect(s: State, index: number)
+function M.reviewToggle(s: State, index: number?)
+function M.reviewOriginal(s: State)
+function M.reviewAsk(s: State, ask: boolean)
+function M.reviewRequest(s: State): ReviewFix.Request?
+-- closeFixes also closes Review fix, preserving the selected card.
+
+-- Card actions (#7). All pure; the block runs the effects.
+function M.mergeMethodFor(s: State, pr: HubPR): "squash" | "merge" | "rebase"   -- the repo's resolved method when it is a GitHub one, else squash (viewerDefaultMergeMethod arrives with #10's detection)
+function M.mergeStep(s: State, pr: HubPR): "confirm" | "ask" | "run"   -- M on a card: a GitHub method asks first, a learned command asks once, a chosen or declared comment, label or queue runs at once
+function M.setMerge(s: State, repo: string, resolution: MergeResolution)   -- the block resolves a repo's record into the board
+function M.setPending(s: State, key: string, pending: PendingMerge?)       -- a merge in flight (or cleared)
+function M.beginMethodEdit(s: State, kind: "comment" | "label") / M.cancelMethodEdit(s) / M.methodOfEdit(s): MergeMethod?   -- the merge menu's text field
+function M.askMerge(s: State, key: string): boolean      -- opens the "Squash and merge #n?" question; mode "confirm", `confirm = { kind = "merge", keys = { key } }`
+function M.cancelConfirm(s: State)
+function M.setBusy(s: State, key: string, text: string?)
+function M.dropPr(s: State, key: string)                 -- a merged PR leaves the board
+function M.branchUpdated(s: State, key: string)          -- behind = false and checks pending, until a refresh says more
+function M.linkTarget(s: State): LinkTarget              -- "empty" | "invalid" | "new" | "board": what the add field's text names (github.com links and owner/repo#123 only)
+function M.openLink(s: State) / M.closeLink(s: State, clear: boolean)   -- N: Review requests with mode "link"
+function M.show(s: State, key: string): boolean          -- selects a PR, clearing a search or filter that hides it
+function M.walk(s: State): boolean                       -- `.` and the banner: selects BoardData.nextUp's item, switching tab, clearing a search or filter only if it hides it; sets `walking`. Any other selection clears `walking`
+function M.nextCard(s: State): Card?                      -- the banner's item as a Card (its chip), whichever tab it sits on
+function M.withAdded(added, ref): (Added?, string?)      -- hub.added with `ref`, or why not (the 50 cap)
+function M.canonicalAdded(added, prs): (Added, boolean)  -- keys an added PR by the repo's own spelling
+function M.unadd(s: State, key: string)                  -- X
+function M.openPlan(slug, number, generate, root: string?, why: string?, dir: string): OpenPlan   -- open this link, or refuse with this toast
 ```
 
 Every file in `src/view/hub/` exports `function M.view(s: State.State, motion: Ui.Motion): Node`, plus `M.layer(s): Node?` where it has an overlay.
@@ -617,8 +825,11 @@ Every file in `src/view/hub/` exports `function M.view(s: State.State, motion: U
 ### `src/keys.luau` (hub keys)
 
 ```luau
-function M.hubAction(s: HubState.State, key: Key): Action?   -- the hub's counterpart of `M.action` (keys.luau:98)
+function M.hubAction(s: HubState.State, key: Key): Action?   -- the hub's counterpart of `M.action` (keys.luau:98). ⇧⏎ sends `hub-open-generate`; `R` sends `hub-fold=recent` on the Review requests tab
+function M.hubAfterTyping(mode: HubState.Mode, outcome: Fields.Outcome): Action?   -- after a key typed into the search field
 ```
+
+`I` shows or hides Inactive and `R` shows or hides Recently opened (a fold is a control, so it has a key). A Recently opened row is selected by `State.recentKey` (`rc:<repo>#<n>`), moved to by `j`/`k` after the last card, and opened by ⏎ or a double-click. A card's action keys (`A`, `⇧A`, `C`, `M`, `U`, `,`, `X`) come from the selected card's `main` and `more`, so a click and a key send the same `Card.main.act`.
 
 `M.pickerAction` (`:109`) is deleted with the picker. Typing modes (`search`, `link`) return nil for letters, as `searchKey` does (`:22`).
 
@@ -626,13 +837,18 @@ function M.hubAction(s: HubState.State, key: Key): Action?   -- the hub's counte
 
 ```luau
 export type Timers = { probe: TimerHandle?, refresh: TimerHandle?, checks: TimerHandle?, debounce: TimerHandle?, ring: TimerHandle? }
+-- #5 declares `s`, `fixture`, `generate` and `agent`; the GitHub client, cache, timers and flights arrive with #4.
 export type Block = {
 	s: State.State, cache: Sync.Cache?,
+	agent: Agent.Agent?,              -- the reader's omp, once found (never with a fixture)
 	github: Github.Client, timers: Timers,
 	flights: { refresh: boolean, checks: boolean, probe: boolean },   -- one call of each kind at a time
 	fixture: string?,                 -- `fixture=cases`: no network, no timers
 	generate: boolean,                -- ⏎ opens the PR with the AI guide started
+	sched: { probedAt: number?, probeChanged: boolean, focusedAt: number?, checksAt: number?, refreshTried: number?, lastModified: string? },   -- what `Sync.schedule` reads; `refreshTried` keeps a failed refresh from retrying at once
 	closed: boolean,
+	refetch: boolean,                 -- a refresh was asked for while one ran (an add, remove, merge or update): run another when it ends
+	show: PRRef?,                     -- a PR just added by link: selected and scrolled to when the refresh brings it
 }
 export type Saved = { tab: Tab, sort: Sort, repositories: { string }?, folded: { [string]: boolean } }
 -- `BlockDef<Block>`: init(cx, args, saved), title, view, key, event, save — as src/block.luau:686.
@@ -642,7 +858,28 @@ The hub has its own `ACTIONS` table, sent by clicks (`event`) and by `Keys.hubAc
 
 ### `src/fetch.luau` (additions)
 
-`src/fetch.luau` keeps local git, treehouse, `omp` and Tandem CLI calls, and one new export: `M.runner: Github.Runner`, which resolves `gh` and the shell's PATH the way `run` does (`:69-121`). The agent engine, Fix bot comments and the Tandem hand-off add their own functions here, each in the `(value?, err?)` style above.
+`src/fetch.luau` keeps local git, treehouse, `omp` and Tandem CLI calls, the recent store (`recentPrs`, `rememberPr`, and `migrateRecent`, which the hub runs on first load), and one new export: `M.runner: Github.Runner`, which resolves `gh` and the shell's PATH the way `run` does (`:69-121`). The fixes page adds `M.readFixes(repo, pr, paths, done)` (fetches the PR's refs, runs `git merge-tree`, then `git show` and `git log` per conflicted file and `git show` per annotated path; returns text as `FixRead`) and `M.readySavedCopy(slug)` (PR Guide's saved copy, only when already set up). The agent engine, Fix bot comments and the Tandem hand-off add their own functions here, each in the `(value?, err?)` style above.
+
+Issue #16's settled boundary signatures:
+
+```luau
+export type AgentFixRead = { files: { [string]: string }, diff: string, originals: { [string]: ReviewFix.Original }? }
+function M.readAgentFix(fix: AgentFix.Fix, done: (AgentFixRead?, string?) -> ())
+function M.pushAgentFix(plan: ReviewFix.Plan, canPush: () -> boolean, done: (boolean?, string?) -> ())
+function M.returnAgentFix(path: string, done: (boolean?, string?) -> ()) -- existing signature, unchanged
+```
+
+`readAgentFix` executes read-only diff/show/git-dir plans, only while the exact engine holds the
+worktree. It reads full original sides from the private conflict journal and validates the journal's
+identity against `fix.headOid`; a clean merge needs no journal.
+`pushAgentFix` validates the gate again, reads head refs and the actual head repository through the
+runner, and checks `git ls-remote` against `fix.headOid`. Fork branches use their head repository.
+`canPush` revalidates the selected PR, route, fix, ticks and flight before each process begins.
+The refspec names the reviewed commit directly and uses neither force flag. A remote already at
+`fix.commit` reconciles a lost successful response without a second push. A different remote head
+refuses. Ordinary Git fast-forward protection remains in force if the head races the preflight.
+Only successful `returnAgentFix`, with `held() == nil` and `busy() == false`, clears the active slot.
+No read, route entry or agent completion pushes automatically.
 
 ## How this maps onto Tern
 
@@ -653,7 +890,7 @@ The hub has its own `ACTIONS` table, sent by clicks (`event`) and by `Keys.hubAc
   - Found and parked (`PaneInfo.parked`, `:377`): `cx.layout:unpark(pane)` (`:1487`), which deals it into the current tab.
   - Found otherwise: `cx.layout:focus(pane)` (`:1466`).
   - Not found: `cx:new_block("prguide.hub", args, "tab")` (`:1596`), with `args = { "generate=true" }` when `generate`.
-  - Opening with `generate` while a hub exists sends it `cx.session:event(pane, { ev = "action", act = "set-generate", value = "true" })` (`:1443`). **[INFERENCE]** that an action event without a node id reaches the block's `event`. The one-way-in issue checks it in Tern and, if it doesn't, sends the event with the id of a node the view always has.
+  - Opening while a hub exists sends it `cx.session:event(pane, { ev = "action", id = "main.hub", act = "set-generate", value = "true" })` (`:1443`), with `"false"` for ⌥⌘R so a hub opened for AI guides does not stay that way. **[INFERENCE]** that an action event without a node id reaches the block's `event`; the event carries `id = "main.hub"`, the hub's root node, which the view always has, so it does not depend on it. `window.luau` sends `hub-focused` the same way.
 - **Callers.** The ⌥⌘R command (`review`), the ⌥⇧⌘R command (`generate`) and the status segment all call `openHub`. Command ids stay, so existing key bindings and `plugin.prguide.review` keep working. Their palette titles become "PR hub" and "PR hub, AI guides". The **New PR Guide sample block** command stays, and a **New PR hub sample block** command (`hub-sample`) opens `prguide.hub` with `fixture=cases`.
 - **Block arguments** follow `options` in `src/block.luau:452-471`: `name=value`, unknown names rejected with a message. The hub takes `generate=true|false` and `fixture=<name>`.
 
@@ -662,7 +899,7 @@ The hub has its own `ACTIONS` table, sent by clicks (`event`) and by `Keys.hubAc
 `BlockCx` has no `new_block`; `WindowCx` does (`tern.d.luau:1141-1160`, `:1596`). The block therefore asks the window half to open it:
 
 1. The block resolves the card's `owner/repo` with the existing resolver: `Fetch.checkoutFor(near, dir, slug, done)` (`src/fetch.luau:388`), then `Fetch.savedCopy(host, slug)` (`:445`) when it finds none. `dir` is `cx.cwd` (`tern.d.luau:1145`), else `HOME`. When neither gives a repo, the block shows a toast with the reason and opens nothing.
-2. It calls `cx:open(url)` (`tern.d.luau:1134-1135`, which goes through the window's `route.link`) with `https://github.com/<owner>/<repo>/pull/<n>#prguide-open=<url-encoded root>`, plus `&generate=true` for ⇧⏎ or ⌥⇧⌘R.
+2. It calls `cx:open(url)` (`tern.d.luau:1134-1135`, which goes through the window's `route.link`) with `https://github.com/<owner>/<repo>/pull/<n>#prguide-open=<url-encoded root>`, plus `&generate=true` for ⇧⏎ or ⌥⇧⌘R. When no checkout exists but PR Guide can make its own copy, `root` is the folder searched and the link ends `&search=true`: the route then answers `pr=<link>` so the guide resolves it as it does a pasted link. The resolver is `openPr` in `src/hub/block.luau`, shared by every open.
 3. `window.luau` registers `tern.route.link` (`:1928`) and claims only links carrying `#prguide-open=`, answering `{ block = "prguide.guide", args = { "pr=<n>", "repo=<root>", "generate=true"? } }` (`RouteDecision`, `:1011-1025`). The guide requires `repo=` with `pr=` (`src/block.luau:469`).
 4. A link the route doesn't claim opens GitHub's own page, so a missing route degrades to the browser.
 
@@ -670,9 +907,9 @@ The hub has its own `ACTIONS` table, sent by clicks (`event`) and by `Keys.hubAc
 
 `window.luau` registers `tern.chrome.status(function(pane) ... end)` (`tern.d.luau:1939`). It returns one `StatusSegment` (`:955-964`) such as "PRs · 2 to review · 10 need fixes", with `command = "plugin.prguide.review"` and `tone = "error"` while flashing.
 
-- **The formatter only reads.** It reads `hub.cache` with `tern.kv.get` and uses `Cache.counts`. It never fetches, and it is pure per input (`:1931-1932`).
-- **The block can't refresh chrome.** `tern.chrome.refresh` is window only (`:1943`). `window_start` (`:1909`) starts a one-shot window timer that re-arms itself every 15 s, re-reads `hub.cache`, and calls `tern.chrome.refresh()` when `refreshedAt` or `counts` changed, and once when `flashAt` plus 10 s passes so the flash ends. It never calls it from the formatter (that raises, `:1942`).
-- **The segment is hidden** (the formatter returns nil) while no cache exists.
+- **The formatter is O(1).** Tern disables a status hook that takes more than about 4 ms (decoding the 42-PR `hub.cache` there did, and the segment never showed). The formatter reads one module-local `Seen` record (`current` in `window.luau`) and touches no kv. The hub block writes the tiny `hub.status` key beside `hub.cache` on every cache write, and the window's timer reads that key, never the cache.
+- **The block can't refresh chrome.** `tern.chrome.refresh` is window only (`:1943`). `window_start` (`:1909`) starts a one-shot window timer that re-arms itself every 2 s (Tern has no block-to-window message, and a `kv.get` is cheap), re-reads `hub.status`, sets `current`, and calls `tern.chrome.refresh()` when `refreshedAt` or `counts` changed. The flash runs 10 s from when the window first sees a new `flashAt` (`Links.watch`), and the window refreshes once more when it ends. The watcher starts from `window_start`, the module load, the first focus and the first status draw, behind one guard. It never calls it from the formatter (that raises, `:1942`).
+- **The segment is hidden** (the formatter returns nil) while `hub.status` is missing or malformed (`Links.watch`).
 
 ### Timers and visibility
 
@@ -689,12 +926,13 @@ The hub has its own `ACTIONS` table, sent by clicks (`event`) and by `Keys.hubAc
 | Key | Holds | Cap |
 |---|---|---|
 | `hub.cache` | `Sync.Cache`, schema 1: normalized records only | at most 50 PRs per search query; the serialized value at most 1 MiB, evicting the oldest `lastActivityAt` first; if the write still fails the block keeps its in-memory state and shows the error |
+| `hub.status` | `{ refreshedAt, counts = { toReview, needFixes, flashAt? } }`, written with every `hub.cache` write; what the status segment reads | a few bytes |
 | `hub.recent` | `{ Opened }`, migrated from the picker's `recent` key | 8 entries |
 | `hub.added` | `Sync.Added`: PRs added by link | 50 entries |
 | `hub.clones` | slug (`owner/repo`) → the clone path the viewer chose ("Choose folder…"), for the agent's clone lookup | one per repo |
-| `hub.merge.<owner>/<repo>` | `Sync.MergeRecord` | one per repo |
+| `hub.merge.<owner>/<repo>` | `Sync.MergeRecord`: your choice, what the repo declares, the learned habit, whether you answered the suggestion, `viewerDefault` and when it was checked | one per repo |
 
-Never store raw GraphQL, tokens or diffs. Only `src/hub/block.luau` reads and writes these keys. The guide's `model`, `runSeconds` and the retired `recent` keys stay in `src/fetch.luau`, which deletes `recent` after the migration. AGENTS.md's Boundary and Glue lines are amended in the PRs that add `src/github.luau` and `src/hub/block.luau`, so they name those modules next to `src/fetch.luau` and `src/block.luau`.
+Never store raw GraphQL, tokens or diffs. `src/hub/block.luau` reads and writes the hub keys above except `hub.clones`, which `src/fetch.luau` reads and writes at the clone lookup boundary. The guide's `model`, `runSeconds` and the retired `recent` keys stay in `src/fetch.luau`, which deletes `recent` after the migration. AGENTS.md's Boundary and Glue lines are amended in the PRs that add `src/github.luau` and `src/hub/block.luau`, so they name those modules next to `src/fetch.luau` and `src/block.luau`.
 
 ### Picker retirement
 
@@ -703,7 +941,7 @@ The picker is `src/picker.luau`, `src/view/picker.luau`, and the picker paths in
 1. **Migrate** (everything below has a new home before anything is deleted):
    - the 8-entry recent store (`Picker.openedList`, `remember`, `RECENT_CAP`, `Opened`; `Fetch.recentPrs`, `rememberPr`, `RECENT_KEY`) moves to `Sync` and `hub.recent`. On first load of the hub, a missing `hub.recent` is filled from `recent`, and `recent` is deleted. `Fetch.rememberPr` keeps being called when the guide opens a PR;
    - link and number parsing (`named`, `linkRepo`, `linkHost`, `reference`, `remoteRepo`, `sameRepo`) moves to `src/links.luau`. Its callers are `src/block.luau:590,602,718` and `src/fetch.luau:372,431,439`;
-   - `epoch` and `ago` move to `model`; `guideNumbers` (`src/fetch.luau:352`) becomes a local helper of `fetch.luau`.
+   - `epoch` and `ago` move to `model`; `guideNumbers` (`src/fetch.luau:352`) is deleted with `guidedPrs`, its only caller.
 2. **Preserve** in the Review requests fold: ⏎ and a pasted link open the PR, a number alone is refused when it names no repo, and a PR appears once, newest first.
 3. **Delete** `src/picker.luau`, `src/view/picker.luau`, `Keys.pickerAction`, `PICKER_ACTIONS`, `pickerKey`, `pickerDispatch`, `showPicker`, `openPicker` and the `picker` field and branches of `src/block.luau`, `Fetch.listAnywhere`, `Fetch.listPrs`, `Fetch.guidedPrs`, and the `gp-pk-*` rules of `guide.css`. A guide block launched with `repo=` and no `pr=` shows "Open a pull request from the PR hub (⌥⌘R)" instead of a picker.
 4. **Update** the README, PRODUCT.md and the `docs/screenshots/picker.png` mention in the same change.
@@ -734,7 +972,7 @@ Tern's clipboard is plain text: `cx:copy(text)` (`tern.d.luau:1136-1137`, and `W
 - **The picker** calls `gh pr list`, `gh search prs --review-requested=@me` / `--author=@me` and `gh pr view` (`src/fetch.luau` around lines 457–501). It keeps the 8 most recently opened PRs in kv. Any pasted PR link opens. The hub replaces it (see Picker retirement).
 - **Opening a PR** costs one `gh pr view`. Everything else is local git, fetched into `refs/prguide/<n>/*`. Guides are stored at `<common git dir>/prguide/<n>.json`.
 - **Module rules (AGENTS.md):**
-  - Only `src/fetch.luau` reaches outside the plugin. The hub adds `src/github.luau` (it starts processes only through the runner `fetch.luau` hands it) and lets `src/hub/block.luau` read and write kv.
+  - Only `src/fetch.luau` reaches outside the plugin. The hub adds `src/github.luau` (it starts processes only through the runner `fetch.luau` hands it) and lets `src/hub/block.luau` read and write hub kv, except `hub.clones`, which stays at the fetch boundary.
   - Only `src/block.luau` does effects, and every action is one `ACTIONS` entry that both clicks and `keys.luau` send. The hub's counterpart is `src/hub/block.luau`.
   - Views live in `src/view/*` and only build nodes.
   - Styles go in `guide.css` with `gp-` classes.
@@ -764,7 +1002,7 @@ tern plugin reload
 - **Frozen clock.** Every rules test passes a fixed `now`, and `cases.luau` records it as `asOf`. No test reads the clock.
 - **Specific assertions the early issues must hold:**
   - `model`: every fixture key lands in its expected column and order, including 16 conflict cases (stale, active, draft), and the negatives: a bot's comment, "LGTM", and an approved PR with a leftover thread never make Needs fixes.
-  - `github`: `parseHub`, `parseThreads` and `parseChecks` consume the recorded responses. A fake runner asserts that `hub-f` sends no thread authors, and that the summed `rateLimit.cost` over a refresh is at most 18 (hub-f 9 plus threads 9). Each call keeps its own envelope; the figure is re-measured after the query changes and updated here.
+  - `github`: `parseHub`, `parseThreads` and `parseChecks` consume the recorded responses. A fake runner asserts that `hub-f` sends no thread authors, and that the summed `rateLimit.cost` over a refresh is at most 18 (measured: hub-f 11, threads 5, checks 1). Each call keeps its own envelope; the figure is re-measured after the query changes and updated here.
   - `sync`: `schedule` and `diff` run on a fake clock from 0 to 3600 s. The probe fires at 60 s, a change or focus triggers a refresh within the 30 s debounce, checks poll at 30 s only while a check runs, and the total cost stays at most 220 points.
 
 ### Fixture plan
@@ -777,11 +1015,12 @@ tern plugin reload
 | `fixtures/hub/raw-threads.json` | A recorded `threads.graphql` response, with unresolved threads by people and by bots. |
 | `fixtures/hub/raw-checks.json` | A recorded `checks.graphql` response with running, failing and passing PRs. |
 | `fixtures/hub/raw-*.luau` | Generated by `tools/luau-fixtures` from the JSON: `return { … }`, with null members dropped as `tern.json.decode` does. Both files are committed. `--check` fails when a twin is stale. |
+| `fixtures/hub/agent/*.json` and `*.luau` | Treehouse, `omp` and conflicts-tool transcripts. `tools/luau-fixtures` generates and checks a deterministic Luau twin for every JSON in this directory, using the same rules as the raw fixtures. |
 | `fixtures/hub/cases.luau` | Normalized `HubPR` records, `asOf`, the expected column and order per sort, the expected Next up keys, and a `refreshes` list: successive caches with `suppressed`, the expected rings, and the expected toast text (or none). Readable by the CLI and by the fixture block (`fixture=cases`). |
 
 Later issues add their own fixtures (`merge-methods`, `selection`, `details`, `fixes`, `flake`, `rereview`, `agent`, `summary`, `tandem-*`), each with `asOf` where time matters.
 
-**The extended `hub-f.graphql`.** It doesn't select several fields the rules need. Before recording, add `additions`, `deletions`, `changedFiles`, `createdAt`, `baseRefName`, `autoMergeRequest { enabledAt }` and the latest `RemovedFromMergeQueueEvent` (`timelineItems(last: 1, itemTypes: [REMOVED_FROM_MERGE_QUEUE_EVENT])`, with its `reason`). Add a `pullRequest(number:)` alias per PR added by link. **Re-measure its cost and time** against the 9 points in the table above, and update the table, the 18-point test limit and the budget. `threads.graphql` and `checks.graphql` gain `id`. Never add thread authors to the search (159 points).
+**The extended `hub-f.graphql`.** It doesn't select several fields the rules need. Before recording, add `additions`, `deletions`, `changedFiles`, `createdAt`, `baseRefName`, `autoMergeRequest { enabledAt }` and the latest `RemovedFromMergeQueueEvent` (`timelineItems(last: 1, itemTypes: [REMOVED_FROM_MERGE_QUEUE_EVENT])`, with its `reason`). Add a `pullRequest(number:)` alias per PR added by link. **Re-measured** at 11 points and 6–9 s (the table above). The 18-point test limit and the budget hold because `threads.graphql` reads 30 threads per PR (5 points for 17 PRs, not 9). `threads.graphql` and `checks.graphql` gain `id`. Never add thread authors to the search (159 points).
 
 ### The fake runner
 
@@ -834,6 +1073,18 @@ Every PR passes these before review:
 - **Base.** Branch every issue from `docs/pr-hub-design` and open its PR against that branch. **One PR per issue**, and the issue's `Touches only` list is the PR's file list. A PR opens only after every issue it depends on has merged, and it rebases onto the branch first.
 - **Commits.** Each subject is the user-visible behavior as a plain sentence, with no type prefix (AGENTS.md, Commits).
 - **Shared files.** No two issues edit the same shared file at once. The files are `src/hub/block.luau`, `src/hub/state.luau`, `src/hub/model.luau`, `src/github.luau`, `src/fetch.luau`, `src/keys.luau`, `src/view/hub/`, `guide.css`, `AGENTS.md` and `tests/run.luau`. The order below is the serialization: a later issue builds on the earlier one's merged contract, and changes a contract here first. The one allowed overlap is #3 and #5, which each append lines to `tests/run.luau` and `AGENTS.md`; the second to merge rebases onto the first.
+- **Issue #15 ownership exception.** Its `Touches only` list omits shared verification files that its Done when criteria require. #15 registers `agent_fix_test` in `tests/run.luau`, extends `tools/luau-fixtures` to generate and check `fixtures/hub/agent/*.luau` from every JSON in that directory, and records these decisions here. `hub.clones` is read and written by `src/fetch.luau` so clone lookup stays at the boundary. The public `AgentFixRun` contract signatures stay unchanged.
+- **Issue #18 acceptance exception and settled details.** Its acceptance criteria also permit the README Keys table, registration of `agent_state_test` in `tests/run.luau`, and this paragraph. A on a running card means Stop; A attempting a different fix while a run, lookup or lease return is active says exactly "One fix at a time". Existing feedback-only Summarize and flaky-check priorities remain until their owning issues change them. Clone repo selects a parent folder and clones to `parent/repo-name`; Choose folder selects an existing clone, remembers it through Fetch, then revalidates through `Fetch.findAgentClone`. With no host folder picker in the documented block API, Block uses `Fetch.runner` with macOS `osascript`; cancellation returns to No local clone without an error toast. Open worktree uses the same runner to open the failed worktree in Finder. `HubPR` omits the head branch name, so Block reads `headRefName`, `baseRefName` and `headRefOid` with a read-only `gh pr view` through Fetch.runner and checks them against the card before starting. `fixture=agent-cards` shows all lifecycle states without lookup, dialogs or processes; ⌘R advances the running card by one #15 transcript event, A stops it, then A on another card starts a new recorded run. A ready fixture remains in place. #16 owns all Review, Discard and Push actions; this issue displays the ready commit and complete path only. UI checklist screenshots and execution evidence are owned by the parent integration round.
+- **Issue #16 acceptance exception and settled decisions.** In addition to its primary file lane, #16 edits only `guide.css` for the new view, `src/view/hub/help.luau` and `README.md` for keys and behavior, `tests/run.luau` for registration, and this spec for contracts and scope. The hand-written `fixtures/hub/review-fix.luau` is not generated. `fixture=review-fix` supplies two files, three unique hunks, every provenance tag, and a take-both rule; fixture Push/Discard simulate outcomes with no processes or network. Enter and double-click use the existing `hub-open` action to open Review fix from a Fix ready card, retaining #18's tested empty primary action slot. Needs fixes still opens the existing fixes page. The mockup's dropped rows and Other changes fold are omitted because acceptance requires only conflict resolutions; original sides appear in one horizontally scrolling excerpt with ownership badges, using the existing flexbox code rows. No new motion is added; the page omits `gp-soft` and suppresses inherited button transforms/transitions. Original snapshots remain available on B if commit verification fails. Commit verification is conservative: changed or non-unique context locks Push. Ready state retains its reviewed ids, verified excerpt and completion marker on any push/return failure; P retries cleanup after push success, and D asks again after a failed discard return. `AgentFlight` and its exact engine stay held until return is proved successful. The fake-runner acceptance lives in the pure planner and injected runner/lease simulation in `review_fix_test`, while Fetch executes the validated plan. Tests, reload, screenshots, light/dark wide/split checks and the live push in `GH_HUB_SMOKE_REPO` are deferred to the parent as instructed; this implementation run performs none of them.
+- **Issue #19 integration exception and settled details.** In addition to its `Touches only` list, #19 edits `tests/run.luau` (registers `summary_test`), the `tests/state_test.luau` and `tests/flake_test.luau` assertions its rule supersedes, and this spec. A correction round adds one documented scope exception, because bot review bodies and current requested changes cannot be read otherwise: `src/github.luau` (`DETAILS_QUERY` and `parseDetails` only), `docs/hub/queries/details.graphql`, focused query and parser regressions in `tests/github_test.luau`, and `fixtures/hub/summary.luau`.
+  - **Actions.** A is Summarize only when `Summary.onlyComments(Summary.current(details, pr))` holds for the loaded details, or, before details load, when no live human review requests changes; otherwise A is Fix with agent and ⇧A is Summarize. Fix bot comments and Summarize appear on an In review card with a bot feedback source: an unresolved bot thread, a bot review that requested changes, or a bot comment review at the current head (`State.botActionable`).
+  - **Current feedback.** `Summary.current` filters the cached details against the board's `latest` reviews before `onlyComments`, the summary prompt and the bot input. A requested-changes review counts only while its author's latest review still requests changes at the current head (the newest per author); a thread of an author who no longer does is a plain comment. A bot's review-level comment counts only while that bot's latest review is a comment at the head.
+  - **Bot comment reviews.** `details.graphql` adds `commentReviews: reviews(last: 20, states: [COMMENTED])`. `parseDetails` keeps only an author whose `__typename` is `Bot`, their newest comment review, at the head, with a nonempty body that no inline thread by them repeats. It is carried as a `ThreadDetail` with `id = "review:" .. url`, no path and `bot = true`, so the fixes page lists it only under "Not counted". A person's comment review is never read as a requested change. Cost stays 1 point (requests, not nodes).
+  - **Stale feedback.** Summarize and Fix bot comments read the details live for every press (a fixture board reads its recorded sample). A read or answer is dropped when the board's `State.feedbackSignature` for the PR changed while it was out. `State.replace` drops a summary, and details unless that PR's page is open, whenever the signature changes with the head unchanged. Summaries are never saved.
+  - **Block regression harness.** `tests/summary_test.luau` loads the real `src/hub/block.luau` and `Fetch.summarizeFeedback` with `tern` written into Block's own module environment (`getfenv`, since globals are not shared between modules), `Fetch.runner`, `findRepo`, `findAgentClone` and `startAgentFix` replaced, and the board's GitHub client given a counting `details`. Every effect is a recorded callback the scenario settles by hand: a bot feedback signature or prompt changed while the refs were out, a comment edited or the second read failing while a summary ran, a timeout, an error exit, a thrown spawn, a closed block, a failed render and duplicate callbacks, each asserting the card state, busy state, toasts and draw count. Removing the post-refs comparison or the summary's second read ends a scenario in the wrong state.
+  - **Summary command.** `Summary.plan` is the only way to a command: an `omp` executable, a model selector that cannot read as an option, a known thinking level and a prompt that starts with the module's fixed line, so the final argument is never an option or an `@file` attachment. `Fetch.summarizeFeedback` takes the agent and the prompt, calls `plan` and fails closed on nil.
+  - **Bot worker confinement.** OMP documents `--add-dir` as extra workspace, not as write confinement, and its tools take absolute paths, so the worker is not trusted to stay in its worktree. `AgentFix.sandboxProfile` builds a Seatbelt profile and the engine runs `/usr/bin/sandbox-exec -p <profile> /usr/bin/env XDG_STATE_HOME=<worktree>/.prguide-omp-state omp …`: reads, network and processes stay open; every write is refused except under the leased worktree (its `.git` pointer, matched by `literal` and `subpath`, excluded) and the `/dev/null`, `/dev/tty` and `/dev/dtracehelper` nodes. Neither `~/.omp` nor any temp folder is writable, and `~/.omp` is denied by name, so a prompt-injected tool call cannot write OMP's configuration, extensions or skills, or another process's temp files. A /tmp, /var or /etc path is also listed under its resolved `/private` path, since the kernel matches resolved paths. Without `spec.sandbox`, a path that cannot be quoted, or a missing `sandbox-exec`, the run fails before or at the agent step and returns the lease. OMP creates its run state before any model call, which the `~/.omp` denial would refuse, so only `XDG_STATE_HOME` is redirected to a reserved folder inside the worktree; `XDG_DATA_HOME` is left alone because OMP keeps its credentials there, and the profile is unchanged. The engine sets the folder up with exact injected commands and no shell: `git ls-files -- .prguide-omp-state` must be empty (a tracked path fails the run), then `/bin/mkdir <root>` and `/bin/mkdir <root>/omp`, both without `-p` so an existing file, folder or link at that path fails closed and is never removed. The OMP step keeps its 20-minute timeout. `/bin/rm -rf <root>` then removes exactly that path, which this run created and only if it did, before the OMP result is read and before any `git add` or diff, so on success, failure, throw, timeout and Stop alike no runtime file is staged or left behind. `rm -rf` unlinks a link without following it, so a link swapped in by the worker is removed, not its target. Stop waits for the OMP callback, cleans, then returns the lease. A setup, OMP or cleanup failure fails the run and returns the lease; if the folder could not be removed, the lease's `reset --hard` and `clean -fd` still run before the return. If OMP cannot run under this write boundary, the agent step fails and the lease returns; nothing is applied. The conflict workflow is unchanged.
+- **Issue #20 acceptance exception and settled details.** In addition to its `Touches only` list, #20 edits `src/hub/state.luau` for these and nothing else: in `actionsFor`, the In review branch (Hand off to Tandem first on a watched card, and no new Merge when ready); in `toCard`, the `agentSlot` flag and the failed-card projection (a watched card offers Hand off to Tandem, and Return worktree while the lease is held, instead of Try again); the `AgentFixState` failed variant, which gains `held: boolean?`; `agentFailed`, which takes `held`; `agentFlight`, which reconciles `held` with the engine's lease along with the path; and the lifecycle `dropObsoleteAgents`, which `State.project` runs first and which drops a no_clone state, or a failed state with no worktree, on a watched PR, since neither starts anything any more. `tests/run.luau` (registers `tandem_test`), `tests/sync_test.luau` (only the Needs fixes count in the merge test, which the placement rule below changes from 2 to 1), `src/view/hub/help.luau` and `README.md` (only the A and ⇧A entries in the help panel and the README Keys table: A must also name Hand off to Tandem, and ⇧A must also name Return worktree, the contextual ⇧A action on a watched card whose failed fix still holds its lease, because a new control is documented in the same change) and this spec. Without the state edit the acceptance cannot be reached: Needs fixes is the only column that offered Hand off to Tandem, and a watched PR with fix reasons must stay In review. Model placement puts every live, non-draft PR of the viewer that Tandem watches in In review with empty `reasons`, before the Needs fixes and Ready rules, so a watched PR that could merge is not in Ready and offers no merge; drafts, Inactive PRs and review-role PRs keep their places. An In review card Tandem watches offers `card-handoff` ("Hand off to Tandem", A) first and Copy link behind it, with the chip Waiting on Tandem, and never Fix with agent, Fix bot comments, Summarize or an agent slot; `card-agent` also refuses a watched PR. The fixes page keeps using `State.fixMain`, so it shows the same label. `Model.parseTandemWatch` turns the decoded `tandem watch --json` into a set of lowercase `owner/repo#123` keys (a row with color `unwatched`, or one that is malformed, is left out; a document that is not the output is nil) and `Model.tandemFlags` turns that set into flags by the board's own keys, because Tandem's spelling of a repo can differ in case. The block reads Tandem on open and at the start of every refresh, in the repository root (the block finds it from `cx.cwd`, which may be a subfolder, with `Fetch.findRepo`, once per block, and shares that one lookup between the read and any hand-off waiting for it; a root that cannot be found is not kept, so the next call looks again), one read at a time; a failed or unreadable read, no `cx.cwd`, or no root changes no flag (every flag is false until a first good read). `Fetch.tandemWatch` runs exactly `tandem watch --json`. `Fetch.tandemHandoff` runs exactly `tandem native act` with stdin `{ v: 1, origin: { plugin: "prguide", repoPath: ROOT }, action: { verb: "pr-fix", repo, number, reason } }` and nothing else; a non-zero exit, a timeout, malformed output or a throw is an error, and the callback settles once. `reason` is `Model.handoffReason`, the card's fix reasons in words ("PR hub: failing checks, merge conflicts") or "Hand off from the PR hub". Both calls run in that root and `repoPath` is that root, never the raw `cx.cwd`. Nothing is sent before A or a click on the card's action; with no root, the press shows "Couldn't hand off to Tandem: …" and sends nothing, and a card that is gone or whose head moved while the root was being found is sent nothing. `done` and `kept` set only that PR's `tandem` flag (and the block's watched set, so a refresh keeps it), and `kept` shows Tandem's notice as an info toast; `refused` shows the notice text as an error toast and changes nothing. An answer is dropped when the card is gone, its head moved, or the block closed. A read of Tandem that began before a `done` or `kept` hand-off is dropped when it returns and a new read starts, so a hand-off is never undone by an older snapshot; the cache's PRs and its Needs fixes and To review counts (over every PR, `flashAt` unchanged) are recounted whenever Tandem's flags move a PR. No agent fix starts, retries or looks for a clone on a watched PR (`beginAgent` refuses it, and every delayed step re-checks before the engine starts); a fix still being set up when Tandem takes the PR ends as stopped, and Stop, Retry's lease return and Open worktree still work. Ownership from another window's cache joins this block's set, and the other window's silence never clears one: only a successful read of Tandem here does, whatever the cache's age, and a read that began before the join is dropped and read again. Joining and adopting have different rules. A cache is adopted whole only when its `refreshedAt` is strictly newer than this block's. Its flagged PRs join when its `refreshedAt` is the same or newer, never older, because a hand-off persists the cache's flags without changing `refreshedAt`, so two windows that opened from the same cache share a stamp after one of them hands off. The join also happens at two more points. When a GitHub refresh answers, before the answer is merged and persisted, the shared cache is read and its flagged PRs join the set and the epoch moves, so a delayed refresh cannot overwrite the other window's ownership with a cache built from an older set. When a read of Tandem answers, the shared cache is read and joined before the answer is checked against the epoch or applied; if that join moved the epoch the answer is dropped and read again, so an older read that returns before the GitHub refresh cannot overwrite a newer cache's ownership either. An older cache joins nothing. Joined ownership guards the card at once: it is set on the board's PRs and recounted (a fix still being set up ends as stopped, and the card drops Fix with agent and Merge when ready) before the read that is read again, or the refresh, answers, and the dropped read stores nothing. Every local write that is not a read of Tandem (an action's cache update, a checks update) joins first, so it never stores another window's flag as false, and it never lowers the shared `refreshedAt`: when the stored cache is strictly newer than this block's, that cache becomes the board first (its ownership joins) and only the action's own change (`keepCache`'s `edit`) or the check results are applied to it, so an older window's whole snapshot is never written over newer data and never relabelled with the newer stamp. A checks result for a PR whose head the newer cache moved is skipped like any moved head. `card-update` sends nothing for a card Tandem watches, so an Update branch queued before the ownership arrived does not run. Ownership another window stored does not wait for this window's own read or refresh to answer: before every action's handler (`dispatch`), at every delayed step of a fix's setup (`carryOn`), before each merge of a batch (`runMerge`) and at every `canPush` check, the block reads the shared cache and joins its flagged PRs when its `refreshedAt` is the same or newer, never older. The join is positive only, sets the flags on the board's PRs and recounts, and persists nothing; a fix still being set up then ends as stopped, a running engine is never stopped by it, and a sample board skips it. A ready fix never pushes to a watched branch: the push is refused before it starts and `canPush` (checked before every command of the push, so ownership that arrives during its remote reads stops it) refuses once Tandem watches the PR, keeping the ready fix and its lease for Discard; a push that already went out still ends in its lease return. A failed lease return on a watched card (a failed state whose engine still holds the lease) offers **Return worktree** (⇧A, free on that card) behind Hand off to Tandem: it is `card-agent-retry` acting as cleanup only, returns the lease through the retained engine and never starts a fixer. The engine's `held()` is the truth about the lease, and it can be held before the engine has sent any worktree event (it takes the lease, then verifies the path), so a failure can carry no path. `dropObsoleteAgents` would drop that failed state on a watched card, so the block keeps the failure reason on its flight and, whenever it reconciles the flight with the engine (`forgetReturned`, which runs after every settled outcome and again once the engine handle is returned), puts a failed state back from `held()` if the lease is held, the flight has settled, and no state remains. That covers a failure that arrives after the handle exists and one that arrives synchronously inside `Fetch.startAgentFix`, before it returns the handle. Nothing clears or retries a held lease on its own: only a successful guarded return does, and a failed one leaves Return worktree in place. A watched card offers no Merge when ready (any method) and `card-merge`, `card-auto` and a stale confirm send nothing for it; Cancel merge stays for a merge already pending. `fixture=` boards parse `fixtures/hub/raw-tandem-watch.json` at open and flag every board they show, including each ⌘R step, without a process; the recorded PR lists are copied, never edited, and the sample board's A on a watched card only shows an info toast. `fixtures/hub/raw-tandem-pr-fix.json` records a success, a kept and a refusal outcome. `tests/tandem_test.luau` stubs `tern` in Block's and Fetch's module environments and `Fetch.findRepo`, and settles every recorded call by hand. Every write of `hub.cache` carries a `writeId` (this window's nonce and a count), so a stored cache is told apart from another stored at the same `refreshedAt` without touching GitHub's freshness; a cache written before ids existed reads as id "". A successful read of Tandem that clears a flag and whose save fails shows the usual "the cache couldn't be saved" error and keeps its memory state, and the block retires the `writeId` of the cache the store held when the answer arrived: it is read once, before the answer is applied, adopted or joined against anything, and the failed save retires that captured id and never rereads the store. While a successful read of Tandem applies its answer, adopting a strictly newer cache writes nothing and marks the ownership it restores as unsaved, so the answer's save is the only local write on that path and no intermediate cache is left to revive a cleared flag. An answer that is dropped as stale, or that fails closed because the store cannot be read, or a failed read, writes nothing at all; the mark waits for the next successful, non-stale answer, which stores it once even when it changes no flag, or for any other write of the cache. `sharedCache` ignores a cache carrying a retired id, so that superseded cache cannot bring the cleared flag back through a dispatch, a setup step or a refresh. Any later write has a new id, so another window's hand-off stored after the clear, even at the same stamp and even while the failed save is in flight, still joins and blocks effects. The retired set is in memory only and nothing waits on it. If the store holds no valid cache when the answer arrives, nothing is retired. If the store cannot be read at all, a clear fails closed: the answer changes no flag and stores nothing, and the next read of Tandem decides again. A cache without an id can only be the superseded one or a pre-id write, so a retired "" ignores both. A closed block sends nothing more: `runMerge` submits no command, and a batch's step, its finish and its toast do not run, once a draw (for example the one that shows adopted ownership) has closed the block. A join that draws a card and raises (the block is gone) leaves no flight, and `carryOn` then answers false, so a lookup that was out cannot go on to start an engine. Tests, reload, the UI checklist in light and dark (wide and split) and the live hand-off in `GH_HUB_SMOKE_REPO` belong to the parent.
 - **Order:**
   1. **v0.** #2 (rules, fixtures, test runner) → #3 (GitHub data) and #5 (board, built against `fixture=cases`) in parallel → #4 (sync) → #6, #7, #8 in that order.
   2. **v1.** #9 → #10 → #12 → #11 → #13 → #14. #10 comes before #11 and #14, and #12 before #13 and every later consumer of the details contract.
@@ -845,7 +1096,7 @@ Every PR passes these before review:
 - **pr-watch** (`src/pr-watch/`, state in `~/.tandem/state.sqlite`) polls GitHub through gh every 1–5 min. It doesn't see review requests or the need to re-review.
 - **"Waiting on Tandem"** comes from `tandem watch [PR] --json`.
 - **Handing off a PR needs a new verb.** `tandem native act` only accepts a coordinator's own pane (`src/native/actions.ts:175-258`), so a hub request would be refused. Add a verb such as `pr-fix {repo, number, reason}` with a plugin origin rule, mapped onto the existing `pr-watch-fix` tool (`src/session/tools.ts:357-369`).
-- **The Tandem PR** is separate, in https://github.com/jdeocampo99/tandem on its default branch `main`, and merges before the plugin side of the hand-off. Native verb `pr-fix`: request `{ repo: string, number: number, reason: string }`, response matching the native outcome `{ status: "done" | "kept" | "refused", notice: string? }`. It accepts the plugin's origin and refuses any other, maps onto `pr-watch-fix`, and ships fixtures for success and refusal. "Waiting on Tandem" shows after `done`.
+- **The Tandem PR** is separate, in https://github.com/jdeocampo99/tandem on its default branch `main`, and merges before the plugin side of the hand-off. Native verb `pr-fix`: request `{ repo: string, number: number, reason: string }`, response matching the native outcome `{ status: "done" | "kept" | "refused", notice?: { code: string, text: string } }` (merged as jubbydev/tandem#438; a refusal can still exit 0). It accepts the plugin's origin and refuses any other, maps onto `pr-watch-fix`, and ships fixtures for success and refusal. "Waiting on Tandem" shows after `done`.
 - **Worktrees** come from treehouse, from Tandem's pool:
   - acquire: `treehouse --root ROOT get --lease --lease-holder prguide --no-fetch --json` (cwd is the repo's clone);
   - return: `treehouse --root ROOT return PATH --if-lease-holder prguide --if-lease-id ID`;
@@ -873,7 +1124,7 @@ Ship in stages that each work end to end. Each stage is a commit series that `te
 - **Queue position:** "2nd in line" needs the merge tool's own API (Aviator's sticky comment, or a token). Without it, the card says "waiting for the merge".
 - **Copy link:** plain "title url" is the acceptance. A rich HTML link through `osascript` is optional and, if added, must be tested.
 - **DESIGN.md additions** are owned by #5, together with the `--tk-*` syntax tokens in `docs/tern-tokens.css`. Confirm amber for running CI and purple for agent and Tandem work before adding them. The Components section should document washed action cards, status chips, the split button and boxes. #18 adds the agent chip.
-- **`pr-fixes.html` wording:** on #418, a Tandem repo, the page says "Fix with agent" where the hub says "Hand off to Tandem". The page should use the hub's wording.
+- **`pr-fixes.html` wording (settled in #12):** the page takes the card's own main action from `State.fixMain`, so a Tandem repo says "Hand off to Tandem" and a comments-only card says "Summarize"; the buttons send the card's action.
 
 ## Friction backlog
 
@@ -894,6 +1145,7 @@ All rows are approved by the user; ideas the user didn't pick were dropped. Each
 **Mocked in `index.html`:** Next up (1), Update branch (3, on #181), Merge several (8) and Close stale (9).
 - **Next up:** the tab-row control described in row 1.
 - **Selecting:** Space or ⌘/⇧-click selects; Esc clears. A selected card gets a blue wash, with a blue box in place of its gutter check.
+- **Decisions (#11).** `State.confirm.kind` also takes `"batch-merge"` and `"batch-close"` (`keys` = the marked cards in column order); `State.selection(s)` builds the bar and its confirm (`Selection`, `BatchConfirm`). Marks last while the card stays selectable, in this tab, matching the filter and (Inactive) shown. M and X act only while something is marked; Esc clears the marks first. The batch confirm is a native overlay in the layer (anchored to the bar, scrim click cancels), because Tern ignores `reveal` for nodes this far down; the inline bar stays in the column. A batch runs one PR at a time, each with `s.merges[repo]` as resolved (a learned, unconfirmed comment is used as shown in the confirm), stops at the first failure, leaves the rest marked, and ends in one toast. `⌘`/`⇧`-click arrives as `ev.mods` on the `hub-select` action and becomes `hub-mark`.
 - **The selection bar** sits at the top of Ready to merge (or inside Inactive): "2 selected · Merge 2 (M) · Clear (Esc)".
 - **The confirm** lists at most 5 titles plus "and N more", then one line on how they merge (for example "Comments /merge"), or "Closed pull requests can be reopened."
 - **Only mergeable cards can be selected:** a card that's behind main or already queued can't be.
@@ -904,6 +1156,7 @@ All rows are approved by the user; ideas the user didn't pick were dropped. Each
 - **Same code, different result:** the check passed on an earlier run of this same commit, or on the previous commit when the new commit didn't touch the failing area.
 - **Failure text:** timeouts, network resets, rate limits, a lost runner, out-of-memory (exit 137) mean infrastructure, not code.
 - **Annotations outside the diff:** the errors point only at files the PR didn't change.
+- **Decisions (#13).** History is keyed by workflow name (the runs API has no job names), counting the workflow's newest 20 finished runs on the base branch; cancelled and skipped runs count for nothing. "Passed earlier" is a successful run of the same workflow on the same commit (a push run beside the failing pull-request run); the "previous commit without a change to the failing area" variant is not read, because it needs a diff per commit. Failure text is the check's summary and every annotation (the runner's exit-code lines included). The verdict is per card: flaky only when every failing check with a workflow run is. The block reads evidence for up to 10 Needs fixes cards with a failing check after each refresh (the details call, the hourly history, one runs call), in memory only. Re-run failed checks is ⇧R (`R` is Recently opened on the board and Reply on the fixes page) and sends `gh run rerun <id> --failed --repo <r>` once per distinct run; it moves first on the card only when the card's sole reason is the checks.
 - The card says why: "Likely flaky: failed 3 of the last 20 runs on main". When an annotation points at a changed file, the failure is treated as real and **Fix with agent** stays first.
 
 **One way in (friction item 10, issue #6).** Today the palette has "New PR review block" (⌥⌘R) and "New AI generated PR review block" (⌥⇧⌘R), each opening a picker (`window.luau:11-12`, via `tern.command`). The hub replaces the picker:
@@ -958,3 +1211,11 @@ Proposals rejected so far: automatic pushes, "Fix all", toasts for conflicts, an
 - UI copy is neutral and official, like GitHub. Every label says what's needed from the user. No filler copy.
 - Keyboard first, with vim keys.
 - Push back when you disagree.
+
+## Merge when ready and Re-request review (issue #14)
+
+- **Re-review rule (`model.awaitingReReview`).** A non-bot reviewer's latest review that requested changes on a commit other than `headOid` is *moved past*: it no longer counts as feedback in `reasons`, so the PR is In review, not Needs fixes. `ask` holds the waiting reviewers not already in `reviews.requested`. A review with no commit oid is never stale. The chip reads "Waiting on @a to re-review", "@a and @b", or "@a and 2 others". Open threads by the same reviewer still make Needs fixes.
+- **Q** is Re-request review (`gh pr edit <n> --repo <r> --add-reviewer a,b`). **M** is Merge when ready / Cancel merge on In review cards, behind the ▾.
+- **Allow auto-merge** is `repository.autoMergeAllowed` in `merge-detect.graphql`, held in `State.autoMerge` (per session, not in the kv record). GitHub methods and the queue need it true; unknown hides the entry. Comment and label methods skip it. A learned, unconfirmed command (`ask`) is not offered early.
+- **Contracts added:** `commands.autoMerge(pr, method)`, `Detected.autoMergeAllowed`, `Model.canMergeWhenReady`, `Model.reviewerList`, `State.setAutoMerge`, `State.reRequested`. `commands.requestReview(pr, logins)` takes a comma-separated list.
+- **Pending.** Merge when ready is stored as `pending` (`queue`, `comment` or `label`); a card in In review with `pending` reads "Merges when ready". Auto-merge turned on outside the hub is not shown (the hub fragment keeps `pending` nil).

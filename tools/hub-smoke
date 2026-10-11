@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+# Seeds and cleans the disposable repository the PR hub's live actions are tried against.
+#
+#   GH_HUB_SMOKE_REPO=you/tern-pr-guide-hub-smoke tools/hub-smoke seed
+#   GH_HUB_SMOKE_REPO=you/tern-pr-guide-hub-smoke tools/hub-smoke clean
+#
+# seed  opens four pull requests (running clean first, so it can be repeated):
+#         clean        merges without trouble
+#         behind       cut from an older main, so it is behind and has no conflict
+#         conflicted   changes a file main changed too
+#         failing      carries a workflow that exits 1 on pull_request
+# clean closes every open pull request whose branch starts with hub-smoke/ and deletes those branches.
+#
+# It refuses to run without GH_HUB_SMOKE_REPO, and every gh call passes --repo "$GH_HUB_SMOKE_REPO".
+# Pushes go to that repository only. Use a repository with nothing in it you want to keep.
+set -euo pipefail
+
+PREFIX="hub-smoke/"
+
+die() { echo "hub-smoke: $*" >&2; exit 1; }
+
+[ "${1:-}" = seed ] || [ "${1:-}" = clean ] || die "usage: GH_HUB_SMOKE_REPO=owner/repo tools/hub-smoke seed|clean"
+[ -n "${GH_HUB_SMOKE_REPO:-}" ] || die "set GH_HUB_SMOKE_REPO to the disposable repository (owner/repo). Nothing was changed."
+case "$GH_HUB_SMOKE_REPO" in
+  */*/* | */ | /* | *" "*) die "GH_HUB_SMOKE_REPO must look like owner/repo, not '$GH_HUB_SMOKE_REPO'." ;;
+  */*) ;;
+  *) die "GH_HUB_SMOKE_REPO must look like owner/repo, not '$GH_HUB_SMOKE_REPO'." ;;
+esac
+command -v gh >/dev/null || die "gh is not installed."
+command -v git >/dev/null || die "git is not installed."
+
+# git reaches the repository through the same credentials gh set up.
+remote="https://github.com/$GH_HUB_SMOKE_REPO.git"
+
+clean() {
+  local numbers number branches branch
+  numbers="$(gh pr list --repo "$GH_HUB_SMOKE_REPO" --state open --limit 100 --json number,headRefName \
+    --jq ".[] | select(.headRefName | startswith(\"$PREFIX\")) | .number")"
+  for number in $numbers; do
+    gh pr close "$number" --repo "$GH_HUB_SMOKE_REPO" --delete-branch >/dev/null
+    echo "closed #$number"
+  done
+  # Branches left behind by merged or already closed pull requests.
+  branches="$(git ls-remote --heads "$remote" "refs/heads/${PREFIX}*" | sed 's|.*refs/heads/||')"
+  if [ -n "$branches" ]; then
+    local args=()
+    for branch in $branches; do args+=("$branch"); done
+    git push "$remote" --delete "${args[@]}" >/dev/null 2>&1 || true
+    echo "deleted branches: ${args[*]}"
+  fi
+}
+
+seed() {
+  clean
+  local stamp base
+  work="$(mktemp -d)"
+  trap 'rm -rf "${work:-}"' EXIT
+  stamp="$(date +%s)"
+  git clone --quiet "$remote" "$work/repo" 2>/dev/null || { git init --quiet "$work/repo"; git -C "$work/repo" remote add origin "$remote"; }
+  cd "$work/repo"
+  git config user.name "hub-smoke"
+  git config user.email "hub-smoke@users.noreply.github.com"
+  git checkout --quiet -B main
+  if ! git rev-parse --verify --quiet HEAD >/dev/null; then
+    mkdir -p smoke
+    echo "Disposable repository for the PR hub's live checks." > smoke/README.md
+    echo "base" > smoke/conflict.txt
+    git add smoke && git commit --quiet -m "Start the smoke repository"
+    git push --quiet origin main 2>/dev/null
+  fi
+  base="$(git rev-parse HEAD)"
+
+  branch_from() { git checkout --quiet -B "$1" "$2"; }
+  commit_file() { # path, text, message
+    mkdir -p "$(dirname "$1")"
+    printf '%s\n' "$2" > "$1"
+    git add "$1"
+    git commit --quiet -m "$3"
+  }
+
+  # Cut from the old main: behind (no conflict) and conflicted.
+  branch_from "${PREFIX}behind-$stamp" "$base"
+  commit_file "smoke/behind-$stamp.txt" "behind $stamp" "Add a file main does not have"
+  branch_from "${PREFIX}conflicted-$stamp" "$base"
+  commit_file smoke/conflict.txt "branch side $stamp" "Change the file main changes too"
+
+  # Main moves on: the two branches above fall behind it, and the conflicted one now conflicts.
+  git checkout --quiet main
+  commit_file smoke/conflict.txt "main side $stamp" "Change a file the conflicted branch changes"
+  commit_file "smoke/main-$stamp.txt" "main moved on $stamp" "Move main on"
+  git push --quiet origin main 2>/dev/null
+
+  # Cut from the new main: clean and failing.
+  branch_from "${PREFIX}clean-$stamp" main
+  commit_file "smoke/clean-$stamp.txt" "clean $stamp" "Add a file that merges cleanly"
+  branch_from "${PREFIX}failing-$stamp" main
+  commit_file .github/workflows/fail.yml 'name: smoke-fail
+on: pull_request
+jobs:
+  fail:
+    runs-on: ubuntu-latest
+    steps:
+      - run: exit 1' "Add a workflow that fails"
+
+  local kind
+  for kind in behind conflicted clean failing; do
+    git push --quiet origin "${PREFIX}${kind}-$stamp" 2>/dev/null
+    url="$(gh pr create --repo "$GH_HUB_SMOKE_REPO" --base main --head "${PREFIX}${kind}-$stamp" \
+      --title "Smoke: $kind pull request" --body "Created by tools/hub-smoke for the PR hub's live checks. Safe to close.")"
+    echo "$kind: $url"
+  done
+}
+
+"$1"
