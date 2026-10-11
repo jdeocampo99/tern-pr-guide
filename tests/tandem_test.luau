@@ -1772,6 +1772,45 @@ local function staleUpdate()
 		assert(#w.toasts == 1 and w.toasts[1].kind == "error" and string.find(w.toasts[1].title, "Tandem watches this pull request", 1, true))
 		assert(State.prOf(b.s, KEY).behind == true and not b.s.acted[KEY], "and nothing changes")
 	end)
+
+	-- The update succeeds after another window's complete cache moved the PR to H2: the edit made for H1 is skipped, and the
+	-- card is not left busy. A mark another operation has put there since is not this update's to clear. On the same head
+	-- (the control) the edit applies and clears it.
+	for _, variant in { "the same head", "a moved head", "a moved head and a newer operation" } do
+		withWorld(function(w, Fetch, Block)
+			local b = behind(w, Block)
+			reads(w)[1].done(out("WATCH"))
+			lag(b)
+			w.shared = true
+			w.kv["hub.cache"] = storedCache({ WEB, API114 }, Cases.asOf)
+			b.cache = Sync.load(copy(w.kv["hub.cache"]))
+			assert(b.cache ~= nil, "this window holds a cache of the store's stamp")
+			Block.event(b, { ev = "action", act = "card-update", value = KEY } :: any, w.cx)
+			assert(#w.runs == 1 and b.s.busy[KEY] == "Updating…", variant .. ": the update is out")
+			local h1 = (State.prOf(b.s, KEY) :: any).headOid
+			if variant ~= "the same head" then
+				local h2 = storedCache({ WEB, API114 }, Cases.asOf + 60)
+				h2.writeId, h2.sinceAt = "other-window#1", Cases.asOf + 30
+				for _, cached in h2.prs do
+					if cached.key == KEY then cached.headOid, cached.behind = "h2-head", true end
+				end
+				w.kv["hub.cache"] = h2
+			end
+			if variant == "a moved head and a newer operation" then b.s.busy[KEY] = "Merging…" end
+			w.runs[1].done(nil, nil)
+			local pr: any = State.prOf(b.s, KEY)
+			assert(w.toasts[#w.toasts].kind == "success", variant .. ": it succeeded")
+			if variant == "the same head" then
+				assert(pr.headOid == h1 and pr.behind == false and b.s.busy[KEY] == nil, variant .. ": the edit applied and cleared it")
+			elseif variant == "a moved head" then
+				assert(pr.headOid == "h2-head" and b.s.busy[KEY] == nil, variant .. ": H2 stands and the card is not busy")
+				assert(pr.behind == true and not b.s.acted[KEY] and #b.replays == 0, variant .. ": nothing the update made on H1 is applied to it or kept")
+			else
+				assert(pr.headOid == "h2-head" and b.s.busy[KEY] == "Merging…", variant .. ": the newer operation's mark stays")
+				assert(pr.behind == true and not b.s.acted[KEY] and #b.replays == 0, variant .. ": and nothing from H1 is applied or kept")
+			end
+		end)
+	end
 end
 
 -- A board whose TARGET holds a ready fix on the Review fix page, kept by a retained engine. The push and the lease
@@ -3411,6 +3450,147 @@ local function sharedOwnership()
 	end)
 end
 
+-- The same two windows, with the shared store unreadable at this window's guard: B stored a hand-off this window has not heard
+-- of, and the read that would tell it throws. Ownership could not be checked, so no effect on the branch begins or goes on:
+-- the merge, merge when ready and Update branch send nothing, a fix being set up ends as failed, and a push is refused at the
+-- press and at each command of it. Navigation is not an effect and still works. Once reads recover, the guard joins B's
+-- hand-off and refuses for that reason.
+local function unreadableOwnership()
+	local UNCHECKED = "couldn't be checked"
+	local function holdCache(w: any, b: any)
+		w.shared = true
+		w.kv["hub.cache"] = storedCache({ WEB, API114 }, Cases.asOf)
+		b.cache = Sync.load(copy(w.kv["hub.cache"]))
+		assert(b.cache ~= nil, "this window holds a cache of the store's stamp")
+	end
+	local function storeOwned(w: any, owned: { string }, at: number): any
+		local theirs = storedCache(owned, at)
+		w.kv["hub.cache"] = theirs
+		return theirs
+	end
+	local function toasted(w: any, text: string): boolean
+		for _, toast in w.toasts do
+			if string.find(toast.title, text, 1, true) then return true end
+		end
+		return false
+	end
+
+	-- A direct effect on a PR's branch from a click.
+	for _, act in { "card-merge", "card-auto", "card-update", "batch-merge" } do
+		withWorld(function(w, Fetch, Block)
+			local b = live(w, Block)
+			reads(w)[1].done(out("WATCH"))
+			w.runs = {}
+			b.github = { refresh = function() end, run = function(command: any, done: any) table.insert(w.runs, { command = command, done = done }) end }
+			local key = if act == "card-update" then "acme/api#118" else "acme/api#109"
+			if act == "card-update" then
+				local lagging: any = State.prOf(b.s, key)
+				lagging.behind, lagging.conflicts, lagging.draft = true, false, false
+			else
+				b.s.merges["acme/api"] = { method = { kind = "comment", command = "/merge" }, source = "declared", ask = false }
+				b.s.autoMerge["acme/api"] = true
+			end
+			State.project(b.s)
+			holdCache(w, b)
+			local theirs = storeOwned(w, { WEB, API114, key }, Cases.asOf + 60)
+			assert(b.watched[key] == nil and not State.prOf(b.s, key).tandem)
+			w.toasts = {}
+			w.failGet = true
+			if act == "batch-merge" then
+				b.s.confirm = { kind = "batch-merge", keys = { key } } :: any
+				Block.event(b, { ev = "action", act = "hub-confirm", value = "" } :: any, w.cx)
+			else
+				Block.event(b, { ev = "action", act = act, value = key } :: any, w.cx)
+			end
+			assert(#w.runs == 0 and gh(w) == nil and b.s.busy[key] == nil, act .. ": nothing is sent")
+			assert(toasted(w, UNCHECKED), act .. ": it says why")
+			assert(b.watched[key] == nil and State.prOf(b.s, key).pending == nil and #handoffs(w) == 0, act .. ": nothing is claimed or marked pending")
+			assert(same(w.kv["hub.cache"], theirs), act .. ": nothing was stored")
+
+			-- Navigation is not an effect.
+			local before = #w.toasts
+			Block.event(b, { ev = "action", act = "hub-move", value = "down" } :: any, w.cx)
+			assert(#w.toasts == before and #w.runs == 0, act .. ": navigation still works")
+
+			-- Reads recover: the guard joins B's hand-off and still sends nothing.
+			w.failGet = false
+			if act == "batch-merge" then
+				b.s.confirm = { kind = "batch-merge", keys = { key } } :: any
+				Block.event(b, { ev = "action", act = "hub-confirm", value = "" } :: any, w.cx)
+			else
+				Block.event(b, { ev = "action", act = act, value = key } :: any, w.cx)
+			end
+			assert(#w.runs == 0 and gh(w) == nil and b.s.busy[key] == nil, act .. ": still nothing after the read recovers")
+			assert(b.watched[key] == true and State.prOf(b.s, key).tandem == true, act .. ": the store told this window")
+		end)
+	end
+
+	-- A fix started from a click, and each step of its setup, with the store unreadable.
+	withWorld(function(w, Fetch, Block)
+		local b = agentBoard(w, Fetch, Block)
+		holdCache(w, b)
+		local finds = #w.finds
+		w.failGet = true
+		Block.event(b, { ev = "action", act = "card-agent", value = TARGET } :: any, w.cx)
+		assert(#w.finds == finds and #w.clones == 0 and #w.started == 0 and w.stops == 0 and gh(w) == nil, "a fix does not begin")
+		assert(b.agentFlight == nil and b.s.agents[TARGET] ~= nil and b.s.agents[TARGET].kind == "failed", "it ends as failed")
+		assert(string.find((b.s.agents[TARGET] :: any).reason, UNCHECKED, 1, true), "and says why")
+	end)
+	for _, stage in { "root", "clone", "refs" } do
+		withWorld(function(w, Fetch, Block)
+			local b = agentBoard(w, Fetch, Block)
+			holdCache(w, b)
+			w.holdRoot = stage == "root"
+			Block.event(b, { ev = "action", act = "card-agent", value = TARGET } :: any, w.cx)
+			assert(b.agentFlight ~= nil and b.agentFlight.engine == nil and b.s.agents[TARGET].kind == "running")
+			local held: any = nil
+			if stage == "root" then
+				held = w.finds[#w.finds]
+			elseif stage == "clone" then
+				held = w.clones[1]
+			else
+				w.clones[1].done("/clone", nil)
+				held = gh(w)
+			end
+			assert(held ~= nil, stage .. ": a step is out")
+			local clones, calls = #w.clones, #w.calls
+			w.failGet = true
+			if stage == "root" then held.done({ root = REPO_ROOT }, nil)
+			elseif stage == "clone" then held.done("/clone", nil)
+			else held.done(out("REFS")) end
+			assert(#w.started == 0 and w.stops == 0 and #w.clones == clones and #w.calls == calls, stage .. ": nothing went on")
+			assert(b.agentFlight == nil and b.s.agents[TARGET].kind == "failed", stage .. ": the setup ended as failed")
+			assert(string.find((b.s.agents[TARGET] :: any).reason, UNCHECKED, 1, true), stage .. ": and says why")
+		end)
+	end
+
+	-- A push, refused at the press and at each command of it; the ready fix and its lease are kept for Discard.
+	withReady(function(w, b)
+		holdCache(w, b)
+		storeOwned(w, { WEB, API114, TARGET }, Cases.asOf + 60)
+		w.failGet = true
+		pressPush(w, b)
+		assert(#w.pushes == 0 and #w.returns == 0 and toasted(w, UNCHECKED), "no push begins")
+		assert(b.s.agents[TARGET].kind == "ready" and b.agentFlight ~= nil and w.lease ~= nil and b.s.busy[TARGET] == nil, "the fix and its lease are kept")
+	end)
+	withReady(function(w, b)
+		holdCache(w, b)
+		pressPush(w, b)
+		assert(#w.pushes == 1 and w.pushes[1].plan.command ~= nil)
+		local run = w.pushes[1]
+		assert(run.canPush() == true, "readable and unwatched: the push may begin")
+		storeOwned(w, { WEB, API114, TARGET }, Cases.asOf + 60)
+		w.failGet = true
+		assert(run.canPush() == false, "unreadable: no command of the push may run")
+		assert(not State.prOf(b.s, TARGET).tandem, "nothing was joined")
+		run.done(nil, "The selected fix changed")
+		assert(#w.pushes == 1 and #w.returns == 0 and toasted(w, UNCHECKED), "the push ends with the reason")
+		assert(b.s.agents[TARGET].kind == "ready" and b.agentFlight ~= nil and w.lease ~= nil and b.s.busy[TARGET] == nil, "the fix and its lease are kept")
+		w.failGet = false
+		assert(run.canPush() == false and State.prOf(b.s, TARGET).tandem == true, "a readable store joins B's hand-off and refuses")
+	end)
+end
+
 -- A fix still being set up for a PR whose ownership arrives in a whole board (another window's newer cache adopted on
 -- focus, or this window's own GitHub answer) ends as stopped at once, before the clone lookup or the read of Tandem
 -- answers, and neither answer starts anything. A running engine and a fix for another PR are left alone.
@@ -4313,6 +4493,44 @@ local function replayedEdits()
 		assert((w.cacheSets or 0) == sets + 1 and same(w.kv["hub.cache"], theirs), "and stores nothing")
 	end)
 
+	-- A queue merge succeeds and its save fails, so the pending edit is retained on H1. A refresh requested after it brings KEY
+	-- on the same head with a queue merge failure: GitHub removed the entry, so the replay must not put it back (and Cancel merge
+	-- with it), and it is retired. A failure of another kind and a pending merge by comment are not queue removals: the edit
+	-- still replays and is stored.
+	for _, variant in { "the queue dropped it", "another kind of failure", "a comment merge" } do
+		withWorld(function(w, Fetch, Block)
+			local b = board(w, Fetch, Block)
+			if variant ~= "a comment merge" then
+				b.s.merges["acme/api"] = { method = { kind = "squash" }, source = "declared", ask = false }
+				State.project(b.s)
+			end
+			local run = auto(w, Block, b)
+			local failed = failOnce(w)
+			run.done(nil, nil)
+			w.failWhen = nil
+			assert(failed() and #b.replays == 1 and State.prOf(b.s, KEY).pending ~= nil, variant .. ": the pending merge is retained")
+			assert(State.prOf(b.s, KEY).pending.method == (if variant == "a comment merge" then "comment" else "queue"), variant .. ": by its method")
+
+			w.now += 120
+			local answer: any = nil
+			b.github = quietGithub(function(_, done) answer = done end)
+			Block.event(b, { ev = "action", act = "hub-refresh", value = "" } :: any, w.cx)
+			assert(answer ~= nil and b.flights.refresh, variant .. ": the refresh is out")
+			local fresh = freshAnswer()
+			for _, source in fresh.prs do
+				if source.key == KEY then
+					source.mergeFailure = { kind = if variant == "another kind of failure" then "comment" else "queue", reason = "removed from the merge queue" }
+				end
+			end
+			answer(fresh, nil)
+			assert(holds(b, KEY) and stored(w.kv["hub.cache"]) ~= nil, variant .. ": the PR is on the board and in the store")
+			assert(#b.replays == 0, variant .. ": nothing is left to replay")
+			local dropped = variant == "the queue dropped it"
+			assert((State.prOf(b.s, KEY).pending == nil) == dropped, variant .. ": the board")
+			assert((stored(w.kv["hub.cache"]).pending == nil) == dropped and (stored(b.cache).pending == nil) == dropped, variant .. ": the store and the cache")
+			assert(State.prOf(b.s, KEY).mergeFailure ~= nil, variant .. ": GitHub's result stands")
+		end)
+	end
 end
 
 return function()
@@ -4338,6 +4556,7 @@ return function()
 	watchedMerge()
 	queuedMerge()
 	sharedOwnership()
+	unreadableOwnership()
 	wholeBoard()
 	replayedEdits()
 	fixture()
